@@ -52,9 +52,9 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
 - [x] **M2 - Networking (emulated)**: `NETUP.BAT` loads PM2000 on a PicoMEM, or
       Crynwr NE1000/NE2000 at 340h in emulators, then DHCP. Works in 86Box.
 - [x] **M3 - Bridge server**: `bridge/xtbridge.py` (Claude API, streaming,
-      refusal fallbacks, CP437) with an offline echo backend.
+      refusal fallbacks, CP437) with an offline mock backend (`--mock`) for testing without an API key.
 - [x] **M4 - CLAUDE.EXE**: streaming chat with word wrap, hardware scrolling,
-      scrollback, stop/new-chat. Verified against the echo bridge in 86Box.
+      scrollback, stop/new-chat. Verified against the mock bridge in 86Box.
 - [ ] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
 - [ ] **M6 - Foundation**: grow `lib/` (input line editor, windows/menus, EMS

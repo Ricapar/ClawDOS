@@ -10,7 +10,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1.
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
   `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like `CLAUDE -m`.
-- Bridge: `python bridge/xtbridge.py [--echo]`; test client `python bridge/chat.py`.
+- Bridge: `python bridge/xtbridge.py [--mock]`; test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
+  `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
 - Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
 - Commit to main freely as checkpoints.
 

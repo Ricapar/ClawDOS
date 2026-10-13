@@ -6,7 +6,7 @@ Raspberry Pi tucked inside the XT's case). It speaks a tiny line protocol in
 code page 437 to the XT (see docs/PROTOCOL.md) and HTTPS to the Claude API.
 
   python bridge/xtbridge.py                    # Claude, port 8023
-  python bridge/xtbridge.py --echo             # offline test backend
+  python bridge/xtbridge.py --mock             # offline mock of Claude (no key)
   python bridge/xtbridge.py --token SECRET     # require AUTH from clients
 
 Credentials come from the environment (ANTHROPIC_API_KEY, or an `ant auth
@@ -17,6 +17,8 @@ import argparse
 import asyncio
 import logging
 import unicodedata
+
+from mockchat import Disconnect, MockAPIError, MockChat, Refused
 
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 8023
@@ -81,10 +83,6 @@ def from_cp437(data):
 
 # --- backends ------------------------------------------------------------------
 
-class Refused(Exception):
-    pass
-
-
 def echo_blocks(content):
     """Assistant content to send back next turn. After a mid-output fallback,
     model-internal blocks that precede the last fallback marker must be dropped."""
@@ -130,30 +128,6 @@ class ClaudeChat:
         self.messages.append({'role': 'assistant', 'content': echo_blocks(final.content)})
         if final.stop_reason == 'max_tokens':
             yield '\n[reply cut off: too long]'
-
-
-class EchoChat:
-    """Offline stand-in for testing the XT side without an API key."""
-
-    def __init__(self):
-        self.turns = 0
-
-    async def reply(self, text):
-        self.turns += 1
-        if 'scroll' in text.lower():
-            # Long output, for exercising scrolling and scrollback on the XT.
-            for i in range(1, 61):
-                await asyncio.sleep(0.02)
-                yield f'Line {i} of 60: the quick brown fox jumps over the lazy dog.\n'
-            return
-        words = (f'Echo #{self.turns} — you said “{text}”.\n'
-                 'This is the offline test backend: no Claude API calls are made. '
-                 'Here is some longer text so you can see word wrapping on an '
-                 '80-column screen, plus a few CP437 characters: café, '
-                 '½, °C, • bullet, and an arrow → done.').split(' ')
-        for i, w in enumerate(words):
-            await asyncio.sleep(0.03)
-            yield w if i == 0 else ' ' + w
 
 
 # --- protocol ----------------------------------------------------------------
@@ -255,6 +229,12 @@ class Session:
             await self.send('END', b'stopped')
         except Refused as e:
             await self.send('ERR', to_cp437(str(e)))
+        except Disconnect:
+            log.info('%s dropped on purpose (mock)', self.peer)
+            self.writer.close()
+        except MockAPIError as e:
+            log.info('%s simulated error: %s', self.peer, e)
+            await self.send('ERR', to_cp437(str(e)))
         except Exception as e:  # report API trouble to the XT instead of dropping the link
             log.exception('reply failed')
             await self.send('ERR', to_cp437(describe_error(e)))
@@ -283,15 +263,25 @@ async def main():
     ap.add_argument('--model', default=DEFAULT_MODEL)
     ap.add_argument('--effort', default='low', choices=['low', 'medium', 'high', 'xhigh', 'max'])
     ap.add_argument('--token', help='shared secret clients must send with AUTH')
-    ap.add_argument('--echo', action='store_true', help='offline echo backend (no API calls)')
+    ap.add_argument('--mock', '--echo', action='store_true',
+                    help='offline mock of Claude (no API key or calls); send !help for test commands')
+    ap.add_argument('--speed', type=float, default=1.0,
+                    help='mock only: scale delays (2 = twice as fast, 0 = no delays)')
     ap.add_argument('-v', '--verbose', action='store_true')
     args = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    server = await start(args)
+    log.info('XTBridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
+    async with server:
+        await server.serve_forever()
 
-    if args.echo:
-        args.backend_name = 'echo (offline test)'
-        make_chat = EchoChat
+
+async def start(args):
+    """Start listening; returns the asyncio server. Sets args.backend_name."""
+    if args.mock:
+        args.backend_name = 'mock Claude (offline test, send !help)'
+        make_chat = lambda: MockChat(args.speed)
     else:
         import anthropic
         client = anthropic.AsyncAnthropic()
@@ -301,10 +291,7 @@ async def main():
     async def handle(reader, writer):
         await Session(reader, writer, args, make_chat).run()
 
-    server = await asyncio.start_server(handle, args.host, args.port, limit=MAX_LINE)
-    log.info('XTBridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
-    async with server:
-        await server.serve_forever()
+    return await asyncio.start_server(handle, args.host, args.port, limit=MAX_LINE)
 
 
 if __name__ == '__main__':

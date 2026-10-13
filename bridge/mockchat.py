@@ -1,0 +1,218 @@
+"""Mock Claude backend for XTBridge: no API key, no network, no cost.
+
+It behaves like the real backend as far as the XT can tell: a pause before the
+first word, then text streamed in token-sized pieces, conversation memory, and
+the same failure modes (API errors, refusals, cut-off replies, dropped links).
+
+Ordinary messages get a canned conversational reply. Messages starting with
+`!` trigger test scenarios; send `!help` for the list.
+"""
+
+import asyncio
+import random
+import re
+
+
+# Raised by backends' reply() generators; xtbridge.py handles them. They live
+# here, not in xtbridge.py, so they are the same classes when xtbridge.py
+# runs as __main__.
+
+class Refused(Exception):
+    """Claude declined to answer (stop_reason "refusal")."""
+
+
+class Disconnect(Exception):
+    """Drop the client's connection mid-reply."""
+
+
+class MockAPIError(Exception):
+    """Stands in for an Anthropic API error."""
+
+
+SCENARIOS = {
+    '!help': 'list these test commands',
+    '!scroll': '60 numbered lines, for scrolling and PgUp/PgDn scrollback',
+    '!long': 'several paragraphs of prose, for word wrap',
+    '!wide': 'a 120-character word and a 1500-byte line (hard wrap, TXT splitting)',
+    '!cp437': 'accented letters, symbols, box drawing, and Unicode the bridge must approximate',
+    '!markdown': 'Markdown the real model is told not to send, to see how it looks',
+    '!slow': 'a reply that trickles out one word per second (try Esc)',
+    '!stall': 'thinks for 30 seconds before answering (spinner, Esc)',
+    '!error': 'an API error after a few words',
+    '!refuse': 'a refusal (the message is dropped from history)',
+    '!cutoff': 'a reply that hits max_tokens',
+    '!drop': 'the bridge hangs up mid-reply',
+    '!history': 'what the mock remembers of this conversation',
+}
+
+LOREM = (
+    "The IBM Personal Computer XT, model 5160, arrived in March 1983. It kept "
+    "the original PC's Intel 8088 at 4.77 MHz but added a 10 MB hard disk, "
+    "eight expansion slots, and room for 640 KB of memory on later "
+    "motherboards. Text on a CGA card lives at segment B800, two bytes per "
+    "character: one for the code page 437 glyph and one for its colours.\n\n"
+    "Writing to that memory while the card is drawing the screen causes the "
+    "famous CGA snow, which is why careful programs wait for the horizontal or "
+    "vertical retrace before touching it. Scrolling by copying 4000 bytes is "
+    "slow on an 8088, so Claude-XT moves the CRTC start address instead and lets "
+    "the 16 KB of video memory act as a ring of scrollback.\n\n"
+    "Networking was never part of the original design, but a packet driver, "
+    "mTCP, and a PicoMEM card on WiFi make it a small TCP/IP host. The heavy "
+    "lifting of TLS happens on the bridge, which turns a modern HTTPS API "
+    "into a line protocol simple enough for a 40-year-old machine."
+)
+
+CP437_SAMPLE = (
+    "Accents: café, naïve, Ångström, señor, Zürich, façade\n"
+    "Symbols: ½ ¼ ° ± ² · ¿ ¡ « » £ ¥ ƒ α ß π Σ µ τ Φ Ω δ ∞ √ ≡ ≈ ≥ ≤ ÷\n"
+    "Boxes:   ┌──┬──┐ ╔══╦══╗ ░▒▓█ ▀▄▌▐\n"
+    "         └──┴──┘ ╚══╩══╝\n"
+    "Approximated by the bridge: “curly quotes” ‘single’ – en — em … "
+    "→ ← • ✓ ✗ © ® ™ € ≠\n"
+    "Become ?: emoji 🙂 and the CP437 glyphs for control codes ♥ ♦ ☺ ♪ ¶ §\n"
+)
+
+MARKDOWN_SAMPLE = (
+    "# A heading\n\n"
+    "Some **bold** and *italic* text, plus `inline code`.\n\n"
+    "| Column | Other |\n|---|---|\n| a | b |\n\n"
+    "```c\nint main(void) { return 0; }\n```\n"
+)
+
+# Plain conversational replies, picked by the first pattern that matches.
+SMALL_TALK = [
+    (r'\b(hi|hello|hey|howdy|greetings)\b',
+     "Hello from the mock bridge! I'm a stand-in for Claude, so no API calls "
+     "are being made. Everything about the connection is real though: your "
+     "XT sent that message over TCP, and this reply is streaming back a few "
+     "characters at a time. Send !help to see the test commands."),
+    (r'\b(who|what) are you\b',
+     "I'm the mock backend of XTBridge. I imitate Claude closely enough "
+     "to test CLAUDE.EXE: replies stream in token-sized pieces after a short "
+     "pause, I remember the conversation, and I can fail in all the ways "
+     "the real API can. Start the bridge without --mock to talk to Claude."),
+    (r'\b(xt|8088|ibm|cga|pc)\b',
+     "Your machine is a classic: an Intel 8088 at 4.77 MHz with 640 KB of "
+     "memory and a CGA card. That's about 0.33 MIPS, so every byte drawn on "
+     "screen counts. Even so, it's keeping up with this stream just fine."),
+    (r'\bjoke\b',
+     "Why did the 8088 refuse to go to the party? It heard there would be "
+     "32-bit registers and didn't want to feel segmented."),
+    (r'\b(thanks|thank you|thx)\b',
+     "You're welcome! This has been a mock conversation, but the real one "
+     "will look exactly the same on your screen."),
+    (r'\b(bye|goodbye|see you)\b',
+     "Goodbye! Press F10 to leave CLAUDE.EXE."),
+]
+
+
+class MockChat:
+    """One mock conversation. `speed` scales every delay; 0 means no waiting."""
+
+    def __init__(self, speed=1.0, seed=None):
+        self.speed = speed
+        self.rng = random.Random(seed)
+        self.history = []   # (user text, reply text) pairs
+
+    async def pause(self, seconds):
+        if self.speed > 0:
+            await asyncio.sleep(seconds / self.speed)
+
+    async def stream(self, text, per_token=0.035):
+        """Yield text in roughly token-sized pieces (1-6 characters)."""
+        i = 0
+        while i < len(text):
+            n = self.rng.randint(1, 6)
+            await self.pause(per_token * self.rng.uniform(0.5, 1.5))
+            yield text[i:i + n]
+            i += n
+
+    async def reply(self, text):
+        await self.pause(self.rng.uniform(0.4, 1.2))   # time to first token
+        command = text.split()[0].lower() if text.startswith('!') else None
+        parts = []
+        async for chunk in self.respond(command, text):
+            parts.append(chunk)
+            yield chunk
+        # Only completed replies are remembered, as with the real backend.
+        self.history.append((text, ''.join(parts)))
+
+    async def respond(self, command, text):
+        if command is None:
+            async for c in self.stream(self.small_talk(text)):
+                yield c
+        elif command == '!help':
+            lines = ['Mock bridge test commands:\n']
+            lines += [f'  {k:<10} {v}\n' for k, v in SCENARIOS.items()]
+            lines.append('Anything else gets a canned conversational reply.')
+            async for c in self.stream(''.join(lines), per_token=0.01):
+                yield c
+        elif command == '!scroll':
+            for i in range(1, 61):
+                await self.pause(0.02)
+                yield f'Line {i} of 60: the quick brown fox jumps over the lazy dog.\n'
+        elif command == '!long':
+            async for c in self.stream(LOREM):
+                yield c
+        elif command == '!wide':
+            yield 'A 120-character word: ' + ''.join(chr(65 + i % 26) for i in range(120)) + '\n'
+            yield 'A 1500-byte line: ' + ' '.join(f'word{i:03}' for i in range(170)) + '\n'
+            yield 'Done.'
+        elif command == '!cp437':
+            async for c in self.stream(CP437_SAMPLE, per_token=0.01):
+                yield c
+        elif command == '!markdown':
+            async for c in self.stream(MARKDOWN_SAMPLE, per_token=0.01):
+                yield c
+        elif command == '!slow':
+            for w in 'This reply trickles out one word per second so you can press Esc to stop it.'.split():
+                await self.pause(1.0)
+                yield w + ' '
+        elif command == '!stall':
+            await self.pause(30)
+            yield 'Sorry for the wait. That was a 30-second stall.'
+        elif command == '!error':
+            async for c in self.stream('Starting a reply, and then '):
+                yield c
+            raise MockAPIError('API error 529: Overloaded (simulated)')
+        elif command == '!refuse':
+            raise Refused('Claude declined to answer that. (simulated)')
+        elif command == '!cutoff':
+            async for c in self.stream(LOREM.split('\n\n')[0]):
+                yield c
+            yield '\n[reply cut off: too long]'
+        elif command == '!drop':
+            async for c in self.stream('This sentence will never be fin'):
+                yield c
+            raise Disconnect()
+        elif command == '!history':
+            async for c in self.stream(self.describe_history()):
+                yield c
+        else:
+            async for c in self.stream(f'Unknown test command {command}. Send !help for the list.'):
+                yield c
+
+    def small_talk(self, text):
+        lowered = text.lower()
+        for pattern, answer in SMALL_TALK:
+            if re.search(pattern, lowered):
+                return answer
+        words = len(text.split())
+        reply = (f"(Mock reply #{len(self.history) + 1}.) You wrote {words} "
+                 f"word{'s' if words != 1 else ''}: “{text}”. ")
+        if self.history:
+            reply += f"Before that you said “{self.history[-1][0]}”, so the bridge is keeping our history. "
+        reply += self.rng.choice([
+            "On the real bridge, Claude would answer this properly.",
+            "That's an interesting thought; the real Claude would have more to say about it.",
+            "I'm only a mock, but your message arrived intact.",
+        ])
+        return reply
+
+    def describe_history(self):
+        if not self.history:
+            return 'Nothing yet: this is the first message of the conversation.'
+        out = [f'I remember {len(self.history)} earlier message(s):\n']
+        out += [f'  {i}. {t[:60]}\n' for i, (t, _) in enumerate(self.history, 1)]
+        out.append('F2 starts a new conversation and clears this.')
+        return ''.join(out)

@@ -16,7 +16,7 @@ client that runs on the XT.
    (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAUDE_BRIDGE`)
 3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
    `ANTHROPIC_API_KEY` (or `ant auth login`), then `python bridge/xtbridge.py`.
-   Use `--echo` to test without an API key. The XT connects in on TCP port 8023,
+   No API key yet? `--mock` runs an offline stand-in for Claude (see below). The XT connects in on TCP port 8023,
    so allow it through the firewall (admin PowerShell):
    `New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow`
 4. **Real XT**: copy `CLAUDEXT.IMG` into the `HDD` folder on the PicoMEM's microSD,
@@ -24,6 +24,16 @@ client that runs on the XT.
    (Other menu), and boot. Networking comes up automatically; type `CLAUDE`.
 5. **Emulator**: `python scripts/run86box.py` boots the same image on an
    emulated XT (8088, CGA, XTIDE, NE1000 with NAT networking).
+
+### Testing without an API key
+
+`python bridge/xtbridge.py --mock` answers like Claude would: a pause, then
+text streamed in small pieces, with conversation memory. Nothing leaves your
+machine. Messages starting with `!` run test scenarios; send `!help` on the XT
+for the list. Among them: `!scroll` (60 lines), `!wide` (over-long word and
+line), `!cp437` (character set), `!slow` and `!stall` (try Esc), and `!error`,
+`!refuse`, `!cutoff`, `!drop` (failure modes). `--speed 3` makes it faster.
+`python bridge/test_bridge.py` runs the protocol tests against it.
 
 In CLAUDE: Enter sends, Esc stops a reply, PgUp/PgDn scroll back, F2 starts a
 new chat, F10 quits. `CLAUDE host:port` overrides the bridge address.

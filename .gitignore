@@ -8,3 +8,4 @@
 *.exe
 *.com
 *.img
+__pycache__/

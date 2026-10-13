@@ -41,7 +41,7 @@ def converse(sock, rx, text):
 
 
 def main():
-    sys.stdout.reconfigure(errors='replace')
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser()
     ap.add_argument('host', nargs='?', default='127.0.0.1')
     ap.add_argument('port', nargs='?', type=int, default=8023)
