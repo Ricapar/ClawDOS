@@ -1,0 +1,43 @@
+# Claude-XT: Claude on the IBM PC XT
+
+DOS software that connects a real IBM 5160 (8088 @ 4.77 MHz, 640K, CGA,
+PicoMEM WiFi) to the modern world. First app: **CLAUDE.EXE**, a Claude chat
+client that runs on the XT.
+
+```
+ IBM XT  CLAUDE.EXE ──TCP (PicoMEM WiFi)──> bridge/xtbridge.py ──HTTPS──> Claude API
+```
+
+## Quick start
+
+1. **Tools** (once): `.\scripts\setup-tools.ps1`
+2. **Build** the disk image, telling it where the bridge will run:
+   `python scripts/build.py --bridge 172.16.0.100:8023` → `build\CLAUDEXT.IMG`
+   (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAUDE_BRIDGE`)
+3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
+   `ANTHROPIC_API_KEY` (or `ant auth login`), then `python bridge/xtbridge.py`.
+   Use `--echo` to test without an API key. The XT connects in on TCP port 8023,
+   so allow it through the firewall (admin PowerShell):
+   `New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow`
+4. **Real XT**: copy `CLAUDEXT.IMG` into the `HDD` folder on the PicoMEM's microSD,
+   pick it as HDD0 in the PicoMEM BIOS menu (Disk), make sure NE2000 is enabled
+   (Other menu), and boot. Networking comes up automatically; type `CLAUDE`.
+5. **Emulator**: `python scripts/run86box.py` boots the same image on an
+   emulated XT (8088, CGA, XTIDE, NE1000 with NAT networking).
+
+In CLAUDE: Enter sends, Esc stops a reply, PgUp/PgDn scroll back, F2 starts a
+new chat, F10 quits. `CLAUDE host:port` overrides the bridge address.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/claude/` | CLAUDE.EXE |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling), `console` (word-wrapping text stream), `xtbridge` (bridge protocol on mTCP) |
+| `bridge/` | XTBridge server and a test client (`chat.py`) |
+| `src/boot/` | MBR and FreeDOS boot sector |
+| `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |
+| `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers |
+| `docs/` | Roadmap and protocol |
+
+Programs linking mTCP (CLAUDE.EXE, anything using `lib/xtbridge`) are GPLv3.

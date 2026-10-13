@@ -1,19 +1,21 @@
 # Claude-XT
 
-DOS software for a real IBM PC XT (8088 @ 4.77 MHz, 640K, CGA, PicoMEM NE2000 over WiFi).
-See docs/ROADMAP.md for hardware, architecture, and milestones.
+DOS software for a real IBM PC XT (8088 @ 4.77 MHz, 640K, CGA, PicoMEM: disk images + NE2000 over WiFi).
+README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the bridge protocol.
 
-## Environment
-- Setup once: `.\scripts\setup-tools.ps1`. Per shell: `. .\scripts\env.ps1` (puts OpenWatcom, NASM, DOSBox-X, 86Box on PATH).
-- Toolchains live in `tools/` (gitignored); build output in `build/` (gitignored).
-
-## Build / run
-- C for DOS: `wcl -q -0 -ms -bt=dos '-fe=out.exe' file.c` (quote `-fe=` in PowerShell). Always use `-0` (8088 code).
-- Headless smoke test in DOSBox-X:
-  `dosbox-x -silent -nogui -set "cpu cputype=8086" -set "cpu cycles=fixed 240" -set "dosbox machine=cga" -c "mount c build" -c "c:" -c "prog > out.txt" -c "exit"` then read `build\OUT.TXT`.
-- mTCP apps build with `wmake` from their APPS/<name> dir (see tools/mtcp-src).
+## Workflow
+- Setup once: `.\scripts\setup-tools.ps1`. Toolchains live in `tools/` (gitignored), outputs in `build/`.
+- Build everything: `python scripts/build.py` (apps -> build/*.EXE, disk -> build/CLAUDEXT.IMG).
+  Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
+- Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1.
+- Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
+  `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like `CLAUDE -m`.
+- Bridge: `python bridge/xtbridge.py [--echo]`; test client `python bridge/chat.py`.
+- Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
+- Commit to main freely as checkpoints.
 
 ## Constraints
-- 8086 instruction set only: no 186+ instructions (`pusha`, `shl r,imm>1`, `push imm`, etc.).
-- Every byte and cycle matters: prefer direct CGA memory writes (B800:0000) over BIOS/DOS output for UIs; avoid CGA snow on real hardware in 80-col mode.
-- Code linking mTCP's library is GPLv3.
+- 8086 instruction set only (`wcc/wpp -0`, NASM `cpu 8086`).
+- Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
+- Code linking mTCP (lib/xtbridge, CLAUDE.EXE) is GPLv3.
+- Watcom on Windows: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).
