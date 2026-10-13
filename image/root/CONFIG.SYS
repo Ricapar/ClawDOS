@@ -1,0 +1,7 @@
+; Claude-XT CONFIG.SYS (FreeDOS 1.4 on an IBM PC XT)
+FILES=20
+BUFFERS=15
+LASTDRIVE=H
+SHELL=C:\COMMAND.COM C:\ /E:1024 /P
+; Uncomment once EMS is enabled in the PicoMEM BIOS (Memory menu):
+;DEVICE=C:\PICOMEM\PMEMM.EXE /n

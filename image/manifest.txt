@@ -1,0 +1,39 @@
+# Claude-XT disk image manifest: DEST  SOURCE
+# Sources:
+#   repo:PATH            file in this repository
+#   build:PATH           file in build/
+#   fdpkg:ZIP!MEMBER     member of a FreeDOS 1.4 package (tools/freedos/packages)
+#   mtcp:NAME            mTCP binary (tools/mtcp)
+#   picomem:NAME         PicoMEM driver (tools/picomem)
+# A DEST ending in / keeps the source file name.
+
+KERNEL.SYS          fdpkg:BASE/KERNEL.ZIP!BIN/KERNL86.SYS
+COMMAND.COM         fdpkg:BASE/FREECOM.ZIP!BIN/COMMAND.COM
+CONFIG.SYS          repo:image/root/CONFIG.SYS
+AUTOEXEC.BAT        repo:image/root/AUTOEXEC.BAT
+
+DOS/                fdpkg:BASE/MEM.ZIP!BIN/MEM.EXE
+DOS/                fdpkg:BASE/EDIT.ZIP!BIN/EDIT.EXE
+DOS/                fdpkg:BASE/DEBUG.ZIP!BIN/DEBUG.COM
+DOS/                fdpkg:BASE/MODE.ZIP!BIN/MODE.COM
+DOS/                fdpkg:BASE/CHOICE.ZIP!BIN/CHOICE.EXE
+DOS/                fdpkg:BASE/FIND.ZIP!BIN/FIND.COM
+DOS/                fdpkg:BASE/MORE.ZIP!BIN/MORE.EXE
+DOS/                fdpkg:BASE/TREE.ZIP!BIN/TREE.COM
+DOS/                fdpkg:BASE/XCOPY.ZIP!BIN/XCOPY.EXE
+DOS/                fdpkg:BASE/DELTREE.ZIP!BIN/DELTREE.COM
+DOS/                fdpkg:BASE/ATTRIB.ZIP!BIN/ATTRIB.COM
+DOS/FORMAT.EXE      fdpkg:BASE/FORMAT.ZIP!BIN/format.exe
+DOS/                fdpkg:BASE/FDISK.ZIP!BIN/FDISK.EXE
+DOS/                fdpkg:BASE/KERNEL.ZIP!BIN/SYS.COM
+DOS/                fdpkg:BASE/DEVLOAD.ZIP!BIN/DEVLOAD.COM
+DOS/                fdpkg:ARCHIVER/UNZIP.ZIP!BIN/UNZIP.EXE
+
+NET/                repo:image/net/NETUP.BAT
+NET/                repo:image/net/MTCP.CFG
+NET/                mtcp:*.exe
+
+PICOMEM/            picomem:*.COM
+PICOMEM/            picomem:*.EXE
+
+CLAUDEXT/               build:hello.exe
