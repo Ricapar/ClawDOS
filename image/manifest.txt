@@ -32,6 +32,8 @@ DOS/                fdpkg:ARCHIVER/UNZIP.ZIP!BIN/UNZIP.EXE
 NET/                repo:image/net/NETUP.BAT
 NET/                repo:image/net/MTCP.CFG
 NET/                mtcp:*.exe
+NET/                fdpkg:NET/CRYNWR.ZIP!DRIVERS/CRYNWR/NE2000.COM
+NET/                fdpkg:NET/CRYNWR.ZIP!DRIVERS/CRYNWR/NE1000.COM
 
 PICOMEM/            picomem:*.COM
 PICOMEM/            picomem:*.EXE

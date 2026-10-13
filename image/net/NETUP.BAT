@@ -1,10 +1,12 @@
 @ECHO OFF
 REM Load a packet driver at INT 60h, then get an address via DHCP.
-REM PM2000 auto-detects a PicoMEM; otherwise fall back to a plain NE2000
-REM at I/O 300h, IRQ 3 (emulators).
+REM Real XT: PM2000 (PicoMEM's NE2000-over-WiFi, auto-detected).
+REM Emulators: Crynwr NE1000 (86Box) or NE2000 (DOSBox-X) at I/O 340h, IRQ 3.
 C:\PICOMEM\PM2000.COM 0x60
 IF NOT ERRORLEVEL 1 GOTO DHCP
-C:\PICOMEM\NE2000.COM 0x60 0x3 0x300
+C:\NET\NE1000.COM 0x60 3 0x340
+IF NOT ERRORLEVEL 1 GOTO DHCP
+C:\NET\NE2000.COM 0x60 3 0x340
 IF ERRORLEVEL 1 GOTO FAIL
 :DHCP
 C:\NET\DHCP.EXE

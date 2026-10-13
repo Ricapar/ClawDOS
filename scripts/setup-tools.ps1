@@ -58,6 +58,28 @@ if (-not (Test-Path "$tools\freedos\liteusb")) {
     Expand-Archive -Force $f "$tools\freedos\liteusb"
 }
 
+# FreeDOS packages (zips), pulled out of the LiteUSB image
+if (-not (Test-Path "$tools\freedos\packages\BASE\KERNEL.ZIP")) {
+    python "$PSScriptRoot\fatimg.py" get "$tools\freedos\liteusb\FD14LITE.img" PACKAGES "$tools\freedos\packages"
+}
+
+# Crynwr packet drivers (generic NE2000 for emulators), from the FreeDOS net repo
+if (-not (Test-Path "$tools\freedos\packages\NET\CRYNWR.ZIP")) {
+    New-Item -ItemType Directory -Force "$tools\freedos\packages\NET" | Out-Null
+    $f = Get-File "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/$fdVer/net/crynwr.zip" 'crynwr.zip'
+    Copy-Item $f "$tools\freedos\packages\NET\CRYNWR.ZIP"
+}
+
+# PicoMEM DOS drivers
+$pmDrivers = 'ASTCLOCK.COM', 'NE2000.COM', 'PICOMEM.EXE', 'PM2000.COM', 'PMDFS.EXE',
+             'PMDFS3.EXE', 'PMEMM.EXE', 'PMINIT.EXE', 'PMMOUSE.EXE', 'README.md'
+New-Item -ItemType Directory -Force "$tools\picomem" | Out-Null
+foreach ($d in $pmDrivers) {
+    if (-not (Test-Path "$tools\picomem\$d")) {
+        curl.exe -sSfL -o "$tools\picomem\$d" "https://raw.githubusercontent.com/FreddyVRetro/ISA-PicoMEM/main/drivers/$d"
+    }
+}
+
 # 86Box ROM set (goes next to the winget-installed 86Box.exe)
 $box = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Directory -Filter '86Box.86Box_*' | Select-Object -First 1
 if ($box -and -not (Test-Path "$($box.FullName)\roms\machines")) {
