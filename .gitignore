@@ -1,0 +1,10 @@
+# Downloaded/extracted toolchains (recreate with scripts/setup-tools.ps1)
+/tools/
+# Build outputs
+/build/
+*.obj
+*.err
+*.map
+*.exe
+*.com
+*.img
