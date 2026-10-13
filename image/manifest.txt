@@ -39,3 +39,4 @@ PICOMEM/            picomem:*.COM
 PICOMEM/            picomem:*.EXE
 
 CLAUDEXT/               build:hello.exe
+CLAUDEXT/               build:claude.exe

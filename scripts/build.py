@@ -2,6 +2,8 @@
 """Build Claude-XT: boot code, DOS apps, and the bootable hard disk image.
 
   python scripts/build.py              build everything -> build/CLAUDEXT.IMG
+  python scripts/build.py --bridge 192.168.1.50:8023
+                                       set the bridge address (remembered)
   python scripts/build.py --autotest image/tests/smoke.bat
                                        also install C:\\AUTOTEST.BAT (run at boot
                                        instead of the normal startup)
@@ -9,6 +11,7 @@
 
 import argparse
 import fnmatch
+import json
 import os
 import shutil
 import subprocess
@@ -27,9 +30,19 @@ WATCOM = os.path.join(TOOLS, 'openwatcom')
 CYLINDERS = 65
 IMAGE_NAME = 'CLAUDEXT.IMG'
 
-# DOS programs: output name -> list of sources (built with OpenWatcom, 8088 code)
+MTCP_SRC = os.path.join(TOOLS, 'mtcp-src', 'mTCP-src_2026-10-10')
+MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.cpp', 'udp.cpp',
+            'utils.cpp', 'dns.cpp', 'timer.cpp', 'trace.cpp', 'ipasm.asm']
+
+# DOS programs, built with OpenWatcom for the 8088.
+#   sources: files in this repo (.c, .cpp, .asm)
+#   model:   memory model letter (s, c, m, l)
+#   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
-    'hello.exe': ['src/hello/hello.c'],
+    'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
+    'claude.exe': {'sources': ['src/claude/claude.cpp', 'lib/screen.c', 'lib/console.c',
+                               'lib/xtbridge.cpp'],
+                   'model': 'c', 'mtcp': 'src/claude/claude.cfg'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini'}
@@ -62,9 +75,17 @@ def watcom_env():
     return env
 
 
-def run(cmd, **kw):
-    print('  ' + ' '.join(cmd))
-    subprocess.run(cmd, check=True, **kw)
+def run(cmd, show_output=True, **kw):
+    """Run a tool. Output is shown if asked for, and always on failure."""
+    print(f'  {os.path.basename(cmd[0])} {os.path.basename(cmd[-1])}')
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
+    out = '\n'.join(l for l in p.stdout.splitlines()
+                    if not l.startswith(('Open Watcom', 'Version 2.0', 'Copyright', 'Portions',
+                                         'Source code', 'See https')))
+    if out.strip() and (show_output or p.returncode):
+        print(out)
+    if p.returncode:
+        sys.exit(f'build: {os.path.basename(cmd[0])} failed')
 
 
 def build_boot():
@@ -76,12 +97,54 @@ def build_boot():
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
 
 
-def build_apps():
+def build_app(name, spec, env):
+    objdir = os.path.join(BUILD, 'obj', os.path.splitext(name)[0])
+    os.makedirs(objdir, exist_ok=True)
+    model = spec.get('model', 's')
+    flags = ['-q', '-0', f'-m{model}', '-bt=dos', '-os', '-s', '-zp2',
+             '-i=' + os.path.join(ROOT, 'lib')]
+    sources = [os.path.join(ROOT, s) for s in spec['sources']]
+    if spec.get('mtcp'):
+        cfg = os.path.join(ROOT, spec['mtcp'])
+        # mTCP sources do `#include CFG_H`; Watcom can't take a quoted -D value
+        # from the Windows command line, so force-include a header defining it.
+        cfg_h = os.path.join(objdir, 'cfg_h.h')
+        with open(cfg_h, 'w') as f:
+            f.write(f'#define CFG_H "{os.path.basename(cfg)}"\n')
+        flags += [f'-fi={cfg_h}', '-i=' + os.path.dirname(cfg),
+                  '-i=' + os.path.join(MTCP_SRC, 'TCPINC'), '-i=' + os.path.join(MTCP_SRC, 'INCLUDE')]
+        sources += [os.path.join(MTCP_SRC, 'TCPLIB', f.upper()) for f in MTCP_LIB]
+
+    objs = []
+    for src in sources:
+        obj = os.path.join(objdir, os.path.splitext(os.path.basename(src))[0].lower() + '.obj')
+        objs.append(obj)
+        ext = os.path.splitext(src)[1].lower()
+        ours = src.startswith(ROOT) and not src.startswith(TOOLS)
+        if ext == '.asm':
+            run([find_tool('wasm', WATCOM_BINS), '-q', '-0', f'-m{model}', f'-fo={obj}', src],
+                show_output=ours, env=env)
+        else:
+            compiler = find_tool('wpp' if ext == '.cpp' else 'wcc', WATCOM_BINS)
+            # All warnings for our code, except where mTCP's headers come along.
+            strict = ours and not (spec.get('mtcp') and ext == '.cpp')
+            run([compiler] + flags + (['-wx'] if strict else []) + [f'-fo={obj}', src],
+                show_output=ours, env=env)
+    lnk = os.path.join(objdir, 'link.lnk')
+    with open(lnk, 'w') as f:
+        f.write('system dos\noption quiet, map, eliminate, stack=4096\n')
+        f.write(f'name {os.path.join(BUILD, name)}\n')
+        f.writelines(f'file {o}\n' for o in objs)
+    run([find_tool('wlink', WATCOM_BINS), f'@{lnk}'], env=env)
+
+
+def build_apps(only=None):
     env = watcom_env()
-    wcl = find_tool('wcl', WATCOM_BINS)
-    for out, srcs in APPS.items():
-        run([wcl, '-q', '-0', '-ms', '-bt=dos', '-os', '-s', f'-fe={out}'] +
-            [os.path.join(ROOT, s) for s in srcs], cwd=BUILD, env=env)
+    for name, spec in APPS.items():
+        if only and name not in only:
+            continue
+        print(f'  -> {name}')
+        build_app(name, spec, env)
 
 
 def resolve(source):
@@ -138,6 +201,10 @@ def build_image(autotest=None):
                 attr |= fatimg.ATTR_SYSTEM | fatimg.ATTR_HIDDEN | fatimg.ATTR_RO
             fs.write_file(path, data, attr=attr)
 
+    # Point CLAUDE.EXE (and future bridge apps) at the bridge.
+    cfg = fs.read_file('NET/MTCP.CFG') + f'CLAUDE_BRIDGE {settings()["bridge"]}\r\n'.encode()
+    fs.write_file('NET/MTCP.CFG', cfg)
+
     out = os.path.join(BUILD, IMAGE_NAME)
     with open(out, 'wb') as f:
         f.write(img)
@@ -146,10 +213,35 @@ def build_image(autotest=None):
     return out
 
 
+SETTINGS_FILE = os.path.join(BUILD, 'settings.json')
+DEFAULT_SETTINGS = {
+    # Where the XT finds xtbridge.py. 10.0.2.2 is the host PC as seen from
+    # 86Box's SLiRP network; real hardware needs the bridge machine's LAN IP.
+    'bridge': '10.0.2.2:8023',
+}
+
+
+def settings(**changes):
+    """Persistent build settings (build/settings.json), updated by command-line flags."""
+    s = dict(DEFAULT_SETTINGS)
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE) as f:
+            s.update(json.load(f))
+    changes = {k: v for k, v in changes.items() if v is not None}
+    if changes:
+        s.update(changes)
+        os.makedirs(BUILD, exist_ok=True)
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(s, f, indent=2)
+    return s
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
+    ap.add_argument('--bridge', help='host:port of the XTBridge (remembered for later builds)')
     a = ap.parse_args()
+    print(f'[settings] bridge = {settings(bridge=a.bridge)["bridge"]}')
     print('[boot]')
     build_boot()
     print('[apps]')
