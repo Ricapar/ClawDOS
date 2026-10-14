@@ -5,9 +5,12 @@
 #include "console.h"
 
 static int row, col;
+static int lm, rm = SCR_COLS;           /* margins: text in [lm, rm) */
+static int track = 1;                   /* move the hardware cursor */
 static unsigned char attr = SCR_ATTR(C_LIGHTGRAY, C_BLACK);
 static unsigned short line[SCR_COLS];   /* mirror of the current row */
 static int soft_wrapped;                /* current row began with a word wrap */
+static int used;                        /* anything written on the current row */
 
 static int mark_row = -1, mark_col;
 static unsigned short mark_line[SCR_COLS];
@@ -22,26 +25,39 @@ static void blank_line(unsigned short *cells)
 
 static void place_cursor(void)
 {
-    scr_cursor(row, col < SCR_COLS ? col : SCR_COLS - 1);
+    if (track)
+        scr_cursor(row, col < SCR_COLS ? col : SCR_COLS - 1);
+}
+
+static int last_row(void)
+{
+    return SCR_ROWS - 1 - scr_footer_rows();
+}
+
+static void scroll_up(void)
+{
+    scr_scroll(attr);
+    if (mark_row >= 0)
+        mark_row--;
 }
 
 static void next_row(void)
 {
-    col = 0;
-    if (row == SCR_ROWS - 1) {
-        scr_scroll(attr);
-        if (mark_row >= 0)
-            mark_row--;
-    } else {
+    if (row >= last_row())
+        scroll_up();
+    else
         row++;
-    }
     blank_line(line);
+    col = lm;
+    used = 0;
 }
 
 void con_init(void)
 {
-    row = col = 0;
+    row = 0;
+    col = lm;
     soft_wrapped = 0;
+    used = 0;
     mark_row = -1;
     blank_line(line);
     scr_clear(attr);
@@ -51,6 +67,21 @@ void con_init(void)
 void con_attr(unsigned char a) { attr = a; }
 int  con_row(void) { return row; }
 int  con_col(void) { return col; }
+void con_track_cursor(int on) { track = on; }
+
+void con_margins(int left, int right)
+{
+    lm = left;
+    rm = right;
+}
+
+void con_make_room(int footer_rows)
+{
+    while (row > SCR_ROWS - 1 - footer_rows) {
+        scroll_up();
+        row--;
+    }
+}
 
 void con_newline(void)
 {
@@ -61,29 +92,38 @@ void con_newline(void)
 
 void con_ensure_blank_line(void)
 {
-    if (col != 0)
+    if (used)
         con_newline();
+}
+
+void con_line(const unsigned short *cells)
+{
+    con_ensure_blank_line();
+    memcpy(line, cells, sizeof(line));
+    scr_putn(row, 0, line, SCR_COLS);
+    con_newline();
 }
 
 static void wrap(void)
 {
-    int k = SCR_COLS - 1;
+    int k = rm - 1;
     int n;
 
-    while (k > 0 && (line[k] & 0xFF) != ' ')
+    while (k > lm && (line[k] & 0xFF) != ' ')
         k--;
-    if (k == 0 || k == SCR_COLS - 1) {
+    if (k <= lm || k == rm - 1) {
         next_row();                         /* no break point: hard wrap */
     } else {
         unsigned short tail[SCR_COLS];
 
-        n = SCR_COLS - 1 - k;               /* move the partial word down */
+        n = rm - 1 - k;                     /* move the partial word down */
         memcpy(tail, line + k + 1, n * sizeof(tail[0]));
         scr_fill(row, k + 1, n, ' ', attr);
         next_row();
-        memcpy(line, tail, n * sizeof(tail[0]));
-        scr_putn(row, 0, line, n);
-        col = n;
+        memcpy(line + lm, tail, n * sizeof(tail[0]));
+        scr_putn(row, lm, line + lm, n);
+        col = lm + n;
+        used = 1;
     }
     soft_wrapped = 1;
 }
@@ -96,11 +136,14 @@ void con_putc(unsigned char c)
     }
     if (c == '\r')
         return;
-    if (c == ' ' && col == 0 && soft_wrapped)
+    if (c == ' ' && col == lm && soft_wrapped)
         return;                             /* don't start a wrapped line with a space */
+    if (col >= rm)
+        wrap();
+    used = 1;
     line[col] = c | (attr << 8);
     scr_putc(row, col, c, attr);
-    if (++col == SCR_COLS)
+    if (++col == rm)
         wrap();
     place_cursor();
 }

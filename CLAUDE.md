@@ -9,7 +9,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1.
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
-  `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like `CLAUDE -m`.
+  `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
+  `CLAUDE -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - Bridge: `python bridge/xtbridge.py [--mock]`; test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
 - Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
@@ -18,5 +19,6 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 ## Constraints
 - 8086 instruction set only (`wcc/wpp -0`, NASM `cpu 8086`).
 - Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
+  A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
 - Code linking mTCP (lib/xtbridge, CLAUDE.EXE) is GPLv3.
 - Watcom on Windows: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).

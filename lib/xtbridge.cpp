@@ -39,6 +39,11 @@ void XTBridge::stopStack(void)
     Utils::endStack();
 }
 
+void XTBridge::localAddress(char *buf)
+{
+    sprintf(buf, "%u.%u.%u.%u", MyIpAddr[0], MyIpAddr[1], MyIpAddr[2], MyIpAddr[3]);
+}
+
 int8_t XTBridge::configValue(const char *key, char *val, uint16_t len)
 {
     int8_t rc;
@@ -51,7 +56,7 @@ int8_t XTBridge::configValue(const char *key, char *val, uint16_t len)
     return rc;
 }
 
-XTBridge::XTBridge() : sock(NULL), rxLen(0), consumed(0), err("") { }
+XTBridge::XTBridge() : sock(NULL), dead(0), rxLen(0), consumed(0), err("") { }
 
 int8_t XTBridge::connect(const char *hostSpec, uint16_t port)
 {
@@ -99,6 +104,7 @@ int8_t XTBridge::connect(const char *hostSpec, uint16_t port)
         return -1;
     }
     rxLen = consumed = 0;
+    dead = 0;
     return 0;
 }
 
@@ -153,6 +159,7 @@ int XTBridge::poll(void)
     int16_t n = sock->recv((uint8_t *)rx + rxLen, sizeof(rx) - 1 - rxLen);
     if (n < 0) {
         err = "Connection error";
+        dead = 1;
         return -1;
     }
     rxLen += n;
@@ -160,6 +167,7 @@ int XTBridge::poll(void)
         return 1;
     if (n == 0 && sock->isRemoteClosed()) {
         err = "The bridge closed the connection";
+        dead = 1;
         return -1;
     }
     return 0;

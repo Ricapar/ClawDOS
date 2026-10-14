@@ -25,6 +25,9 @@ class XTBridge {
     static int8_t startStack(void);
     static void   stopStack(void);
 
+    /* Our IP address as "a.b.c.d" (valid after startStack). buf >= 16 bytes. */
+    static void localAddress(char *buf);
+
     /* Look up an app setting (e.g. "CLAUDE_BRIDGE") in the mTCP config file. */
     static int8_t configValue(const char *key, char *val, uint16_t len);
 
@@ -35,6 +38,7 @@ class XTBridge {
        describes failures. */
     int8_t connect(const char *host, uint16_t port);
     void   close(void);
+    int    isConnected(void) { return sock != 0 && !dead; }
 
     /* Service the network. Returns 1 when a line is ready (see verb()/payload(),
        valid until the next poll), 0 when nothing is ready, -1 when the
@@ -50,6 +54,7 @@ class XTBridge {
 
   private:
     TcpSocket *sock;
+    uint8_t dead;                     /* poll() reported the connection gone */
     char  rx[XTBRIDGE_LINE_MAX];
     uint16_t rxLen;
     uint16_t consumed;

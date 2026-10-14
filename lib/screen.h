@@ -7,6 +7,12 @@
  * so the IBM CGA doesn't show "snow"; scr_set_snowcheck(0) turns that off for
  * cards that don't need it. Other adapters fall back to software scrolling.
  *
+ * A footer of up to SCR_FOOT_MAX rows can be pinned to the bottom of the
+ * screen (an input box, a status line); scr_scroll() then scrolls only the
+ * rows above it. With hardware scrolling the footer has to be rewritten one
+ * row further on in VRAM each time, so that happens in the vertical blanking
+ * interval, together with the CRTC update, and the footer never visibly moves.
+ *
  * Rows/cols are logical screen positions (0..24, 0..79).
  */
 #ifndef CXT_SCREEN_H
@@ -18,6 +24,7 @@ extern "C" {
 
 #define SCR_COLS 80
 #define SCR_ROWS 25
+#define SCR_FOOT_MAX 10
 
 /* CGA attribute helpers: SCR_ATTR(fg, bg) */
 #define SCR_ATTR(fg, bg) ((unsigned char)(((bg) << 4) | (fg)))
@@ -38,7 +45,12 @@ void scr_putn(int row, int col, const unsigned short *cells, int n);  /* char|at
 void scr_fill(int row, int col, int n, unsigned char ch, unsigned char attr);
 void scr_clear(unsigned char attr);
 
-void scr_scroll(unsigned char attr); /* whole screen up one row, new bottom row blank */
+void scr_scroll(unsigned char attr); /* rows above the footer up one, new row blank */
+
+/* Pin the bottom `rows` rows (0..SCR_FOOT_MAX). Rows given up by a smaller
+   footer are blanked; the caller draws the footer's contents. */
+void scr_footer(int rows, unsigned char attr);
+int  scr_footer_rows(void);
 
 /* Scrollback: view `lines` rows above the live screen (0 = live). Returns the
    amount actually applied, which is limited by the history available. */

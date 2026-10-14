@@ -35,15 +35,20 @@ line), `!cp437` (character set), `!slow` and `!stall` (try Esc), and `!error`,
 `!refuse`, `!cutoff`, `!drop` (failure modes). `--speed 3` makes it faster.
 `python bridge/test_bridge.py` runs the protocol tests against it.
 
-In CLAUDE: Enter sends, Esc stops a reply, PgUp/PgDn scroll back, F2 starts a
-new chat, F10 quits. `CLAUDE host:port` overrides the bridge address.
+CLAUDE looks like Claude Code: a welcome panel with Clawd, the conversation
+scrolling above an input box pinned to the bottom, and a spinner while Claude
+works. Enter sends (typing ahead while Claude replies queues the message), Esc
+stops a reply or clears the input, arrows/Home/End/Del edit, Up/Down recall
+earlier messages, PgUp/PgDn scroll back, F1 help, F2 new chat, F10 quits.
+`CLAUDE host:port` overrides the bridge address; `-m text` sends a message at
+startup and `-i text` pre-fills the input box (handy for hands-free tests).
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/claude/` | CLAUDE.EXE |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling), `console` (word-wrapping text stream), `xtbridge` (bridge protocol on mTCP) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP) |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |
 | `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |
