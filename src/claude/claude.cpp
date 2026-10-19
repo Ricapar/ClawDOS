@@ -356,6 +356,7 @@ static void showHelp(void)
         "Enter sends \xFA Esc stops a reply (or clears what you typed)",
         "\x18/\x19 recall earlier messages \xFA \x1B/\x1A Home End Del edit \xFA Ctrl-U clears",
         "PgUp/PgDn scroll back \xFA F2 or /new starts over \xFA F10 or /quit leaves",
+        "/model lists the bridge's AI providers \xFA /model name switches",
         0
     };
     blankLine();

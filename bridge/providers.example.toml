@@ -1,0 +1,26 @@
+# XTBridge providers. Copy to bridge/providers.toml (gitignored) and edit.
+# Each [table] adds a provider or overrides fields of a built-in one
+# (anthropic, openrouter, zai, openai, ollama, mock; see providers.py).
+# Never put API keys here: name the environment variable that holds the key.
+
+# Change a built-in provider's default model.
+[openrouter]
+model = "z-ai/glm-4.6"
+
+# Z.ai's GLM Coding Plan uses a different endpoint from pay-as-you-go.
+# [zai]
+# base_url = "https://api.z.ai/api/coding/paas/v4"
+
+# Any OpenAI-compatible server: LM Studio, llama.cpp, vLLM, Groq, DeepSeek, ...
+[lmstudio]
+type = "openai"
+base_url = "http://localhost:1234/v1"
+model = "qwen3-8b"
+
+[deepseek]
+type = "openai"
+name = "DeepSeek"                  # who the assistant is, in the system prompt
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+model = "deepseek-chat"
+# extra = { temperature = 0.7 }    # extra fields for the request body

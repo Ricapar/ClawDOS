@@ -16,6 +16,8 @@ client that runs on the XT.
    (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAUDE_BRIDGE`)
 3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
    `ANTHROPIC_API_KEY` (or `ant auth login`), then `python bridge/xtbridge.py`.
+   Other providers: `--provider openrouter`, `zai`, `openai` or `ollama` (keys in
+   `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`); see "Other models" below.
    No API key yet? `--mock` runs an offline stand-in for Claude (see below). The XT connects in on TCP port 8023,
    so allow it through the firewall (admin PowerShell):
    `New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow`
@@ -34,6 +36,19 @@ for the list. Among them: `!scroll` (60 lines), `!wide` (over-long word and
 line), `!cp437` (character set), `!slow` and `!stall` (try Esc), and `!error`,
 `!refuse`, `!cutoff`, `!drop` (failure modes). `--speed 3` makes it faster.
 `python bridge/test_bridge.py` runs the protocol tests against it.
+
+### Other models
+
+The bridge isn't tied to Claude. Besides Anthropic's API it speaks the
+OpenAI-compatible chat API that OpenRouter, Z.ai, OpenAI, Ollama, LM Studio and
+most others offer, so nothing changes on the XT. Built-in providers:
+`anthropic` (default), `openrouter`, `zai`, `openai`, `ollama`, `mock`.
+`--provider NAME --model MODEL` picks where new chats start. On the XT, type
+`/model` to list providers and `/model openrouter:z-ai/glm-4.6` (or
+`/model zai`, or just `/model some-model` on the current provider) to switch
+mid-conversation; the history carries over. To add or change providers, copy
+`bridge/providers.example.toml` to `bridge/providers.toml` (format in
+`bridge/providers.py`). API keys only ever come from environment variables.
 
 CLAUDE looks like Claude Code: a welcome panel with Clawd, the conversation
 scrolling above an input box pinned to the bottom, and a spinner while Claude

@@ -9,3 +9,5 @@
 *.com
 *.img
 __pycache__/
+# Local bridge provider config (see bridge/providers.example.toml)
+/bridge/providers.toml

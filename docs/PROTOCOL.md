@@ -29,6 +29,12 @@ receive buffer on the XT always holds a whole line.
 | `NEW` | Start a new conversation. |
 | `INFO`, `PING`, `QUIT` | Housekeeping. |
 
+A `MSG` starting with `/model` (or `/provider`) is answered by the bridge
+itself rather than the model: `/model` lists the AI providers it knows, and
+`/model provider[:model]` or `/model model` switches the conversation to another
+backend, keeping its history. The reply arrives as ordinary `TXT`/`NL`/`END`
+lines, so clients need no special support; `INFO` reflects the new backend.
+
 The bridge keeps the conversation history, so the XT only ever holds what is on
 screen. Word wrapping is the client's job: the bridge doesn't know the screen
 width.

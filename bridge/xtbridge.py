@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""XTBridge: lets a DOS machine chat with Claude over a plain TCP connection.
+"""XTBridge: lets a DOS machine chat with Claude (or another LLM) over a plain
+TCP connection.
 
 The XT can't do modern TLS, so this runs on a nearby modern machine (a PC, or a
 Raspberry Pi tucked inside the XT's case). It speaks a tiny line protocol in
-code page 437 to the XT (see docs/PROTOCOL.md) and HTTPS to the Claude API.
+code page 437 to the XT (see docs/PROTOCOL.md) and HTTPS to the model's API.
 
-  python bridge/xtbridge.py                    # Claude, port 8023
-  python bridge/xtbridge.py --mock             # offline mock of Claude (no key)
-  python bridge/xtbridge.py --token SECRET     # require AUTH from clients
+  python bridge/xtbridge.py                         # Claude, port 8023
+  python bridge/xtbridge.py --provider openrouter   # any provider in providers.py
+  python bridge/xtbridge.py --provider zai --model glm-4.6
+  python bridge/xtbridge.py --mock                  # offline mock of Claude (no key)
+  python bridge/xtbridge.py --token SECRET          # require AUTH from clients
 
-Credentials come from the environment (ANTHROPIC_API_KEY, or an `ant auth
-login` profile).
+From the XT, "/model" lists providers and "/model openrouter:some/model"
+switches the current conversation. providers.py has the built-in providers;
+bridge/providers.toml adds your own. API keys come from the environment
+(ANTHROPIC_API_KEY or an `ant auth login` profile, OPENROUTER_API_KEY,
+ZAI_API_KEY, OPENAI_API_KEY).
 """
 
 import argparse
@@ -18,25 +24,14 @@ import asyncio
 import logging
 import unicodedata
 
-from mockchat import Disconnect, MockAPIError, MockChat, Refused
+import providers
+from mockchat import Disconnect, MockAPIError, Refused
+from providers import APIError, Backends, ConfigError, transcript
 
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 8023
-DEFAULT_MODEL = 'claude-opus-5-5'
-MAX_TOKENS = 16000
 MAX_LINE = 4096          # longest line accepted from a client
 MAX_TXT = 500            # longest payload sent to a client
-FALLBACK_BETA = 'server-side-fallback-2026-07-01'
-
-SYSTEM_PROMPT = """\
-You are Claude, chatting with someone through Claude-XT on a 1983 IBM PC XT \
-(Intel 8088 at 4.77 MHz, 640 KB RAM, CGA display), connected to you over a \
-network bridge. Your replies appear on an 80-column text-mode screen using \
-code page 437, so write plain text: no Markdown syntax such as **bold**, # \
-headings, tables, or code fences, because it would show up literally. Simple \
-lists with "-" are fine. Keep replies conversational and fairly short; the \
-screen is small and text draws slowly. Latency-sensitive; begin your visible \
-answer immediately."""
 
 log = logging.getLogger('xtbridge')
 
@@ -48,7 +43,7 @@ CP437_FALLBACKS = {
     '‘': "'", '’': "'", '‚': "'", '‛': "'",
     '“': '"', '”': '"', '„': '"', '″': '"', '′': "'",
     '–': '-', '—': '--', '―': '--', '−': '-', '‐': '-', '‑': '-',
-    '…': '...', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ',
+    '…': '...', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ',
     '​': '', '‍': '', '️': '',
     '→': '->', '←': '<-', '⇒': '=>', '↔': '<->',
     '•': '∙', '◦': 'o', '‣': '>', '×': 'x',
@@ -81,64 +76,15 @@ def from_cp437(data):
     return data.decode('cp437')
 
 
-# --- backends ------------------------------------------------------------------
-
-def echo_blocks(content):
-    """Assistant content to send back next turn. After a mid-output fallback,
-    model-internal blocks that precede the last fallback marker must be dropped."""
-    last = max((i for i, b in enumerate(content) if b.type == 'fallback'), default=-1)
-    keep = []
-    for i, b in enumerate(content):
-        if i < last and b.type not in ('text', 'fallback'):
-            continue
-        keep.append(b)
-    return keep
-
-
-class ClaudeChat:
-    """One conversation with Claude. History is append-only."""
-
-    def __init__(self, client, model, effort):
-        self.client = client
-        self.model = model
-        self.effort = effort
-        self.messages = []
-
-    async def reply(self, text):
-        self.messages.append({'role': 'user', 'content': text})
-        try:
-            async with self.client.beta.messages.stream(
-                model=self.model,
-                max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
-                messages=self.messages,
-                output_config={'effort': self.effort},
-                betas=[FALLBACK_BETA],
-                fallbacks='default',
-            ) as stream:
-                async for chunk in stream.text_stream:
-                    yield chunk
-                final = await stream.get_final_message()
-        except BaseException:
-            self.messages.pop()  # never sent a reply; drop the dangling user turn
-            raise
-        if final.stop_reason == 'refusal':
-            self.messages.pop()
-            raise Refused('Claude declined to answer that.')
-        self.messages.append({'role': 'assistant', 'content': echo_blocks(final.content)})
-        if final.stop_reason == 'max_tokens':
-            yield '\n[reply cut off: too long]'
-
-
 # --- protocol ----------------------------------------------------------------
 
 class Session:
-    def __init__(self, reader, writer, args, make_chat):
+    def __init__(self, reader, writer, args, backends):
         self.reader = reader
         self.writer = writer
         self.args = args
-        self.make_chat = make_chat
-        self.chat = make_chat()
+        self.backends = backends
+        self.chat = backends.make(args.provider, args.model)
         self.task = None
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
@@ -189,11 +135,11 @@ class Session:
             await self.send('ERR', b'AUTH required')
             return True
         if verb == 'INFO':
-            await self.send('INFO', to_cp437(self.args.backend_name))
+            await self.send('INFO', to_cp437(self.backends.describe(self.chat)))
         elif verb == 'NEW':
             if self.task:
                 self.task.cancel()
-            self.chat = self.make_chat()
+            self.chat = self.backends.make(self.chat.provider, self.chat.model)
             await self.send('OK')
         elif verb == 'STOP':
             if self.task:
@@ -204,11 +150,48 @@ class Session:
                 await self.send('ERR', b'busy')
             elif not text:
                 await self.send('ERR', b'empty message')
+            elif text.split()[0].lower() in ('/model', '/provider'):
+                await self.say(self.switch(text.split(None, 1)[1:]))
             else:
                 self.task = asyncio.create_task(self.answer(text))
         else:
             await self.send('ERR', b'unknown command')
         return True
+
+    async def say(self, text):
+        """A whole reply written by the bridge itself."""
+        for i, line in enumerate(text.split('\n')):
+            if i:
+                await self.send('NL')
+            if line:
+                await self.send('TXT', to_cp437(line))
+        await self.send('END')
+
+    def switch(self, arg):
+        """/model [provider | provider:model | model]: list or switch backends,
+        keeping the conversation so far."""
+        table = self.backends.providers
+        if not arg:
+            lines = [f'Now using {self.backends.describe(self.chat)}. Providers:']
+            for key, p in table.items():
+                note = '' if providers.has_key(p) else f'  (no {p["api_key_env"]})'
+                lines.append(f'  {key:<11} {p["model"]}{note}')
+            lines.append('Switch with /model provider, /model provider:model, or /model model.')
+            return '\n'.join(lines)
+        key, sep, model = arg[0].strip().partition(':')
+        if key.lower() in table:
+            key = key.lower()
+        elif sep:
+            return f'Unknown provider "{key}". Send /model for the list.'
+        else:   # a model name on the current provider
+            key, model = self.chat.provider, arg[0].strip()
+        if not providers.has_key(table[key]):
+            return f'{key} needs an API key: set {table[key]["api_key_env"]} where the bridge runs.'
+        history = transcript(self.chat)
+        self.chat = self.backends.make(key, model or None, history)
+        log.info('%s switched to %s', self.peer, self.backends.describe(self.chat))
+        kept = f', keeping {len(history) // 2} earlier exchange(s)' if history else ''
+        return f'Switched to {self.backends.describe(self.chat)}{kept}.'
 
     async def answer(self, text):
         log.info('%s >> %s', self.peer, text)
@@ -232,8 +215,8 @@ class Session:
         except Disconnect:
             log.info('%s dropped on purpose (mock)', self.peer)
             self.writer.close()
-        except MockAPIError as e:
-            log.info('%s simulated error: %s', self.peer, e)
+        except (MockAPIError, APIError) as e:
+            log.info('%s API error: %s', self.peer, e)
             await self.send('ERR', to_cp437(str(e)))
         except Exception as e:  # report API trouble to the XT instead of dropping the link
             log.exception('reply failed')
@@ -242,9 +225,17 @@ class Session:
 
 def describe_error(e):
     try:
+        import httpx
+        if isinstance(e, httpx.TimeoutException):
+            return 'The model API timed out.'
+        if isinstance(e, httpx.TransportError):
+            return 'Bridge could not reach the model API.'
+    except ImportError:
+        pass
+    try:
         import anthropic
     except ImportError:
-        return str(e)
+        return f'{type(e).__name__}: {e}'[:200]
     if isinstance(e, anthropic.AuthenticationError):
         return 'Bridge has no valid Anthropic API key.'
     if isinstance(e, anthropic.RateLimitError):
@@ -260,18 +251,25 @@ async def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--host', default='0.0.0.0')
     ap.add_argument('--port', type=int, default=DEFAULT_PORT)
-    ap.add_argument('--model', default=DEFAULT_MODEL)
-    ap.add_argument('--effort', default='low', choices=['low', 'medium', 'high', 'xhigh', 'max'])
+    ap.add_argument('--provider', default='anthropic',
+                    help='backend new conversations start on (see providers.py)')
+    ap.add_argument('--model', help="model to use instead of the provider's default")
+    ap.add_argument('--effort', choices=['low', 'medium', 'high', 'xhigh', 'max'],
+                    help='anthropic only: reasoning effort (default low)')
+    ap.add_argument('--config', help='provider config file (default: bridge/providers.toml if present)')
     ap.add_argument('--token', help='shared secret clients must send with AUTH')
     ap.add_argument('--mock', '--echo', action='store_true',
-                    help='offline mock of Claude (no API key or calls); send !help for test commands')
+                    help='same as --provider mock: offline mock of Claude; send !help for test commands')
     ap.add_argument('--speed', type=float, default=1.0,
                     help='mock only: scale delays (2 = twice as fast, 0 = no delays)')
     ap.add_argument('-v', '--verbose', action='store_true')
     args = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
-    server = await start(args)
+    try:
+        server = await start(args)
+    except ConfigError as e:
+        raise SystemExit(f'xtbridge: {e}')
     log.info('XTBridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
     async with server:
         await server.serve_forever()
@@ -279,17 +277,21 @@ async def main():
 
 async def start(args):
     """Start listening; returns the asyncio server. Sets args.backend_name."""
-    if args.mock:
-        args.backend_name = 'mock Claude (offline test, send !help)'
-        make_chat = lambda: MockChat(args.speed)
-    else:
-        import anthropic
-        client = anthropic.AsyncAnthropic()
-        args.backend_name = f'{args.model} (effort {args.effort})'
-        make_chat = lambda: ClaudeChat(client, args.model, args.effort)
+    table = providers.load_providers(getattr(args, 'config', None))
+    args.provider = 'mock' if args.mock else (getattr(args, 'provider', None) or 'anthropic')
+    args.model = getattr(args, 'model', None)
+    if args.provider not in table:
+        raise ConfigError(f'unknown provider {args.provider} (have: {", ".join(table)})')
+    p = table[args.provider]
+    if getattr(args, 'effort', None):
+        p['effort'] = args.effort
+    if not providers.has_key(p):
+        raise ConfigError(f'{args.provider} needs an API key in {p["api_key_env"]}')
+    backends = Backends(table, getattr(args, 'speed', 1.0))
+    args.backend_name = backends.describe(backends.make(args.provider, args.model))
 
     async def handle(reader, writer):
-        await Session(reader, writer, args, make_chat).run()
+        await Session(reader, writer, args, backends).run()
 
     return await asyncio.start_server(handle, args.host, args.port, limit=MAX_LINE)
 
