@@ -21,12 +21,22 @@ import build
 
 DONE = b'CLAUDEXT-TEST-DONE'
 
+# Not 8086: on an 8088/8086 the Crynwr NE2000 packet driver moves packet data with
+# 8-bit IN/OUT loops (it only uses REP INSW/OUTSW on a 186+) while keeping the card in
+# 16-bit word mode. DOSBox-X's NE2000 is a 16-bit card that consumes a whole word per
+# data-port access, so every received frame is read half-length and garbled: the
+# driver drops it and mTCP DHCP times out. 80186 keeps real-mode-only, 20-bit memory
+# aliasing behaviour; 86Box (run86box.py) remains the accurate 8088 check.
+CPUTYPE = '80186'
+
 
 def dosbox():
-    p = shutil.which('dosbox-x') or r'C:\DOSBox-X\dosbox-x.exe'
-    if not os.path.exists(p):
-        sys.exit('boottest: dosbox-x not found')
-    return p
+    # Prefer the portable MinGW build from setup-tools.ps1: it has SLiRP networking.
+    for p in (os.path.join(build.ROOT, 'tools', 'dosbox-x', 'mingw-build', 'mingw', 'dosbox-x.exe'),
+              shutil.which('dosbox-x'), r'C:\DOSBox-X\dosbox-x.exe'):
+        if p and os.path.exists(p):
+            return p
+    sys.exit('dosbox-x not found; run scripts/setup-tools.ps1')
 
 
 def read_log(path):
@@ -42,6 +52,8 @@ def main():
     ap.add_argument('test', nargs='?', default=os.path.join(build.ROOT, 'image', 'tests', 'smoke.bat'))
     ap.add_argument('--timeout', type=int, default=90)
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
+    ap.add_argument('--set', action='append', default=[], metavar='"SECTION KEY=VALUE"',
+                    help='extra DOSBox-X -set options, e.g. "log misc=true"')
     a = ap.parse_args()
 
     if not a.no_build:
@@ -53,8 +65,12 @@ def main():
     build.build_image()  # leave a clean CLAUDEXT.IMG behind
 
     cmd = [dosbox(), '-silent', '-nogui',
-           '-set', 'cpu cputype=8086', '-set', 'cpu cycles=max', '-set', 'dosbox machine=cga',
+           '-set', f'cpu cputype={CPUTYPE}', '-set', 'cpu cycles=max', '-set', 'dosbox machine=cga',
            '-set', 'serial serial1=file file:serial.log',
+           '-set', 'ne2000 ne2000=true', '-set', 'ne2000 nicbase=340', '-set', 'ne2000 nicirq=3',
+           '-set', 'ne2000 backend=slirp', '-set', 'serial serial2=disabled',  # COM2 would share IRQ 3
+           '-set', 'log logfile=dbx.log',
+           *[x for s in a.set for x in ('-set', s)],
            '-c', f'imgmount 2 test.img -t hdd -size 512,63,16,{build.CYLINDERS}',
            '-c', 'boot -l c']
     # DOSBox-X exits immediately when given an absolute image path from here, so

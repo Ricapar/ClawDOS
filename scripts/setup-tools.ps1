@@ -1,6 +1,6 @@
 # Downloads and extracts the project toolchain into ./tools (gitignored).
-# Idempotent: skips anything already present. System-wide tools (NASM, 86Box,
-# DOSBox-X) are installed via winget.
+# Idempotent: skips anything already present. System-wide tools (NASM, 86Box)
+# are installed via winget.
 
 $ErrorActionPreference = 'Stop'
 $root  = Split-Path -Parent $PSScriptRoot
@@ -12,6 +12,7 @@ $owBuild   = '2026-10-01-Build'
 $mtcpVer   = '2026-10-10'
 $fdVer     = '1.4'
 $romsVer   = 'v6.0'
+$dbxVer    = '2026.10.01'
 
 function Get-File($url, $name) {
     $dest = Join-Path $dl $name
@@ -24,11 +25,18 @@ function Get-File($url, $name) {
 }
 
 # winget packages
-foreach ($id in 'NASM.NASM', '86Box.86Box', 'joncampbell123.DOSBox-X') {
+foreach ($id in 'NASM.NASM', '86Box.86Box') {
     winget list --id $id -e --accept-source-agreements | Out-Null
     if ($LASTEXITCODE) {
         winget install --id $id -e --silent --accept-source-agreements --accept-package-agreements
     }
+}
+
+# DOSBox-X, MinGW portable build: unlike the winget (Visual Studio) build it
+# has the SLiRP network backend, so the emulated NE2000 works without Npcap.
+if (-not (Test-Path "$tools\dosbox-x\mingw-build\mingw\dosbox-x.exe")) {
+    $f = Get-File "https://github.com/joncampbell123/dosbox-x/releases/download/dosbox-x-v$dbxVer/dosbox-x-mingw64-$dbxVer-portable.zip" "dosbox-x-mingw64-$dbxVer.zip"
+    Expand-Archive -Force $f "$tools\dosbox-x"
 }
 
 # OpenWatcom 2 (portable snapshot)
