@@ -126,9 +126,13 @@ words ("file not found", "access denied", "disk full").
     consistent point.
 - `bridge/chat.py` answers every `TOOL` with `DONE <id> error` ("this client
   has no tools"), so it never hangs the bridge.
-- `mockchat.py` gains scenarios that issue scripted calls: `!read`, `!dir`,
-  `!write`, `!run`, `!draw`, `!play`, `!textart`, `!peek`, and `!tooltour`
-  (several in a row). They report the results they get back.
+- `mockchat.py` gains scenarios that issue scripted calls:
+  - `!tool NAME key=value ...` calls any one tool, with shell-style quoting
+    for values.
+  - `!draw` and `!play` are demos.
+  - `!tooltour` calls every tool in turn, checks the results, and logs
+    `tool tour: PASS` or `tool tour: FAIL ...`.
+  All of them report the results they get back.
 
 ## CLAUDE.EXE
 
@@ -167,6 +171,10 @@ words ("file not found", "access denied", "disk full").
     `F3 safe:off` (red).
   - Each toggle also prints a note in the transcript.
   - `-unsafe` starts with safe mode off, mainly for unattended autotests.
+  - `-q` (unattended) quits after the `-m` message's reply ends, and shortens
+    the hold times for `run` and `draw`.
+- CLAUDE.EXE moves from the compact to the large memory model: its code
+  segment is already about 63.5 KB of the 64 KB the compact model allows.
 - While a tool runs:
   - The spinner shows a tool verb (Reading, Running, Drawing, Playing, ...).
   - Esc is honoured wherever an executor can poll the keyboard: between
@@ -188,9 +196,12 @@ memory, start address and cursor, so scrollback survives. On EGA/VGA
 
 **`run` (`lib/shell`):**
 1. Suspend the screen and print `C:\> command`.
-2. Hook INT 21h (AH=02h, 06h with DL not FFh, 09h, and 40h on handles 1 and
-   2) and INT 29h. The hooks copy output into the capture buffer, then chain
-   to the original handler.
+2. Hook INT 10h AH=0Eh (BIOS teletype). DOS console output (INT 21h
+   functions 02h, 09h, 40h, and INT 29h) ends up there, as does BIOS-level
+   program output, so each character is captured exactly once. Hooking
+   INT 21h and INT 29h as well would capture console output twice. The hook
+   copies the character (dropping CR, undoing backspace), then chains to the
+   original handler.
 3. Spawn `%COMSPEC% /C command`.
 4. Unhook and get the exit code from INT 21h AH=4Dh. Whether FreeCOM passes
    the child's errorlevel through is checked during implementation, and the
@@ -198,7 +209,7 @@ memory, start address and cursor, so scrollback survives. On EGA/VGA
 5. If nothing was captured, the result is an 80x25 text snapshot of the
    screen instead.
 6. Show `-- exit code N - any key returns to Claude --`. It continues on
-   its own after 5 s.
+   its own after 5 s, or 1 s with `-q`.
 7. Resume the screen.
 
 If the output overflows 4 KB, the first 1 KB and last 3 KB are kept, with an
@@ -224,8 +235,8 @@ how much memory the child gets, and shrink CLAUDE.EXE's allocation if needed.
     if it's cheap
   - `LOCATE r,c` and `PRINT "text"`, drawn through the BIOS in graphics mode
   - `SLEEP n`
-- After the script, the picture stays up until a key is pressed, or 60 s
-  with `-unsafe`.
+- After the script, the picture stays up until a key is pressed, or 3 s
+  with `-q`.
 - A parse or range error stops the script and is reported as
   `line N: STATEMENT: message`. Everything drawn up to that point stays on
   screen.
@@ -253,12 +264,15 @@ columns, and the output is capped at 40 lines.
     single call, parallel calls, deny, stop, the round cap, a disconnect,
     and an API error mid-loop.
   - Mock scenarios end to end over a socket, with a scripted fake XT client.
-- **Host parser tests (`tests/host/`):** `basdraw` and the PLAY parser are
-  plain C with no hardware access. They are built with Watcom as a Win32
-  console program and check parsed statements and error messages.
+- **Parser unit tests (`tests/unit/`):** `basdraw` and the PLAY parser are
+  plain C with no hardware access, written against a recording backend. They
+  build into `CXTUNIT.EXE`, which `image/tests/units.bat` runs in DOSBox-X
+  with results on COM1. The installed Watcom has no Win32 libraries, and there
+  is no other host C compiler.
 - **DOSBox-X end to end:** `image/tests/tools.bat` runs
-  `CLAUDE -unsafe -m "!tooltour"` against the mock bridge. The bridge logs
-  each `DONE` status, and `scripts/boottest.py` asserts on that log.
+  `CLAUDE -unsafe -q -m "!tooltour"` against the mock bridge, which
+  `scripts/boottest.py --bridge` starts. The bridge logs each `DONE` status,
+  and boottest asserts on that log.
 - **86Box by eye:** `draw` output, `play` timing and CGA snow, checked with
   `scripts/winshot.ps1`.
 
