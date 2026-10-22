@@ -93,7 +93,7 @@ PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E
 
 # The tool tour: (tool, args, expected status, text the result must contain).
 # Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
-TOUR_EXPECT = {'draw': 'error', 'play': 'error', 'run': 'error'}
+TOUR_EXPECT = {'draw': 'error', 'run': 'error'}
 TOUR_DRAW = 'SCREEN 1\n' + '\n'.join(f'LINE ({i * 2},0)-({319 - i * 2},199),{1 + i % 3}'
                                      for i in range(120)) + '\nLOCATE 12,15\nPRINT "TOUR"\n'
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'

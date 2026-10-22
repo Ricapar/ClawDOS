@@ -16,6 +16,7 @@
 #include "toolapi.h"
 #include "dosfs.h"
 #include "sysinfo.h"
+#include "sound.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -168,6 +169,7 @@ static const ToolDef tools[] = {
     { "poke",    "Poke",    "addr",    'W', "Poking",     toolPoke },
     { "port",    "Port",    "port",    'W', "Probing",    toolPort },
     { "textart", "TextArt", NULL,      'H', "Painting",   toolTextart },
+    { "play",    "Play",    NULL,      'H', "Playing",    tool_play },
 };
 
 
