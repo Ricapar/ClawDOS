@@ -59,11 +59,11 @@ DRAW_DEMO = """\
 SCREEN 1
 COLOR 1,0
 ' sky is the blue background; palette 0 is green, red, brown
-LINE (0,150)-(319,199),1,BF
+' the sun first, then the ground covers its lower half
 CIRCLE (160,150),45,2
-PAINT (160,130),2,2
+PAINT (160,140),2,2
+LINE (0,151)-(319,199),1,BF
 LINE (0,150)-(319,150),3
-LINE (115,150)-(205,150),1
 ' sun rays
 LINE (160,95)-(160,80),2
 LINE (125,110)-(112,98),2
@@ -83,8 +83,8 @@ CIRCLE (290,130),10,1
 PAINT (290,130),1,1
 LINE (290,140)-(290,150),3
 ' birds
-DRAW "C0 BM100,60 E4 F4 E4 F4"
-DRAW "C0 BM200,45 E3 F3 E3 F3"
+DRAW "C3 BM100,60 E4 F4 E4 F4"
+DRAW "C3 BM200,45 E3 F3 E3 F3"
 LOCATE 2,12
 PRINT "SUNSET ON THE XT"
 """
@@ -93,7 +93,7 @@ PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E
 
 # The tool tour: (tool, args, expected status, text the result must contain).
 # Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
-TOUR_EXPECT = {'draw': 'error', 'run': 'error'}
+TOUR_EXPECT = {'run': 'error'}
 TOUR_DRAW = 'SCREEN 1\n' + '\n'.join(f'LINE ({i * 2},0)-({319 - i * 2},199),{1 + i % 3}'
                                      for i in range(120)) + '\nLOCATE 12,15\nPRINT "TOUR"\n'
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'

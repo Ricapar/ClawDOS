@@ -17,6 +17,7 @@
 #include "dosfs.h"
 #include "sysinfo.h"
 #include "sound.h"
+#include "gfx.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -157,6 +158,41 @@ static int toolTextart(ToolCtx *t)
     return TS_OK;
 }
 
+/* A picture in CGA graphics; the chat comes back afterwards. */
+static int toolDraw(ToolCtx *t)
+{
+    const char *script = targ("script");
+    unsigned short *save;
+    unsigned viewed;
+    char err[90];
+    int rc;
+
+    if (script == NULL)
+        return tool_fail(t, "missing script");
+    save = (unsigned short *)malloc(SCR_SAVE_BYTES);
+    if (save == NULL)
+        return tool_fail(t, "not enough memory to save the screen");
+    scr_suspend(save);
+    rc = gfx_draw(script, unattended ? 3 : 0, err, sizeof(err), &viewed);
+    scr_resume(save);
+    free(save);
+    ui_redraw();
+    if (rc < 0) {
+        tout_printf(t, "%s\n(everything before that line was drawn and shown for %us)\n", err, viewed);
+        strncpy(t->summary, err, sizeof(t->summary) - 1);
+        t->summary[sizeof(t->summary) - 1] = 0;
+        return TS_ERROR;
+    }
+    if (rc > 0) {
+        strcpy(t->summary, "stopped by user");
+        tout_puts(t, "stopped by user before the picture was finished\n");
+        return TS_STOPPED;
+    }
+    sprintf(t->summary, "drawn, viewed %us", viewed);
+    tout_printf(t, "drawn; the user looked at it for %u seconds\n", viewed);
+    return TS_OK;
+}
+
 static const ToolDef tools[] = {
     { "sysinfo", "SysInfo", NULL,      'R', "Inspecting", toolSysinfo },
     { "dir",     "Dir",     "path",    'R', "Listing",    tool_dir },
@@ -170,6 +206,7 @@ static const ToolDef tools[] = {
     { "port",    "Port",    "port",    'W', "Probing",    toolPort },
     { "textart", "TextArt", NULL,      'H', "Painting",   toolTextart },
     { "play",    "Play",    NULL,      'H', "Playing",    tool_play },
+    { "draw",    "Draw",    NULL,      'H', "Drawing",    toolDraw },
 };
 
 

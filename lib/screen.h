@@ -60,6 +60,14 @@ int  scr_viewing(void);              /* current scrollback offset */
 void scr_cursor(int row, int col);
 void scr_cursor_visible(int on);
 
+/* Hand the display to something else (a graphics picture, a DOS program) and
+   take it back with the text, scrollback and cursor as they were.
+   scr_suspend saves video memory into `save` (SCR_SAVE_BYTES) and leaves a
+   clean 80x25 text screen; scr_resume restores it. */
+#define SCR_SAVE_BYTES 16384u
+void scr_suspend(unsigned short __far *save);
+void scr_resume(const unsigned short __far *save);
+
 #ifdef __cplusplus
 }
 #endif

@@ -384,3 +384,32 @@ void scr_cursor_visible(int on)
     crtc_write(10, on ? 6 : 0x20);  /* start line 6, or bit 5 = cursor off */
     crtc_write(11, 7);
 }
+
+#define CGA_MODE_REG  0x3D8
+#define CGA_TEXT80    0x29          /* 80x25 colour text, video on, blink */
+
+void scr_suspend(unsigned short __far *save)
+{
+    union REGS r;
+
+    _fmemcpy(save, MK_FP(VRAM_SEG, 0), SCR_SAVE_BYTES);
+    r.x.ax = 0x0003;
+    int86(0x10, &r, &r);
+}
+
+void scr_resume(const unsigned short __far *save)
+{
+    union REGS r;
+
+    r.x.ax = 0x0003;
+    int86(0x10, &r, &r);
+    if (hwscroll)                   /* blank the display: no snow while copying */
+        outp(CGA_MODE_REG, CGA_TEXT80 & ~8);
+    _fmemcpy(MK_FP(VRAM_SEG, 0), save, SCR_SAVE_BYTES);
+    if (hwscroll) {
+        set_start_now();
+        outp(CGA_MODE_REG, CGA_TEXT80);
+    } else {
+        scr_cursor(cur_pos / SCR_COLS, cur_pos % SCR_COLS);
+    }
+}
