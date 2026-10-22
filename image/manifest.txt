@@ -40,3 +40,5 @@ PICOMEM/            picomem:*.EXE
 
 CLAUDEXT/               build:hello.exe
 CLAUDEXT/               build:claude.exe
+
+TESTS/                  build:cxtunit.exe

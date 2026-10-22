@@ -54,6 +54,10 @@ def main():
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     ap.add_argument('--set', action='append', default=[], metavar='"SECTION KEY=VALUE"',
                     help='extra DOSBox-X -set options, e.g. "log misc=true"')
+    ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
+                    help='TEXT must appear in the serial or bridge log (repeatable)')
+    ap.add_argument('--bridge', action='store_true',
+                    help='run the mock bridge (xtbridge.py --mock) on port 8023 during the test')
     a = ap.parse_args()
 
     if not a.no_build:
@@ -75,6 +79,13 @@ def main():
            '-c', 'boot -l c']
     # DOSBox-X exits immediately when given an absolute image path from here, so
     # mount by relative path from build/.
+    bridge = None
+    bridge_log = os.path.join(build.BUILD, 'bridge.log')
+    if a.bridge:
+        with open(bridge_log, 'wb') as f:
+            bridge = subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'xtbridge.py'),
+                                       '--mock', '--speed', '0', '--port', '8023', '-v'],
+                                      stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     proc = subprocess.Popen(cmd, cwd=build.BUILD, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     serial = os.path.join(build.BUILD, 'serial.log')
@@ -91,10 +102,21 @@ def main():
     finally:
         proc.kill()
         proc.wait()
+        if bridge:
+            bridge.kill()
+            bridge.wait()
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
+    if bridge:
+        print('--- bridge log ---')
+        sys.stdout.write(read_log(bridge_log).decode('utf-8', 'replace'))
+        log += read_log(bridge_log)
     if DONE not in log:
         print(f'boottest: FAILED (no {DONE.decode()} within {a.timeout}s)')
+        sys.exit(1)
+    missing = [t for t in a.expect if t.encode('cp437', 'replace') not in log]
+    if missing:
+        print('boottest: FAILED (missing: ' + ', '.join(repr(t) for t in missing) + ')')
         sys.exit(1)
     print('boottest: PASS')
 

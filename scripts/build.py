@@ -43,6 +43,7 @@ APPS = {
     'claude.exe': {'sources': ['src/claude/claude.cpp', 'lib/screen.c', 'lib/console.c',
                                'lib/xtbridge.cpp'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
+    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c'], 'model': 'l'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini'}
