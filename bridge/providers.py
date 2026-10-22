@@ -26,8 +26,8 @@ import os
 import tomllib
 
 from mockchat import MockChat, Refused
-from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, stringify,
-                   summary)
+from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, openai_tools,
+                   stringify, summary)
 
 ROUND_CAP_NOTE = 'Tool limit reached; answer now without tools.'
 
@@ -342,40 +342,96 @@ class OpenAIChat:
         self.extra = p.get('extra', {})
         self.messages = []
 
+    def _settle(self, start, answered):
+        """After a failed or interrupted reply: forget it if nothing came back,
+        otherwise answer any tool calls left open."""
+        if not any(m['role'] == 'assistant' for m in self.messages[start:]):
+            del self.messages[start:]
+            return
+        last = self.messages[-1]
+        open_calls = last.get('tool_calls') or [] if last['role'] == 'assistant' else []
+        for tc in open_calls:
+            if tc['id'] not in answered:
+                self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
+                                      'content': ToolResult('stopped', '').model_text()})
+
     async def reply(self, text):
+        start = len(self.messages)
         self.messages.append({'role': 'user', 'content': text})
-        body = {'model': self.model, 'stream': True, 'max_tokens': MAX_TOKENS,
-                'messages': [{'role': 'system', 'content': self.system}] + self.messages,
-                **self.extra}
-        parts, finish = [], None
+        answered = set()
         try:
-            async with self.client.stream('POST', 'chat/completions', json=body) as r:
-                if r.status_code != 200:
-                    raise APIError(f'API error {r.status_code}: {error_message(await r.aread())}')
-                async for line in r.aiter_lines():
-                    if not line.startswith('data:'):
-                        continue   # blank separators, ": keep-alive" comments
-                    data = line[5:].strip()
-                    if data == '[DONE]':
-                        break
-                    event = json.loads(data)
-                    if 'error' in event:   # OpenRouter reports mid-stream failures this way
-                        raise APIError(error_message(data.encode()))
-                    for choice in event.get('choices', []):
-                        piece = (choice.get('delta') or {}).get('content')
-                        if piece:
-                            parts.append(piece)
-                            yield piece
-                        finish = choice.get('finish_reason') or finish
+            for round in range(MAX_ROUNDS + 1):
+                body = {'model': self.model, 'stream': True, 'max_tokens': MAX_TOKENS,
+                        'messages': [{'role': 'system', 'content': self.system}] + self.messages,
+                        'tools': openai_tools(), **self.extra}
+                if round == MAX_ROUNDS:
+                    body['tool_choice'] = 'none'
+                parts, calls = [], {}
+                async for piece in self._stream(body, parts, calls):
+                    yield piece
+                finish = self._finish
+                if finish == 'content_filter' and not parts and not calls:
+                    raise Refused('The model declined to answer that.')
+                message = {'role': 'assistant', 'content': ''.join(parts) or None}
+                if calls:
+                    message['tool_calls'] = [{'id': c['id'], 'type': 'function',
+                                              'function': {'name': c['name'], 'arguments': c['arguments']}}
+                                             for _, c in sorted(calls.items())]
+                else:
+                    message['content'] = message['content'] or ''
+                self.messages.append(message)
+                if finish == 'length':
+                    yield '\n[reply cut off: too long]'
+                if not calls:
+                    return
+                answered = set()
+                for tc in message['tool_calls']:
+                    try:
+                        args = json.loads(tc['function']['arguments'] or '{}')
+                        if not isinstance(args, dict):
+                            raise ValueError
+                    except ValueError:
+                        result = ToolResult('error', 'arguments were not valid JSON')
+                    else:
+                        call = ToolCall(tc['function']['name'], stringify(args))
+                        yield call
+                        result = call.result
+                    self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
+                                          'content': result.model_text()})
+                    answered.add(tc['id'])
         except BaseException:
-            self.messages.pop()
+            self._settle(start, answered)
             raise
-        if finish == 'content_filter' and not parts:
-            self.messages.pop()
-            raise Refused('The model declined to answer that.')
-        self.messages.append({'role': 'assistant', 'content': ''.join(parts)})
-        if finish == 'length':
-            yield '\n[reply cut off: too long]'
+
+    async def _stream(self, body, parts, calls):
+        """POST one streaming request; yields text, fills parts and calls
+        (index -> id/name/arguments), and leaves the finish reason in _finish."""
+        self._finish = None
+        async with self.client.stream('POST', 'chat/completions', json=body) as r:
+            if r.status_code != 200:
+                raise APIError(f'API error {r.status_code}: {error_message(await r.aread())}')
+            async for line in r.aiter_lines():
+                if not line.startswith('data:'):
+                    continue   # blank separators, ": keep-alive" comments
+                data = line[5:].strip()
+                if data == '[DONE]':
+                    break
+                event = json.loads(data)
+                if 'error' in event:   # OpenRouter reports mid-stream failures this way
+                    raise APIError(error_message(data.encode()))
+                for choice in event.get('choices', []):
+                    delta = choice.get('delta') or {}
+                    piece = delta.get('content')
+                    if piece:
+                        parts.append(piece)
+                        yield piece
+                    for tc in delta.get('tool_calls') or []:
+                        c = calls.setdefault(tc.get('index', 0), {'id': '', 'name': '', 'arguments': ''})
+                        c['id'] = tc.get('id') or c['id']
+                        fn = tc.get('function') or {}
+                        c['name'] = fn.get('name') or c['name']
+                        c['arguments'] += fn.get('arguments') or ''
+                    self._finish = choice.get('finish_reason') or self._finish
 
 
 def error_message(raw):

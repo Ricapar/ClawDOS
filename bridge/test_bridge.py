@@ -320,6 +320,15 @@ class FakeOpenAI:
             if last == 'midstream':
                 events = [{'choices': [{'delta': {'content': 'Half'}}]},
                           {'error': {'message': 'Provider fell over'}}]
+            elif last in ('use tool', 'bad args'):
+                args = ['{"path":', '"C:\\\\A.BAT"}'] if last == 'use tool' else ['{bad']
+                events = [{'choices': [{'delta': {'content': 'Reading.'}}]},
+                          {'choices': [{'delta': {'tool_calls': [
+                              {'index': 0, 'id': 'call_1', 'type': 'function',
+                               'function': {'name': 'read', 'arguments': args[0]}}]}}]}]
+                events += [{'choices': [{'delta': {'tool_calls': [
+                              {'index': 0, 'function': {'arguments': a}}]}}]} for a in args[1:]]
+                events.append({'choices': [{'delta': {}, 'finish_reason': 'tool_calls'}]})
             else:
                 pieces, finish = self.REPLIES.get(last, (['Fake ', 'says: ', last, '\nbye'], 'stop'))
                 events = [{'choices': [{'delta': {'content': p}}]} for p in pieces]
@@ -387,6 +396,25 @@ class Providers(BridgeTest):
         os.environ.pop('CXT_TEST_KEY')
         text, _, _ = await self.c.ask('/model fake')
         self.assertIn('set CXT_TEST_KEY', text)
+
+    async def test_openai_tool_call(self):
+        await self.c.ask('/model fake')
+        text, calls, verb = await self.c.ask_tools('use tool', lambda n, a: ('ok', '1 @ECHO OFF'))
+        self.assertEqual(verb, 'END')
+        self.assertEqual(calls, [('read', {'path': 'C:\\A.BAT'})])
+        body = self.fake.requests[-1][1]
+        self.assertEqual([m['role'] for m in body['messages']], ['system', 'user', 'assistant', 'tool'])
+        self.assertEqual(len(body['tools']), 14)
+        self.assertEqual(body['messages'][2]['tool_calls'][0]['function']['name'], 'read')
+        self.assertEqual(body['messages'][3], {'role': 'tool', 'tool_call_id': 'call_1',
+                                               'content': '1 @ECHO OFF'})
+        self.assertIn('Fake says: 1 @ECHO OFF', text)
+
+    async def test_openai_bad_json_args(self):
+        await self.c.ask('/model fake')
+        _, calls, verb = await self.c.ask_tools('bad args', lambda n, a: ('ok', 'x'))
+        self.assertEqual((calls, verb), ([], 'END'))
+        self.assertTrue(self.fake.requests[-1][1]['messages'][-1]['content'].startswith('Error:'))
 
     async def test_openai_failures(self):
         await self.c.ask('/model fake:fake-2')
