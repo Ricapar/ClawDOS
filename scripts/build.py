@@ -42,7 +42,7 @@ APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     'claude.exe': {'sources': ['src/claude/claude.cpp', 'lib/screen.c', 'lib/console.c',
                                'lib/xtbridge.cpp'],
-                   'model': 'c', 'mtcp': 'src/claude/claude.cfg'},
+                   'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini'}
