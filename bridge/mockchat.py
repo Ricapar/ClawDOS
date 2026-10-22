@@ -103,6 +103,8 @@ def tour_steps():
     steps = [
         ('sysinfo', {}, 'ok', 'DOS'),
         ('dir', {'path': 'C:\\'}, 'ok', 'AUTOEXEC.BAT'),
+        # an empty or missing floppy drive must fail, not prompt "Abort, Retry, Fail?"
+        ('dir', {'path': 'A:\\'}, 'error', None),
         ('write', {'path': 'C:\\CXTTOUR.TXT', 'text': TOUR_TEXT}, 'ok', None),
         ('read', {'path': 'c:\\cxttour.txt'}, 'ok', 'Hello from the tool tour.'),
         ('rename', {'from': 'C:\\CXTTOUR.TXT', 'to': 'C:\\CXTTOUR2.TXT'}, 'ok', None),

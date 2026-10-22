@@ -280,6 +280,17 @@ static void testRaster(void)
     ras_line(&big, -5, -5, 3, 3, 1);
     CHECK("raster: clipped line", plots == 4);
 
+    plots = 0;                        /* far off-screen coordinates (16-bit overflow) */
+    ras_line(&big, 0, 0, 20000, 5, 1);
+    CHECK("raster: very long line terminates", plots == 320);
+    plots = 0;
+    ras_line(&big, -10000, 0, 10000, 50, 1);
+    CHECK("raster: line across the screen from far away", plots > 0 && plots < 400);
+    memset(bitmap, 0, sizeof(bitmap));
+    plots = 0;
+    ras_box(&small, -30000, 2, 32767, 3, 1, 1);
+    CHECK("raster: huge filled box is clipped", plots == 2 * BW && count(1) == 2 * BW);
+
     memset(bitmap, 0, sizeof(bitmap));
     ras_box(&small, 5, 5, 20, 15, 2, 0);
     CHECK("raster: box outline", count(2) == 2 * 16 + 2 * 9);

@@ -81,7 +81,7 @@ static void teletype(const char *s)
 static void snapshot(ToolCtx *t)
 {
     const unsigned short __far *vram = (const unsigned short __far *)MK_FP(0xB800, 0);
-    char line[81];
+    char line[82];                    /* 80 columns, newline, NUL */
     int row, last = -1, col, n;
 
     for (row = 0; row < 25; row++)

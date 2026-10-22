@@ -210,6 +210,7 @@ const char *dos_error(int code)
     case 32: return "sharing violation";
     case 80: return "file exists";
     case 82: return "cannot make directory";
+    case 83: return "drive not ready or disk error";
     default: return "DOS error";
     }
 }

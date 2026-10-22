@@ -12,6 +12,7 @@
 #include <string.h>
 #include <conio.h>
 #include <i86.h>
+#include <dos.h>
 
 #include "toolapi.h"
 #include "dosfs.h"
@@ -41,6 +42,7 @@ static int unattended;
 static char callId[16];
 static char callName[16];
 static int argsOverflow;
+static int stopping;                  /* STOP sent; don't start anything new */
 
 
 /* --- the small tools ---------------------------------------------------------- */
@@ -234,11 +236,24 @@ static const ToolDef tools[] = {
 
 /* --- calls ---------------------------------------------------------------------- */
 
+/* DOS critical errors (no disk in A:, write-protected disk) fail the call
+   instead of printing "Abort, Retry, Fail?" over the chat and waiting. */
+static int __far criticalError(unsigned deverr, unsigned errcode, unsigned __far *devhdr)
+{
+    (void)deverr;
+    (void)errcode;
+    (void)devhdr;
+    return _HARDERR_FAIL;
+}
+
 void tools_init(int safeMode, int noUser)
 {
     safe = safeMode;
     unattended = noUser;
+    _harderr(criticalError);
 }
+
+void tools_stopping(int on) { stopping = on; }
 
 int tools_safe(void) { return safe; }
 void tools_toggle_safe(void) { safe = !safe; }
@@ -315,6 +330,11 @@ static void runCall(void)
 
     tout_reset(&t);
     t.unattended = unattended;
+    if (stopping) {                   /* sent before our STOP reached the bridge */
+        sprintf(text, "%s stopped", callId);
+        ui_send("DONE", text);
+        return;
+    }
     if (d == NULL) {
         ui_tool_header(callName, "");
         sprintf(text, "unknown tool %.20s", callName);
@@ -351,8 +371,10 @@ static void runCall(void)
         ui_tool_note(t.summary[0] ? t.summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
     sendResult(statusNames[status], &t);
-    if (status == TS_STOPPED)
+    if (status == TS_STOPPED) {
         ui_send("STOP", NULL);
+        stopping = 1;
+    }
     ui_tool_done();
 }
 

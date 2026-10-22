@@ -554,10 +554,12 @@ static void handleLine(const char *verb, const char *payload)
         else
             con_newline();
     } else if (!strcmp(verb, "END")) {
+        tools_stopping(0);
         if (*payload)
             note("Interrupted by user", A_ERR);
         finished();
     } else if (!strcmp(verb, "ERR")) {
+        tools_stopping(0);
         note(payload, A_ERR);
         finished();
     }
@@ -638,6 +640,9 @@ void ui_tool_busy(const char *verb)
 
 void ui_tool_done(void)
 {
+    /* Ctrl-Break during a tool (say, to stop a program under run) shouldn't
+       also end the chat. */
+    XTBridge::breakPressed = 0;
     toolVerb = NULL;
     drawStatus();
     placeCursor();
@@ -719,9 +724,10 @@ static void handleKey(unsigned key)
 
     switch (ch) {
     case KEY_ESC:
-        if (state != IDLE)
+        if (state != IDLE) {
             bridge.send("STOP");
-        else
+            tools_stopping(1);        /* calls already on their way won't run */
+        } else
             setInput("");
         return;
     case KEY_ENTER:

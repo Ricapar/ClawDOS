@@ -95,6 +95,8 @@ def tour_responder(bad_readback=False):
         if name == 'sysinfo':
             return 'ok', 'DOS 7.10\nRAM 640K total'
         if name == 'dir':
+            if args['path'].startswith('A:'):
+                return 'error', 'drive not ready or disk error'
             return 'ok', 'AUTOEXEC.BAT   312  2026-10-21'
         if name == 'read':
             if 'NOPE' in args['path']:
@@ -252,7 +254,7 @@ class Tools(BridgeTest):
     async def test_tooltour_reports(self):
         text, calls, verb = await self.c.ask_tools('!tooltour', tour_responder())
         self.assertEqual(verb, 'END')
-        self.assertEqual(len(calls), 17)
+        self.assertEqual(len(calls), 18)
         self.assertIn('tool tour: PASS', text)
         text, _, _ = await self.c.ask_tools('!tooltour', tour_responder(bad_readback=True))
         self.assertIn('tool tour: FAIL', text)
@@ -492,6 +494,28 @@ async def drive(chat, text, status='ok', stop_at_tool=False):
     return items
 
 
+class OpenAISettle(unittest.IsolatedAsyncioTestCase):
+    async def test_cancel_after_first_of_two_calls(self):
+        chat = providers.OpenAIChat(None, 'm', {'name': 'X'})
+
+        async def fake_stream(body, parts, calls):
+            calls[0] = {'id': 'a', 'name': 'sysinfo', 'arguments': '{}'}
+            calls[1] = {'id': 'b', 'name': 'dir', 'arguments': '{"path": "C:\\\\"}'}
+            chat._finish = 'tool_calls'
+            return
+            yield
+        chat._stream = fake_stream
+        gen = chat.reply('go')
+        first = await gen.__anext__()
+        first.result = ToolResult('ok', 'DOS')
+        second = await gen.__anext__()
+        self.assertEqual(second.name, 'dir')
+        await gen.aclose()                     # Esc while the second call runs
+        roles = [(m['role'], m.get('tool_call_id')) for m in chat.messages]
+        self.assertEqual(roles, [('user', None), ('assistant', None), ('tool', 'a'), ('tool', 'b')])
+        self.assertEqual(chat.messages[-1]['content'], 'Interrupted by the user.')
+
+
 class AnthropicTools(unittest.IsolatedAsyncioTestCase):
     def chat(self, rounds, **kw):
         self.fake = FakeAnthropic(rounds, **kw)
@@ -557,6 +581,19 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await drive(chat, 'again')
         self.assertEqual(chat.messages, before)
+
+    async def test_max_tokens_mid_tool_use_keeps_history_valid(self):
+        cut = (['Drawing.'], [text_block('Drawing.'), tool_block('toolu_9', 'draw', script='SCR')],
+               'max_tokens')
+        chat = self.chat([cut, DONE_ROUND])
+        items = await drive(chat, 'draw a lot')
+        self.assertFalse(any(isinstance(i, ToolCall) for i in items))
+        self.assertEqual(chat.messages[-1]['role'], 'user')
+        self.assertEqual(chat.messages[-1]['content'][0]['tool_use_id'], 'toolu_9')
+        self.assertTrue(chat.messages[-1]['content'][0]['is_error'])
+        await drive(chat, 'next')
+        self.assertEqual(self.fake.requests[-1]['messages'][-1]['content'][-1],
+                         {'type': 'text', 'text': 'next'})
 
     async def test_transcript_flattens_tools(self):
         chat = self.chat([TOOL_ROUND, DONE_ROUND])

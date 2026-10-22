@@ -11,15 +11,16 @@ void ras_plot(const Raster *r, int x, int y, int c)
         r->plot(r->ctx, x, y, c);
 }
 
-/* Bresenham. */
+/* Bresenham. The error terms are long: script coordinates can be far off
+   screen, and 16-bit arithmetic would overflow and never reach the end. */
 void ras_line(const Raster *r, int x1, int y1, int x2, int y2, int c)
 {
-    int dx = abs(x2 - x1), dy = -abs(y2 - y1);
+    long dx = labs((long)x2 - x1), dy = -labs((long)y2 - y1);
     int sx = x1 < x2 ? 1 : -1, sy = y1 < y2 ? 1 : -1;
-    int e = dx + dy;
+    long e = dx + dy;
 
     for (;;) {
-        int e2 = 2 * e;               /* decide both steps from the same error */
+        long e2 = 2 * e;              /* decide both steps from the same error */
         ras_plot(r, x1, y1, c);
         if (x1 == x2 && y1 == y2)
             break;
@@ -34,6 +35,7 @@ void ras_line(const Raster *r, int x1, int y1, int x2, int y2, int c)
     }
 }
 
+/* Clipped to the surface first, so huge spans cost nothing and x++ can't wrap. */
 static void hline(const Raster *r, int x1, int x2, int y, int c)
 {
     int x;
@@ -42,6 +44,12 @@ static void hline(const Raster *r, int x1, int x2, int y, int c)
         x1 = x2;
         x2 = x;
     }
+    if (y < 0 || y > r->maxY || x2 < 0 || x1 > r->maxX)
+        return;
+    if (x1 < 0)
+        x1 = 0;
+    if (x2 > r->maxX)
+        x2 = r->maxX;
     for (x = x1; x <= x2; x++)
         ras_plot(r, x, y, c);
 }
@@ -55,6 +63,10 @@ void ras_box(const Raster *r, int x1, int y1, int x2, int y2, int c, int fill)
         y2 = t;
     }
     if (fill) {
+        if (y1 < 0)
+            y1 = 0;
+        if (y2 > r->maxY)
+            y2 = r->maxY;
         for (y = y1; y <= y2; y++)
             hline(r, x1, x2, y, c);
     } else {

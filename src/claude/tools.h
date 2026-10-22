@@ -7,6 +7,10 @@ void tools_init(int safe, int unattended);
 int  tools_safe(void);
 void tools_toggle_safe(void);
 
+/* After STOP is sent and until the reply ends, calls that still arrive are
+   answered "stopped" without running. */
+void tools_stopping(int on);
+
 /* Handle a protocol line if it belongs to a tool call; returns 1 if consumed.
    A CALL runs the tool before returning. */
 int  tools_line(const char *verb, const char *payload);

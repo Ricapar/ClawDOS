@@ -309,10 +309,16 @@ class AnthropicChat:
                     final = await stream.get_final_message()
                 if final.stop_reason == 'refusal':
                     raise Refused('Claude declined to answer that.')
-                self.messages.append({'role': 'assistant', 'content': echo_blocks(final.content)})
+                kept = echo_blocks(final.content)
+                self.messages.append({'role': 'assistant', 'content': kept})
                 if final.stop_reason == 'max_tokens':
                     yield '\n[reply cut off: too long]'
                 if final.stop_reason != 'tool_use':
+                    # A reply cut off mid-call leaves a tool_use that must be answered.
+                    cut = [tool_result(_get(b, 'id'), ToolResult('error', 'reply cut off before the call was complete'))
+                           for b in kept if _get(b, 'type') == 'tool_use']
+                    if cut:
+                        self.messages.append({'role': 'user', 'content': cut})
                     return
                 for block in final.content:
                     if block.type == 'tool_use':
@@ -348,9 +354,10 @@ class OpenAIChat:
         if not any(m['role'] == 'assistant' for m in self.messages[start:]):
             del self.messages[start:]
             return
-        last = self.messages[-1]
-        open_calls = last.get('tool_calls') or [] if last['role'] == 'assistant' else []
-        for tc in open_calls:
+        # The last assistant message may already be followed by some answers.
+        last = next(m for m in reversed(self.messages) if m['role'] == 'assistant')
+        answered = {m.get('tool_call_id') for m in self.messages if m['role'] == 'tool'}
+        for tc in last.get('tool_calls') or []:
             if tc['id'] not in answered:
                 self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
                                       'content': ToolResult('stopped', '').model_text()})
