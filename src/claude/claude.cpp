@@ -6,7 +6,10 @@
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAUDE [host[:port]] [-nosnow] [-m message] [-i text]
+ *   CLAUDE [host[:port]] [-nosnow] [-unsafe] [-q] [-m message] [-i text]
+ *
+ * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
+ * anything that would change files, memory or ports asks first.
  *
  * Without a host, uses CLAUDE_BRIDGE from the mTCP config file (MTCPCFG), and
  * CLAUDE_TOKEN if the bridge requires one.
@@ -23,6 +26,8 @@
 #include "xtbridge.h"
 #include "screen.h"
 #include "console.h"
+#include "tools.h"
+#include "ui.h"
 
 #define VERSION   "0.2"
 #define INPUT_MAX 900
@@ -66,6 +71,7 @@
 #define KEY_CTRLU 21
 #define SCAN_F1   0x3B
 #define SCAN_F2   0x3C
+#define SCAN_F3   0x3D
 #define SCAN_F10  0x44
 #define SCAN_ALTX 0x2D
 #define SCAN_HOME 0x47
@@ -84,6 +90,8 @@ static XTBridge bridge;
 static State state = IDLE;
 static int quitting;
 static int queued;                    /* Enter pressed while Claude was busy */
+static int quitAfterReply;            /* -q: leave once the -m message is answered */
+static const char *toolVerb;          /* spinner verb while a tool runs */
 static char host[80];
 static char backend[80];
 
@@ -172,7 +180,7 @@ static void drawStatus(void)
         int col;
 
         r.c[1] = spinGlyphs[(unsigned)(now >> 1) & 7] | (A_CLAWD << 8);
-        col = rowText(r, 3, verbs[verbIndex], A_ACCENT);
+        col = rowText(r, 3, toolVerb ? toolVerb : verbs[verbIndex], A_ACCENT);
         col = rowText(r, col, "... ", A_ACCENT);
         sprintf(buf, "(%us %c esc to interrupt%s)", secs, G_DOT,
                 queued ? " \xFA 1 message queued" : "");
@@ -248,7 +256,9 @@ static void drawHint(void)
     int col;
 
     rowBlank(r);
-    rowText(r, 2, "F1 help \xFA F2 new chat \xFA PgUp/PgDn scroll \xFA F10 quit", A_DIM);
+    col = rowText(r, 2, "F1 help \xFA F2 new chat \xFA F3 ", A_DIM);
+    col = rowText(r, col, tools_safe() ? "safe:on" : "safe:off", tools_safe() ? A_GOOD : A_ERR);
+    rowText(r, col, " \xFA PgUp/PgDn \xFA F10 quit", A_DIM);
     col = SCR_COLS - 2 - strlen(host) - 2;
     r.c[col] = G_BULLET | ((bridge.isConnected() ? A_GOOD : A_ERR) << 8);
     rowText(r, col + 2, host, A_DIM);
@@ -357,6 +367,7 @@ static void showHelp(void)
         "\x18/\x19 recall earlier messages \xFA \x1B/\x1A Home End Del edit \xFA Ctrl-U clears",
         "PgUp/PgDn scroll back \xFA F2 or /new starts over \xFA F10 or /quit leaves",
         "/model lists the bridge's AI providers \xFA /model name switches",
+        "F3 toggles safe mode (asks before tools change files, memory or ports)",
         0
     };
     blankLine();
@@ -410,7 +421,7 @@ static void welcome(void)
         switch (i) {
         case 2: rowText(r, R, "Tips for getting started", A_ACCENT); break;
         case 3: rowText(r, R, "Type below and press Enter to chat", A_TEXT, RW); break;
-        case 4: rowText(r, R, "Esc stops a reply \xFA F2 starts over", A_TEXT, RW); break;
+        case 4: rowText(r, R, "Esc stops \xFA F2 new chat \xFA F3 safe", A_TEXT, RW); break;
         case 5: rowText(r, R, "PgUp/PgDn scroll back \xFA F1 help", A_TEXT, RW); break;
         case 6:
             rowFill(r, MID + 1, SCR_COLS - MID - 2, G_H, A_CLAWD);
@@ -479,6 +490,8 @@ static void submit(void);
 static void finished(void)
 {
     setState(IDLE);
+    if (quitAfterReply && !queued)
+        quitting = 1;
     if (queued) {
         queued = 0;
         submit();
@@ -527,6 +540,8 @@ static void submit(void)
 
 static void handleLine(const char *verb, const char *payload)
 {
+    if (tools_line(verb, payload))
+        return;
     if (!strcmp(verb, "TXT") || !strcmp(verb, "NL")) {
         if (scr_viewing())
             scr_view(0);
@@ -546,6 +561,102 @@ static void handleLine(const char *verb, const char *payload)
         note(payload, A_ERR);
         finished();
     }
+}
+
+
+/* --- tool calls (ui.h) ----------------------------------------------------- */
+
+void ui_tool_header(const char *title, const char *arg)
+{
+    char buf[SCR_COLS];
+
+    if (scr_viewing())
+        scr_view(0);
+    if (state == STREAMING)
+        state = WAITING;              /* text after the tool starts a new bullet */
+    if (*arg)
+        sprintf(buf, "%.20s(%.60s", title, arg);
+    else
+        sprintf(buf, "%.20s", title);
+    if (strlen(buf) > SCR_COLS - 6)
+        strcpy(buf + SCR_COLS - 9, "...");
+    blankLine();
+    con_margins(0, SCR_COLS - 1);
+    con_attr(A_GOOD);
+    con_putc(G_BULLET);
+    con_putc(' ');
+    con_margins(2, SCR_COLS - 1);
+    con_attr(A_BRIGHT);
+    con_write(buf);
+    if (*arg)
+        con_write(")");
+    con_newline();
+}
+
+void ui_tool_detail(const char *text)
+{
+    con_margins(0, SCR_COLS - 1);
+    con_attr(A_DIM);
+    con_write("    ");
+    con_margins(4, SCR_COLS - 1);
+    con_write(text);
+    con_newline();
+}
+
+void ui_tool_note(const char *text, int error)
+{
+    note(text, error ? A_ERR : A_DIM);
+}
+
+int ui_ask(const char *question)
+{
+    Row r;
+    int key;
+
+    rowBlank(r);
+    rowText(r, 1, "? ", A_ACCENT);
+    rowText(r, 3, question, A_BRIGHT);
+    scr_putn(footerTop(), 0, r.c, SCR_COLS);
+    while (biosIsKeyReady())          /* typed before the question appeared */
+        biosKeyRead();
+    do {
+        key = biosKeyRead() & 0xFF;
+        if (key == 'Y')
+            key = 'y';
+        if (key == 'N')
+            key = 'n';
+    } while (key != 'y' && key != 'n' && key != KEY_ESC);
+    drawStatus();
+    return key;
+}
+
+void ui_tool_busy(const char *verb)
+{
+    toolVerb = verb;
+    drawStatus();
+}
+
+void ui_tool_done(void)
+{
+    toolVerb = NULL;
+    drawStatus();
+    placeCursor();
+}
+
+void ui_redraw(void)
+{
+    scr_footer(footerRows(), A_TEXT);
+    drawFooter();
+}
+
+int ui_send(const char *verb, const char *payload)
+{
+    return bridge.send(verb, payload);
+}
+
+void ui_local_address(char *buf)
+{
+    XTBridge::localAddress(buf);
 }
 
 
@@ -580,6 +691,14 @@ static void handleKey(unsigned key)
         case SCAN_ALTX: quitting = 1; break;
         case SCAN_F1:   showHelp(); break;
         case SCAN_F2:   if (state == IDLE) newChat(); break;
+        case SCAN_F3:
+            tools_toggle_safe();
+            note(tools_safe() ? "Safe mode on: changes need your OK."
+                              : "Safe mode off: tools run without asking.",
+                 tools_safe() ? A_GOOD : A_ERR);
+            drawHint();
+            placeCursor();
+            return;
         case SCAN_LEFT:  if (inputPos > 0) inputPos--; break;
         case SCAN_RIGHT: if (inputPos < inputLen) inputPos++; break;
         case SCAN_HOME:  inputPos = 0; break;
@@ -674,7 +793,7 @@ int main(int argc, char *argv[])
 {
     char token[64] = "";
     char note_[120];
-    int nosnow = 0;
+    int nosnow = 0, unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     int i;
@@ -682,15 +801,21 @@ int main(int argc, char *argv[])
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-nosnow") || !stricmp(argv[i], "/nosnow")) {
             nosnow = 1;
+        } else if (!stricmp(argv[i], "-unsafe") || !stricmp(argv[i], "/unsafe")) {
+            unsafe = 1;
+        } else if (!stricmp(argv[i], "-q") || !stricmp(argv[i], "/q")) {
+            quick = 1;
         } else if ((!stricmp(argv[i], "-m") || !stricmp(argv[i], "/m")) && i + 1 < argc) {
             firstMessage = argv[++i];
         } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
             printf("CLAUDE " VERSION " - chat with Claude via an XTBridge\n\n"
-                   "Usage: CLAUDE [host[:port]] [-nosnow] [-m message] [-i text]\n\n"
+                   "Usage: CLAUDE [host[:port]] [-nosnow] [-unsafe] [-q] [-m message] [-i text]\n\n"
                    "Without a host, CLAUDE_BRIDGE from the mTCP config file is used.\n"
                    "-nosnow  skip CGA retrace waits (faster on clones and EGA/VGA)\n"
+                   "-unsafe  start with safe mode off: tools run without asking\n"
+                   "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
                    "-i       start with this text in the input box\n");
             return 1;
@@ -699,6 +824,8 @@ int main(int argc, char *argv[])
         }
     }
 
+    tools_init(!unsafe, quick);
+    quitAfterReply = quick && firstMessage != NULL;
     if (XTBridge::startStack())
         return 1;
     if (!host[0] && XTBridge::configValue("CLAUDE_BRIDGE", host, sizeof(host)) != 0) {

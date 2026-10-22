@@ -40,8 +40,9 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
-    'claude.exe': {'sources': ['src/claude/claude.cpp', 'lib/screen.c', 'lib/console.c',
-                               'lib/xtbridge.cpp'],
+    'claude.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
+                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c',
+                               'lib/sysinfo.c'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
     'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c'], 'model': 'l'},
 }

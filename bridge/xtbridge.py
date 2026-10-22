@@ -185,6 +185,7 @@ class Session:
         finally:
             self.tool = None
         log.info('%s tool %s %s -> %s', self.peer, call.id, call.name, result.status)
+        log.debug('%s tool %s result: %r', self.peer, call.id, result.text[:400])
         return result
 
     async def answer(self, text):
