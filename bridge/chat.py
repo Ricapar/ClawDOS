@@ -36,6 +36,11 @@ def converse(sock, rx, text):
         elif verb == b'ERR':
             print(f'\n[error: {rest}]')
             return True
+        elif verb == b'TOOL':        # this client runs no tools; say so
+            tool_id, _, name = rest.partition(' ')
+            print(f'[tool {name}]')
+        elif verb == b'CALL':
+            sock.sendall(b'OUT this client has no tools\nDONE ' + tool_id.encode() + b' error\n')
         sys.stdout.flush()
     return False
 

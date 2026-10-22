@@ -9,8 +9,14 @@ Ordinary messages get a canned conversational reply. Messages starting with
 """
 
 import asyncio
+import logging
 import random
 import re
+import shlex
+
+from tools import ToolCall
+
+log = logging.getLogger('mockchat')
 
 
 # Raised by backends' reply() generators; xtbridge.py handles them. They live
@@ -43,7 +49,82 @@ SCENARIOS = {
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the bridge hangs up mid-reply',
     '!history': 'what the mock remembers of this conversation',
+    '!tool': 'call one XT tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
+    '!tooltour': 'call every XT tool in turn and check the results',
+    '!draw': 'draw a sunset with the draw tool',
+    '!play': 'play a tune on the PC speaker',
 }
+
+DRAW_DEMO = """\
+SCREEN 1
+COLOR 1,0
+' sky is the blue background; palette 0 is green, red, brown
+LINE (0,150)-(319,199),1,BF
+CIRCLE (160,150),45,2
+PAINT (160,130),2,2
+LINE (0,150)-(319,150),3
+LINE (115,150)-(205,150),1
+' sun rays
+LINE (160,95)-(160,80),2
+LINE (125,110)-(112,98),2
+LINE (195,110)-(208,98),2
+LINE (110,135)-(92,130),2
+LINE (210,135)-(228,130),2
+' a house
+LINE (30,120)-(80,150),3,BF
+DRAW "C3 BM30,120 E25 F25"
+PAINT (55,110),3,3
+LINE (48,132)-(60,150),0,BF
+' trees
+CIRCLE (260,125),14,1
+PAINT (260,125),1,1
+LINE (260,139)-(260,150),3
+CIRCLE (290,130),10,1
+PAINT (290,130),1,1
+LINE (290,140)-(290,150),3
+' birds
+DRAW "C0 BM100,60 E4 F4 E4 F4"
+DRAW "C0 BM200,45 E3 F3 E3 F3"
+LOCATE 2,12
+PRINT "SUNSET ON THE XT"
+"""
+
+PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
+
+# The tool tour: (tool, args, expected status, text the result must contain).
+# Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
+TOUR_EXPECT = {'draw': 'error', 'play': 'error', 'run': 'error'}
+TOUR_DRAW = 'SCREEN 1\n' + '\n'.join(f'LINE ({i * 2},0)-({319 - i * 2},199),{1 + i % 3}'
+                                     for i in range(120)) + '\nLOCATE 12,15\nPRINT "TOUR"\n'
+TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
+
+
+def tour_steps():
+    steps = [
+        ('sysinfo', {}, 'ok', 'DOS'),
+        ('dir', {'path': 'C:\\'}, 'ok', 'AUTOEXEC.BAT'),
+        ('write', {'path': 'C:\\CXTTOUR.TXT', 'text': TOUR_TEXT}, 'ok', None),
+        ('read', {'path': 'c:\\cxttour.txt'}, 'ok', 'Hello from the tool tour.'),
+        ('rename', {'from': 'C:\\CXTTOUR.TXT', 'to': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
+        ('mkdir', {'path': 'C:\\CXTTDIR'}, 'ok', None),
+        ('delete', {'path': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
+        ('delete', {'path': 'C:\\*.BAT'}, 'error', None),
+        ('peek', {'addr': '0040:0000', 'len': '16'}, 'ok', None),
+        ('poke', {'addr': '0000:04F0', 'bytes': '43 58 54'}, 'ok', None),
+        ('peek', {'addr': '0000:04F0', 'len': '3'}, 'ok', '43 58 54'),
+        ('port', {'port': '61'}, 'ok', None),
+        ('textart', {'text': '~EClaude~C-XT'}, 'ok', None),
+        ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
+        ('draw', {'script': TOUR_DRAW}, 'ok', None),
+        ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
+        ('run', {'command': 'VER'}, 'ok', 'FreeDOS'),
+    ]
+    out = []
+    for name, args, status, want in steps:
+        if TOUR_EXPECT.get(name) == 'error':
+            status, want = 'error', None
+        out.append((name, args, status, want))
+    return out
 
 LOREM = (
     "The IBM Personal Computer XT, model 5160, arrived in March 1983. It kept "
@@ -132,7 +213,8 @@ class MockChat:
         command = text.split()[0].lower() if text.startswith('!') else None
         parts = []
         async for chunk in self.respond(command, text):
-            parts.append(chunk)
+            if isinstance(chunk, str):
+                parts.append(chunk)
             yield chunk
         # Only completed replies are remembered, as with the real backend.
         self.history.append((text, ''.join(parts)))
@@ -188,9 +270,54 @@ class MockChat:
         elif command == '!history':
             async for c in self.stream(self.describe_history()):
                 yield c
+        elif command == '!tool':
+            words = shlex.split(text, posix=False)[1:]
+            if not words:
+                yield 'Usage: !tool NAME key=value ...'
+                return
+            args = {}
+            for w in words[1:]:
+                key, _, value = w.strip('"').partition('=')
+                args[key] = value.strip('"')
+            async for c in self.call(words[0], args):
+                yield c
+        elif command == '!draw':
+            async for c in self.call('draw', {'script': DRAW_DEMO}):
+                yield c
+        elif command == '!play':
+            async for c in self.call('play', {'music': PLAY_DEMO}):
+                yield c
+        elif command == '!tooltour':
+            async for c in self.tooltour():
+                yield c
         else:
             async for c in self.stream(f'Unknown test command {command}. Send !help for the list.'):
                 yield c
+
+    async def call(self, name, args):
+        """Announce a tool call (without ending the line), make it, report it."""
+        async for c in self.stream(f'Calling {name}.'):
+            yield c
+        call = ToolCall(name, args)
+        yield call
+        result = call.result
+        async for c in self.stream(f'{name} -> {result.status}: {result.text[:300]}', per_token=0.005):
+            yield c
+
+    async def tooltour(self):
+        yield 'Touring the XT tools.\n'
+        failure = None
+        for i, (name, args, status, want) in enumerate(tour_steps(), 1):
+            call = ToolCall(name, args)
+            yield call
+            got = call.result
+            ok = got.status == status and (want is None or want in got.text)
+            yield f'{i:2}. {name}: {got.status}{"" if ok else "  <- expected " + status}\n'
+            if not ok and failure is None:
+                failure = f'step {i} {name}: got {got.status} {got.text[:60]!r}'
+        verdict = 'tool tour: PASS' if failure is None else f'tool tour: FAIL {failure}'
+        log.info(verdict)
+        yield verdict
 
     def small_talk(self, text):
         lowered = text.lower()

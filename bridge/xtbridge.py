@@ -27,6 +27,7 @@ import providers
 from cp437 import from_cp437, to_cp437
 from mockchat import Disconnect, MockAPIError, Refused
 from providers import APIError, Backends, ConfigError, transcript
+from tools import STATUSES, ToolCall, ToolResult, call_lines, unescape
 
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 8023
@@ -48,6 +49,8 @@ class Session:
         self.task = None
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
+        self.tools_sent = 0
+        self.tool = None             # (id, future, OUT chunks) of the call in progress
 
     async def send(self, verb, payload=b''):
         # Keep lines short for the XT's receive buffer; TXT can be split freely.
@@ -94,7 +97,14 @@ class Session:
         if not self.authed:
             await self.send('ERR', b'AUTH required')
             return True
-        if verb == 'INFO':
+        if verb == 'OUT':
+            if self.tool:
+                self.tool[2].append(from_cp437(rest))
+            else:
+                log.info('%s stray OUT ignored', self.peer)
+        elif verb == 'DONE':
+            self.tool_done(*(from_cp437(rest).split() + ['', ''])[:2])
+        elif verb == 'INFO':
             await self.send('INFO', to_cp437(self.backends.describe(self.chat)))
         elif verb == 'NEW':
             if self.task:
@@ -153,20 +163,51 @@ class Session:
         kept = f', keeping {len(history) // 2} earlier exchange(s)' if history else ''
         return f'Switched to {self.backends.describe(self.chat)}{kept}.'
 
+    def tool_done(self, id, status):
+        if not self.tool or self.tool[0] != id or status not in STATUSES:
+            log.info('%s stray DONE %s %s ignored', self.peer, id, status)
+            return
+        fut = self.tool[1]
+        if not fut.done():
+            fut.set_result(ToolResult(status, unescape(''.join(self.tool[2]))))
+        if status == 'stopped' and self.task:
+            self.task.cancel()       # Esc on the XT ends the whole turn
+
+    async def run_tool(self, call):
+        """Have the XT run one tool call; returns its ToolResult."""
+        self.tools_sent += 1
+        call.id = f't{self.tools_sent}'
+        self.tool = (call.id, asyncio.get_running_loop().create_future(), [])
+        try:
+            for verb, payload in call_lines(call.id, call):
+                await self.send(verb, to_cp437(payload))
+            result = await self.tool[1]
+        finally:
+            self.tool = None
+        log.info('%s tool %s %s -> %s', self.peer, call.id, call.name, result.status)
+        return result
+
     async def answer(self, text):
         log.info('%s >> %s', self.peer, text)
-        pending = ''
+        line_open = False            # sent text that isn't followed by NL yet
+        reply = self.chat.reply(text)
         try:
-            async for chunk in self.chat.reply(text):
-                pending += chunk
-                *lines, pending = pending.split('\n')
+            async for item in reply:
+                if isinstance(item, ToolCall):
+                    if line_open:    # the XT starts tool headers on a fresh line
+                        await self.send('NL')
+                        line_open = False
+                    item.result = await self.run_tool(item)
+                    continue
+                *lines, rest = item.split('\n')
                 for line in lines:
                     if line:
                         await self.send('TXT', to_cp437(line))
                     await self.send('NL')
-                if pending:
-                    await self.send('TXT', to_cp437(pending))
-                    pending = ''
+                    line_open = False
+                if rest:
+                    await self.send('TXT', to_cp437(rest))
+                    line_open = True
             await self.send('END')
         except asyncio.CancelledError:
             await self.send('END', b'stopped')
@@ -181,6 +222,8 @@ class Session:
         except Exception as e:  # report API trouble to the XT instead of dropping the link
             log.exception('reply failed')
             await self.send('ERR', to_cp437(describe_error(e)))
+        finally:
+            await reply.aclose()
 
 
 def describe_error(e):

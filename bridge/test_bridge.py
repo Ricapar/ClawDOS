@@ -14,7 +14,9 @@ import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mockchat  # noqa: E402
 import xtbridge  # noqa: E402
+from tools import escape, unescape  # noqa: E402
 
 
 class Client:
@@ -48,6 +50,64 @@ class Client:
                 return ''.join(out), verb, rest.decode('cp437')
 
 
+class ToolClient(Client):
+    """A fake XT that answers tool calls. respond(name, args) -> (status, text)."""
+
+    async def ask_tools(self, text, respond, raw=None):
+        """Send MSG; return (reply text, [(name, args)], final verb)."""
+        await self.send('MSG ' + text)
+        out, calls, call = [], [], None
+        while True:
+            verb, rest = await self.line()
+            if raw is not None:
+                raw.append(verb)
+            rest = rest.decode('cp437')
+            if verb == 'TXT':
+                out.append(rest)
+            elif verb == 'NL':
+                out.append('\n')
+            elif verb == 'TOOL':
+                tid, name = rest.split(' ', 1)
+                call = (tid, name, {})
+            elif verb == 'ARG':
+                key, _, chunk = rest.partition(' ')
+                call[2][key] = call[2].get(key, '') + chunk
+            elif verb == 'CALL':
+                tid, name, args = call
+                args = {k: unescape(v) for k, v in args.items()}
+                calls.append((name, args))
+                status, result = respond(name, args)
+                for i in range(0, len(result), 300):
+                    await self.send('OUT ' + escape(result[i:i + 300]))
+                await self.send(f'DONE {tid} {status}')
+            else:
+                return ''.join(out), calls, verb
+
+
+def tour_responder(bad_readback=False):
+    """Plausible XT answers for the mock's !tooltour."""
+    def respond(name, args):
+        if name in mockchat.TOUR_EXPECT and mockchat.TOUR_EXPECT[name] == 'error':
+            return 'error', f'unknown tool {name}'
+        if name == 'sysinfo':
+            return 'ok', 'DOS 7.10\nRAM 640K total'
+        if name == 'dir':
+            return 'ok', 'AUTOEXEC.BAT   312  2026-10-21'
+        if name == 'read':
+            if 'NOPE' in args['path']:
+                return 'error', 'file not found'
+            body = 'Hello from somewhere else.' if bad_readback else 'Hello from the tool tour.'
+            return 'ok', f'    1 {body}\n    2 Second line.'
+        if name == 'delete' and '*' in args['path']:
+            return 'error', 'no wildcards'
+        if name == 'peek' and args['addr'] == '0000:04F0':
+            return 'ok', '0000:04F0  43 58 54  CXT'
+        if name == 'run':
+            return 'ok', 'exit code 0\nFreeDOS kernel 2043'
+        return 'ok', 'done'
+    return respond
+
+
 class BridgeTest(unittest.IsolatedAsyncioTestCase):
     token = None
     speed = 0   # no delays
@@ -57,7 +117,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
                                      token=self.token, config=getattr(self, 'config', None))
         self.server = await xtbridge.start(args)
         port = self.server.sockets[0].getsockname()[1]
-        self.c = Client(*await asyncio.open_connection('127.0.0.1', port))
+        self.c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
         self.hello = await self.c.line()
 
     async def asyncTearDown(self):
@@ -140,6 +200,71 @@ class RealTiming(BridgeTest):
         await self.c.send('MSG !stall')
         await self.c.send('MSG again')
         self.assertEqual(await self.c.line(), ('ERR', b'busy'))
+        await self.c.send('STOP')
+        self.assertEqual(await self.c.line(), ('END', b'stopped'))
+        _, verb, _ = await self.c.ask('hi')
+        self.assertEqual(verb, 'END')
+
+
+class Tools(BridgeTest):
+    async def test_tool_roundtrip(self):
+        text, calls, verb = await self.c.ask_tools(
+            '!tool read path=C:\AUTOEXEC.BAT lines=5', lambda n, a: ('ok', '1 @ECHO OFF'))
+        self.assertEqual(verb, 'END')
+        self.assertEqual(calls, [('read', {'path': 'C:\AUTOEXEC.BAT', 'lines': '5'})])
+        self.assertIn('read -> ok: 1 @ECHO OFF', text)
+
+    async def test_text_flushed_before_tool(self):
+        raw = []
+        await self.c.ask_tools('!tool sysinfo', lambda n, a: ('ok', 'DOS'), raw)
+        i = raw.index('TOOL')
+        self.assertEqual(raw[i - 1], 'NL')
+
+    async def test_quoted_values(self):
+        _, calls, _ = await self.c.ask_tools('!tool write path=C:\X.TXT "text=hello world"',
+                                             lambda n, a: ('ok', 'wrote'))
+        self.assertEqual(calls[0][1]['text'], 'hello world')
+
+    async def test_long_arg_chunks(self):
+        raw = []
+        _, calls, verb = await self.c.ask_tools('!draw', lambda n, a: ('ok', 'drawn'), raw)
+        self.assertEqual(verb, 'END')
+        self.assertGreaterEqual(raw.count('ARG'), 2)
+        script = calls[0][1]['script']
+        self.assertEqual(script, mockchat.DRAW_DEMO)
+        self.assertIn('CIRCLE', script)
+
+    async def test_denied_and_error_statuses(self):
+        text, _, _ = await self.c.ask_tools('!tool delete path=C:\X', lambda n, a: ('denied', ''))
+        self.assertIn('-> denied', text)
+        text, _, _ = await self.c.ask_tools('!tool delete path=C:\X', lambda n, a: ('error', 'nope'))
+        self.assertIn('-> error: nope', text)
+
+    async def test_stray_done_ignored(self):
+        await self.c.send('DONE t9 ok')
+        await self.c.send('OUT junk')
+        await self.c.send('PING')
+        self.assertEqual(await self.c.line(), ('PONG', b''))
+
+    async def test_tooltour_reports(self):
+        text, calls, verb = await self.c.ask_tools('!tooltour', tour_responder())
+        self.assertEqual(verb, 'END')
+        self.assertEqual(len(calls), 17)
+        self.assertIn('tool tour: PASS', text)
+        text, _, _ = await self.c.ask_tools('!tooltour', tour_responder(bad_readback=True))
+        self.assertIn('tool tour: FAIL', text)
+
+
+class ToolTiming(BridgeTest):
+    speed = 1
+
+    async def test_stop_mid_tool_then_continue(self):
+        await self.c.send('MSG !tool sysinfo')
+        while True:
+            verb, rest = await self.c.line()
+            if verb == 'CALL':
+                break
+        await self.c.send('DONE t1 stopped')
         await self.c.send('STOP')
         self.assertEqual(await self.c.line(), ('END', b'stopped'))
         _, verb, _ = await self.c.ask('hi')
