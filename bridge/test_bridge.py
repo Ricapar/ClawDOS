@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -15,8 +16,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mockchat  # noqa: E402
+import providers  # noqa: E402
+import tools  # noqa: E402
 import xtbridge  # noqa: E402
-from tools import escape, unescape  # noqa: E402
+from tools import ToolCall, ToolResult, escape, unescape  # noqa: E402
 
 
 class Client:
@@ -397,6 +400,141 @@ class Providers(BridgeTest):
         await self.c.ask('ok')   # only completed replies are remembered
         roles = [m['role'] for m in self.fake.requests[-1][1]['messages']]
         self.assertEqual(roles, ['system', 'user', 'assistant', 'user'])
+
+
+class FakeAnthropic:
+    """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
+    (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
+
+    def __init__(self, rounds, repeat_last=False):
+        self.rounds = list(rounds)
+        self.repeat_last = repeat_last
+        self.requests = []
+        self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(stream=self.stream))
+
+    def stream(self, **kw):
+        self.requests.append(copy.deepcopy(kw))
+        r = self.rounds[0] if self.repeat_last and len(self.rounds) == 1 else self.rounds.pop(0)
+        fake = self
+
+        class Stream:
+            async def __aenter__(self):
+                if isinstance(r, Exception):
+                    raise r
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            @property
+            async def text_stream(self):
+                for t in r[0]:
+                    yield t
+
+            async def get_final_message(self):
+                return types.SimpleNamespace(content=r[1], stop_reason=r[2])
+        del fake
+        return Stream()
+
+
+def text_block(t):
+    return types.SimpleNamespace(type='text', text=t)
+
+
+def tool_block(id, name, **args):
+    return types.SimpleNamespace(type='tool_use', id=id, name=name, input=args)
+
+
+TOOL_ROUND = (['Looking.'], [text_block('Looking.'), tool_block('toolu_1', 'read', path='C:\\A.BAT')],
+              'tool_use')
+DONE_ROUND = (['done'], [text_block('done')], 'end_turn')
+
+
+async def drive(chat, text, status='ok', stop_at_tool=False):
+    """Run chat.reply, answering each ToolCall; returns the yielded items."""
+    items = []
+    gen = chat.reply(text)
+    async for item in gen:
+        items.append(item)
+        if isinstance(item, ToolCall):
+            if stop_at_tool:
+                await gen.aclose()
+                break
+            item.result = ToolResult(status, f'result of {item.name}')
+    return items
+
+
+class AnthropicTools(unittest.IsolatedAsyncioTestCase):
+    def chat(self, rounds, **kw):
+        self.fake = FakeAnthropic(rounds, **kw)
+        return providers.AnthropicChat(self.fake, 'claude-test', 'low', {'name': 'Claude'})
+
+    async def test_tool_round(self):
+        chat = self.chat([TOOL_ROUND, DONE_ROUND])
+        items = await drive(chat, 'show me')
+        self.assertEqual(items[0], 'Looking.')
+        self.assertIsInstance(items[1], ToolCall)
+        self.assertEqual((items[1].name, items[1].args), ('read', {'path': 'C:\\A.BAT'}))
+        self.assertEqual(items[2:], ['done'])
+        req = self.fake.requests[1]
+        self.assertEqual(len(req['tools']), 14)
+        msgs = req['messages']
+        self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
+        self.assertEqual(msgs[2]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',
+                                               'content': 'result of read', 'is_error': False}])
+        self.assertIn('real IBM PC XT', req['system'])
+
+    async def test_parallel_tool_uses(self):
+        both = ([], [tool_block('a', 'sysinfo'), tool_block('b', 'dir', path='C:\\')], 'tool_use')
+        chat = self.chat([both, DONE_ROUND])
+        items = await drive(chat, 'go', status='denied')
+        self.assertEqual([i.name for i in items if isinstance(i, ToolCall)], ['sysinfo', 'dir'])
+        results = self.fake.requests[1]['messages'][2]['content']
+        self.assertEqual([r['tool_use_id'] for r in results], ['a', 'b'])
+        self.assertTrue(all(r['is_error'] for r in results))
+        self.assertEqual(results[0]['content'], 'The user denied this tool call.')
+
+    async def test_round_cap(self):
+        chat = self.chat([TOOL_ROUND], repeat_last=True)
+        await drive(chat, 'loop forever')
+        self.assertEqual(len(self.fake.requests), tools.MAX_ROUNDS + 1)
+        last = self.fake.requests[-1]
+        self.assertEqual(last['tool_choice'], {'type': 'none'})
+        self.assertNotIn('tool_choice', self.fake.requests[0])
+        self.assertEqual(last['messages'][-1]['content'][-1],
+                         {'type': 'text', 'text': 'Tool limit reached; answer now without tools.'})
+
+    async def test_settle_after_cancel(self):
+        chat = self.chat([TOOL_ROUND, DONE_ROUND])
+        await drive(chat, 'show me', stop_at_tool=True)
+        last = chat.messages[-1]
+        self.assertEqual(last['role'], 'user')
+        self.assertEqual(last['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',
+                                            'content': 'Interrupted by the user.', 'is_error': True}])
+        await drive(chat, 'next')
+        sent = self.fake.requests[-1]['messages'][-1]['content']
+        self.assertEqual(sent[0]['type'], 'tool_result')
+        self.assertEqual(sent[-1], {'type': 'text', 'text': 'next'})
+
+    async def test_error_before_any_reply_pops_user(self):
+        chat = self.chat([RuntimeError('boom')])
+        with self.assertRaises(RuntimeError):
+            await drive(chat, 'hi')
+        self.assertEqual(chat.messages, [])
+
+    async def test_error_after_merge_removes_only_text(self):
+        chat = self.chat([TOOL_ROUND, RuntimeError('boom')])
+        await drive(chat, 'show me', stop_at_tool=True)
+        before = copy.deepcopy(chat.messages)
+        with self.assertRaises(RuntimeError):
+            await drive(chat, 'again')
+        self.assertEqual(chat.messages, before)
+
+    async def test_transcript_flattens_tools(self):
+        chat = self.chat([TOOL_ROUND, DONE_ROUND])
+        await drive(chat, 'show me')
+        self.assertEqual(providers.transcript(chat),
+                         [('user', 'show me'), ('assistant', 'Looking.\n[read C:\\A.BAT -> ok]\ndone')])
 
 
 if __name__ == '__main__':

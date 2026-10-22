@@ -26,6 +26,10 @@ import os
 import tomllib
 
 from mockchat import MockChat, Refused
+from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, stringify,
+                   summary)
+
+ROUND_CAP_NOTE = 'Tool limit reached; answer now without tools.'
 
 MAX_TOKENS = 16000
 FALLBACK_BETA = 'server-side-fallback-2026-07-01'
@@ -151,21 +155,72 @@ class Backends:
         self.clients.clear()
 
 
+def _get(block, key):
+    """A field of a content block, whether it is a dict or an SDK object."""
+    return block.get(key) if isinstance(block, dict) else getattr(block, key, None)
+
+
+def _result_status(content, is_error):
+    for status in ('denied', 'stopped'):
+        if content == ToolResult(status, '').model_text():
+            return status
+    if is_error or (is_error is None and str(content).startswith('Error: ')):
+        return 'error'
+    return 'ok'
+
+
+def _parse_args(arguments):
+    try:
+        return stringify(json.loads(arguments or '{}'))
+    except (ValueError, AttributeError):
+        return {}
+
+
 def transcript(chat):
-    """A chat's history as (role, text) pairs, for handing to another backend."""
+    """A chat's history as alternating (role, text) pairs, for handing to another
+    backend. Tool calls become one-line summaries inside the assistant's turn."""
     if isinstance(chat, MockChat):
         return [x for u, a in chat.history for x in (('user', u), ('assistant', a))]
-    out = []
+    entries, calls = [], {}
+
+    def finish(tool_id, content, is_error):
+        if tool_id in calls:
+            calls[tool_id].result = ToolResult(_result_status(content, is_error), '')
+
     for m in chat.messages:
-        c = m['content']
-        if not isinstance(c, str):
-            c = ''.join(getattr(b, 'text', '') for b in c if getattr(b, 'type', '') == 'text')
-        out.append((m['role'], c))
-    return out
+        role, content = m['role'], m.get('content')
+        if role == 'tool':                     # OpenAI tool result
+            finish(m.get('tool_call_id'), content, None)
+            continue
+        parts = []
+        if isinstance(content, str):
+            parts.append(content)
+        else:
+            for b in content or []:
+                kind = _get(b, 'type')
+                if kind == 'text':
+                    parts.append(_get(b, 'text'))
+                elif kind == 'tool_use':
+                    calls[_get(b, 'id')] = ToolCall(_get(b, 'name'), stringify(_get(b, 'input')))
+                    parts.append(calls[_get(b, 'id')])
+                elif kind == 'tool_result':
+                    finish(_get(b, 'tool_use_id'), _get(b, 'content'), _get(b, 'is_error'))
+        for tc in m.get('tool_calls') or []:   # OpenAI tool calls
+            calls[tc['id']] = ToolCall(tc['function']['name'], _parse_args(tc['function']['arguments']))
+            parts.append(calls[tc['id']])
+        parts = [p for p in parts if p]
+        if not parts:
+            continue                           # tool results: part of the assistant's turn
+        if entries and entries[-1][0] == role:
+            entries[-1][1].extend(parts)
+        else:
+            entries.append((role, parts))
+    return [(role, '\n'.join(summary(p) if isinstance(p, ToolCall) else p for p in parts))
+            for role, parts in entries]
 
 
 def system_prompt(p):
-    return SYSTEM_PROMPT.format(name=p.get('name', 'a helpful AI assistant'))
+    return SYSTEM_PROMPT.format(name=p.get('name', 'a helpful AI assistant')) + '\n\n' + TOOLS_PROMPT
 
 
 # --- Claude (native API) -------------------------------------------------------
@@ -182,8 +237,18 @@ def echo_blocks(content):
     return keep
 
 
+def tool_result(tool_use_id, result):
+    return {'type': 'tool_result', 'tool_use_id': tool_use_id,
+            'content': result.model_text(), 'is_error': result.status != 'ok'}
+
+
 class AnthropicChat:
-    """One conversation with Claude. History is append-only."""
+    """One conversation with Claude, including rounds of tool use on the XT.
+
+    reply() yields text chunks and ToolCalls; whoever iterates sets each call's
+    result before asking for more. The history always stays valid for the API:
+    if a reply is cut short, tool calls left unanswered get an "interrupted"
+    result, and a reply that produced nothing is forgotten."""
 
     def __init__(self, client, model, effort, p):
         self.client = client
@@ -192,30 +257,73 @@ class AnthropicChat:
         self.system = system_prompt(p)
         self.messages = []
 
-    async def reply(self, text):
+    def _add_user(self, text):
+        """Append the user's text; after tool results it joins that message,
+        since roles must alternate. Returns (index before, merged)."""
+        start = len(self.messages)
+        last = self.messages[-1] if self.messages else None
+        if last and last['role'] == 'user' and isinstance(last['content'], list):
+            last['content'].append({'type': 'text', 'text': text})
+            return start, True
         self.messages.append({'role': 'user', 'content': text})
+        return start, False
+
+    def _settle(self, start, merged, results):
+        if not any(m['role'] == 'assistant' for m in self.messages[start:]):
+            if merged:
+                self.messages[start - 1]['content'].pop()
+            else:
+                del self.messages[start:]
+            return
+        last = self.messages[-1]
+        if last['role'] != 'assistant':
+            return
+        ids = [_get(b, 'id') for b in last['content'] if _get(b, 'type') == 'tool_use']
+        if ids:
+            answered = {r['tool_use_id'] for r in results}
+            missing = [tool_result(i, ToolResult('stopped', '')) for i in ids if i not in answered]
+            self.messages.append({'role': 'user', 'content': list(results) + missing})
+
+    async def reply(self, text):
+        start, merged = self._add_user(text)
+        results = []
         try:
-            async with self.client.beta.messages.stream(
-                model=self.model,
-                max_tokens=MAX_TOKENS,
-                system=self.system,
-                messages=self.messages,
-                output_config={'effort': self.effort},
-                betas=[FALLBACK_BETA],
-                fallbacks='default',
-            ) as stream:
-                async for chunk in stream.text_stream:
-                    yield chunk
-                final = await stream.get_final_message()
+            for round in range(MAX_ROUNDS + 1):
+                extra = {}
+                if round == MAX_ROUNDS:
+                    extra['tool_choice'] = {'type': 'none'}
+                    self.messages[-1]['content'].append({'type': 'text', 'text': ROUND_CAP_NOTE})
+                async with self.client.beta.messages.stream(
+                    model=self.model,
+                    max_tokens=MAX_TOKENS,
+                    system=self.system,
+                    messages=self.messages,
+                    tools=anthropic_tools(),
+                    output_config={'effort': self.effort},
+                    betas=[FALLBACK_BETA],
+                    fallbacks='default',
+                    **extra,
+                ) as stream:
+                    async for chunk in stream.text_stream:
+                        yield chunk
+                    final = await stream.get_final_message()
+                if final.stop_reason == 'refusal':
+                    raise Refused('Claude declined to answer that.')
+                self.messages.append({'role': 'assistant', 'content': echo_blocks(final.content)})
+                if final.stop_reason == 'max_tokens':
+                    yield '\n[reply cut off: too long]'
+                if final.stop_reason != 'tool_use':
+                    return
+                for block in final.content:
+                    if block.type == 'tool_use':
+                        call = ToolCall(block.name, stringify(block.input))
+                        yield call
+                        results.append(tool_result(block.id, call.result))
+                self.messages.append({'role': 'user', 'content': results})
+                results = []
         except BaseException:
-            self.messages.pop()  # never sent a reply; drop the dangling user turn
+            self._settle(start, merged, results)
             raise
-        if final.stop_reason == 'refusal':
-            self.messages.pop()
-            raise Refused('Claude declined to answer that.')
-        self.messages.append({'role': 'assistant', 'content': echo_blocks(final.content)})
-        if final.stop_reason == 'max_tokens':
-            yield '\n[reply cut off: too long]'
 
 
 # --- OpenAI-compatible chat completions ---------------------------------------
