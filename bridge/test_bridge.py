@@ -106,7 +106,7 @@ def tour_responder(bad_readback=False):
         if name == 'peek' and args['addr'] == '0000:04F0':
             return 'ok', '0000:04F0  43 58 54  CXT'
         if name == 'run':
-            return 'ok', 'exit code 0\nFreeDOS kernel 2043'
+            return 'ok', 'exit code 0\nFreeCom version 0.86'
         return 'ok', 'done'
     return respond
 

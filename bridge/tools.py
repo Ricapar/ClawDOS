@@ -83,8 +83,10 @@ TOOLS = [
      'description': "Run a DOS command line with COMMAND.COM /C (programs, .BAT files, "
                     "internal commands like DIR, TYPE, DEL). The screen switches to DOS while "
                     "it runs; you get the output it printed (or the final screen text) and the "
-                    "exit code. Programs cannot use the network, and there is no way to type "
-                    "into them, so avoid interactive programs.",
+                    "exit code, which FreeCOM passes through from the program (e.g. 2 for DIR "
+                    "of a missing file). Programs cannot use the network, there is no way to "
+                    "type into them, and Ctrl-C can't stop them, so avoid interactive or "
+                    "endless programs.",
      'params': {'command': ("The command line, at most 120 characters", True)}},
     {'name': 'poke', 'cls': 'W',
      'description': "Write bytes to memory. Careful: wrong addresses can crash the XT.",

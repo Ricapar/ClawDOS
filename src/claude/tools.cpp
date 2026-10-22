@@ -18,6 +18,7 @@
 #include "sysinfo.h"
 #include "sound.h"
 #include "gfx.h"
+#include "shell.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -193,6 +194,26 @@ static int toolDraw(ToolCtx *t)
     return TS_OK;
 }
 
+/* A DOS command on a plain DOS screen; the chat comes back afterwards. */
+static int toolRun(ToolCtx *t)
+{
+    const char *cmd = targ("command");
+    unsigned short *save;
+    int status;
+
+    if (cmd && strlen(cmd) > SHELL_CMD_MAX)
+        return tool_fail(t, "command too long (max 120)");
+    save = (unsigned short *)malloc(SCR_SAVE_BYTES);
+    if (save == NULL)
+        return tool_fail(t, "not enough memory to save the screen");
+    scr_suspend(save);
+    status = shell_run(t, cmd, unattended ? 1 : 5);
+    scr_resume(save);
+    free(save);
+    ui_redraw();
+    return status;
+}
+
 static const ToolDef tools[] = {
     { "sysinfo", "SysInfo", NULL,      'R', "Inspecting", toolSysinfo },
     { "dir",     "Dir",     "path",    'R', "Listing",    tool_dir },
@@ -207,6 +228,7 @@ static const ToolDef tools[] = {
     { "textart", "TextArt", NULL,      'H', "Painting",   toolTextart },
     { "play",    "Play",    NULL,      'H', "Playing",    tool_play },
     { "draw",    "Draw",    NULL,      'H', "Drawing",    toolDraw },
+    { "run",     "Run",     "command", 'W', "Running",    toolRun },
 };
 
 

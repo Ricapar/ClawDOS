@@ -93,7 +93,7 @@ PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E
 
 # The tool tour: (tool, args, expected status, text the result must contain).
 # Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
-TOUR_EXPECT = {'run': 'error'}
+TOUR_EXPECT = {}
 TOUR_DRAW = 'SCREEN 1\n' + '\n'.join(f'LINE ({i * 2},0)-({319 - i * 2},199),{1 + i % 3}'
                                      for i in range(120)) + '\nLOCATE 12,15\nPRINT "TOUR"\n'
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
@@ -117,7 +117,8 @@ def tour_steps():
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
         ('draw', {'script': TOUR_DRAW}, 'ok', None),
         ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
-        ('run', {'command': 'VER'}, 'ok', 'FreeDOS'),
+        # captured output, not the screen-text fallback
+        ('run', {'command': 'VER'}, 'ok', lambda r: 'FreeCom' in r and '(screen text)' not in r),
     ]
     out = []
     for name, args, status, want in steps:
@@ -311,7 +312,7 @@ class MockChat:
             call = ToolCall(name, args)
             yield call
             got = call.result
-            ok = got.status == status and (want is None or want in got.text)
+            ok = got.status == status and (want is None or (want(got.text) if callable(want) else want in got.text))
             yield f'{i:2}. {name}: {got.status}{"" if ok else "  <- expected " + status}\n'
             if not ok and failure is None:
                 failure = f'step {i} {name}: got {got.status} {got.text[:60]!r}'
