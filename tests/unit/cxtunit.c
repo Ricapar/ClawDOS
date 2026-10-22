@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "play.h"
+#include "basdraw.h"
 
 static int passed, failed;
 
@@ -107,10 +108,111 @@ static void testPlay(void)
     CHECK("play: total ms", total == 1500);
 }
 
+/* --- basdraw ---------------------------------------------------------------- */
+
+static int stmts;
+
+#define REC (rec + strlen(rec))
+static void dScreen(void *c, int m) { (void)c; sprintf(REC, "scr%d ", m); }
+static void dColor(void *c, int bg, int pal) { (void)c; sprintf(REC, "col%d,%d ", bg, pal); }
+static void dCls(void *c) { (void)c; strcat(rec, "cls "); }
+static void dPset(void *c, int x, int y, int k) { (void)c; sprintf(REC, "pset%d,%d,%d ", x, y, k); }
+static void dLine(void *c, int x1, int y1, int x2, int y2, int k)
+{ (void)c; sprintf(REC, "line%d,%d,%d,%d,%d ", x1, y1, x2, y2, k); }
+static void dBox(void *c, int x1, int y1, int x2, int y2, int k, int f)
+{ (void)c; sprintf(REC, "box%d,%d,%d,%d,%d,%d ", x1, y1, x2, y2, k, f); }
+static void dEll(void *c, int x, int y, int rx, int ry, int k)
+{ (void)c; sprintf(REC, "ell%d,%d,%d,%d,%d ", x, y, rx, ry, k); }
+static int dPaint(void *c, int x, int y, int k, int b)
+{ (void)c; sprintf(REC, "paint%d,%d,%d,%d ", x, y, k, b); return 0; }
+static void dText(void *c, int r, int col, const char *s, int k)
+{ (void)c; sprintf(REC, "text%d,%d,%s,%d ", r, col, s, k); }
+static void dSleep(void *c, int s) { (void)c; sprintf(REC, "sleep%d ", s); }
+static int dStop(void *c) { (void)c; return stopAfter && ++stmts >= stopAfter; }
+
+static const DrawOps recDraw = { 0, dScreen, dColor, dCls, dPset, dLine, dBox, dEll,
+                                 dPaint, dText, dSleep, dStop };
+
+static int draw(const char *script, char *err)
+{
+    rec[0] = 0;
+    stmts = 0;
+    err[0] = 0;
+    return bas_draw(script, &recDraw, err, 80);
+}
+
+static void drawIs(const char *name, const char *script, const char *want)
+{
+    char err[80];
+    int rc = draw(script, err);
+    if (rc != 0) {
+        CHECK_STR(name, err, "(no error)");
+        return;
+    }
+    CHECK_STR(name, rec, want);
+}
+
+static void drawFails(const char *name, const char *script, const char *want)
+{
+    char err[80];
+    int rc = draw(script, err);
+    CHECK(name, rc == -1);
+    CHECK_STR(name, err, want);
+}
+
+static void testDraw(void)
+{
+    char err[80];
+    int rc;
+
+    drawIs("draw: screen and pset", "SCREEN 1:PSET (10,20),2", "scr1 pset10,20,2 ");
+    drawIs("draw: default colour 3", "PSET (1,1)", "pset1,1,3 ");
+    drawIs("draw: screen 2 colour 1", "SCREEN 2\nPSET (1,1)", "scr2 pset1,1,1 ");
+    drawIs("draw: preset", "PRESET (4,5)", "pset4,5,0 ");
+    drawIs("draw: line and continuation", "LINE (0,0)-(10,10),1:LINE -(20,5)",
+           "line0,0,10,10,1 line10,10,20,5,3 ");
+    drawIs("draw: box fill", "LINE (0,0)-(5,5),2,BF", "box0,0,5,5,2,1 ");
+    drawIs("draw: box default colour", "LINE (0,0)-(5,5),,B", "box0,0,5,5,3,0 ");
+    drawIs("draw: step", "PSET (10,10):PSET STEP(5,-2)", "pset10,10,3 pset15,8,3 ");
+    drawIs("draw: circle aspect", "CIRCLE (160,100),50,1", "ell160,100,50,42,1 ");
+    drawIs("draw: circle given aspect", "CIRCLE (160,100),50,1,,,.5", "ell160,100,50,25,1 ");
+    drawIs("draw: circle tall", "CIRCLE (160,100),50,1,,,2", "ell160,100,25,50,1 ");
+    drawIs("draw: paint", "PAINT (5,5),1,3", "paint5,5,1,3 ");
+    drawIs("draw: paint border default", "PAINT (5,5),2", "paint5,5,2,2 ");
+    drawIs("draw: turtle", "DRAW \"BM10,10 R5 D5\"", "line10,10,15,10,3 line15,10,15,15,3 ");
+    drawIs("draw: turtle scale", "DRAW \"S8 BM0,0 R5\"", "line0,0,10,0,3 ");
+    drawIs("draw: turtle no-update", "DRAW \"BM0,0 NR5 D2\"", "line0,0,5,0,3 line0,0,0,2,3 ");
+    drawIs("draw: turtle diagonal colour", "DRAW \"BM0,10 C2 E3 M+2,1 M20,20\"",
+           "line0,10,3,7,2 line3,7,5,8,2 line5,8,20,20,2 ");
+    drawIs("draw: turtle angle", "DRAW \"BM10,10 A1 R5\"", "line10,10,10,5,3 ");
+    drawIs("draw: turtle any angle", "DRAW \"BM10,10 TA45 R10\"", "line10,10,17,3,3 ");
+    drawIs("draw: expressions", "PSET (100+20, 50*2)", "pset120,100,3 ");
+    drawIs("draw: parens and division", "PSET ((10+2)/4, -3+5)", "pset3,2,3 ");
+    drawIs("draw: line numbers and comments", "10 REM hi\n20 PSET (1,1) ' x", "pset1,1,3 ");
+    drawIs("draw: locate print", "LOCATE 2,3:PRINT \"HI\"", "text2,3,HI,3 ");
+    drawIs("draw: print advances", "PRINT \"A\"\nPRINT \"B\";\nPRINT \"C\"",
+           "text1,1,A,3 text2,1,B,3 text2,2,C,3 ");
+    drawIs("draw: color cls sleep", "COLOR 1,0:CLS:SLEEP 2", "col1,0 cls sleep2 ");
+    drawIs("draw: lowercase", "pset (1,2),1", "pset1,2,1 ");
+
+    drawFails("draw: missing paren", "PSET 10,10", "line 1: PSET: expected (");
+    drawFails("draw: unknown statement", "PSET (1,1)\nFOO", "line 2: FOO: unknown statement");
+    CHECK_STR("draw: statements before an error run", rec, "pset1,1,3 ");
+    drawFails("draw: bad screen", "SCREEN 7", "line 1: SCREEN: only SCREEN 1 or 2");
+    drawFails("draw: bad turtle", "DRAW \"Q5\"", "line 1: DRAW: unknown command Q");
+
+    stopAfter = 1;
+    rc = draw("PSET (1,1)\nPSET (2,2)", err);
+    stopAfter = 0;
+    CHECK("draw: stop returns 1", rc == 1);
+    CHECK_STR("draw: stop after one statement", rec, "pset1,1,3 ");
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
     testPlay();
+    testDraw();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

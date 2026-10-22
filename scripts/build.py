@@ -44,7 +44,7 @@ APPS = {
                                'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c',
                                'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
-    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c'], 'model': 'l'},
+    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/basdraw.c'], 'model': 'l'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini'}
