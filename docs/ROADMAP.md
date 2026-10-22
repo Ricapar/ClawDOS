@@ -55,6 +55,10 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       refusal fallbacks, CP437) with an offline mock backend (`--mock`) for testing without an API key.
 - [x] **M4 - CLAUDE.EXE**: streaming chat with word wrap, hardware scrolling,
       scrollback, stop/new-chat. Verified against the mock bridge in 86Box.
+- [x] **M4.5 - Tools**: Claude acts on the XT through CLAUDE.EXE: files, system
+      info, DOS commands, memory and ports, CGA drawing (GW-BASIC style), PC
+      speaker music (PLAY), text art; safe mode asks before changes (F3).
+      Design in [superpowers/specs/2026-10-21-xt-tools-design.md](superpowers/specs/2026-10-21-xt-tools-design.md).
 - [ ] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
 - [ ] **M6 - Foundation**: grow `lib/` (input line editor, windows/menus, EMS

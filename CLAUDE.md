@@ -8,13 +8,19 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Build everything: `python scripts/build.py` (apps -> build/*.EXE, disk -> build/CLAUDEXT.IMG).
   Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1;
-  `image/tests/net.bat` checks networking. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  `image/tests/net.bat` checks networking. `--bridge` runs the mock bridge alongside (log in build/bridge.log) and
+  `--expect TEXT` fails unless TEXT is in the serial or bridge log: `image/tests/tools.bat --bridge --expect
+  "tool tour: PASS"` runs every XT tool; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/cxtunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
   `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAUDE -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - Bridge: `python bridge/xtbridge.py [--mock]`; test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
+  Tools: schemas in bridge/tools.py, executors dispatched by src/claude/tools.cpp; mock `!tool NAME k=v` calls one,
+  `!tooltour` all. CLAUDE `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.
+- ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
+  the state they change `volatile`.
 - Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
 - Commit to main freely as checkpoints.
 

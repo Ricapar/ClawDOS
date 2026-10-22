@@ -58,12 +58,40 @@ earlier messages, PgUp/PgDn scroll back, F1 help, F2 new chat, F10 quits.
 `CLAUDE host:port` overrides the bridge address; `-m text` sends a message at
 startup and `-i text` pre-fills the input box (handy for hands-free tests).
 
+### Tools on the XT
+
+Claude can also act on the machine it's running on. The bridge offers the model
+a fixed set of tools; CLAUDE.EXE runs them and shows each call in the
+transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
+
+| Tool | What it does |
+|---|---|
+| `sysinfo`, `dir`, `read`, `peek` | Look at the system, directories, files (text or hex) and memory |
+| `write`, `delete`, `mkdir`, `rename` | Change files |
+| `run` | Run a DOS command on a plain DOS screen and read back what it printed |
+| `poke`, `port` | Write memory, read or write I/O ports |
+| `draw` | Draw a CGA picture from a GW-BASIC-style script (SCREEN, LINE, CIRCLE, PAINT, DRAW, PRINT...) |
+| `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
+| `textart` | Print coloured CP437 text art into the chat |
+
+**Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
+that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
+drawing and playing music never ask. `-unsafe` starts with it off, and `-q`
+quits once the `-m` message is answered (both for unattended tests). Esc
+during a tool stops the reply. Programs started by `run` can't use the network
+or be stopped with Ctrl-C, and get about 210K of memory.
+
+With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
+`!tool read path=C:\AUTOEXEC.BAT`), `!draw` and `!play` are demos, and
+`!tooltour` exercises every tool.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/claude/` | CLAUDE.EXE |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `sysinfo`, `shell`, `basdraw` + `raster` + `gfx` (drawing), `play` + `sound` (music) |
+| `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |
 | `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |

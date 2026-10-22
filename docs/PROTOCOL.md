@@ -35,6 +35,47 @@ itself rather than the model: `/model` lists the AI providers it knows, and
 backend, keeping its history. The reply arrives as ordinary `TXT`/`NL`/`END`
 lines, so clients need no special support; `INFO` reflects the new backend.
 
+## Tool calls
+
+The model can use tools that run on the XT. The bridge holds their schemas
+(`bridge/tools.py`) and runs the tool loop with the model; the client only
+executes calls. While a reply is in progress the bridge may send a call:
+
+| Server → client | Meaning |
+|---|---|
+| `TOOL <id> <name>` | A call begins. `id` is short (`t1`, `t2`, ...). |
+| `ARG <key> <chunk>` | An argument, escaped. Repeated lines for the same key append. |
+| `CALL` | All arguments sent: run it now. |
+
+| Client → server | Meaning |
+|---|---|
+| `OUT <chunk>` | Part of the result, escaped. Repeats. |
+| `DONE <id> <status>` | Finished: `ok`, `error`, `denied` (the user said no) or `stopped` (Esc). |
+
+Escaping: `\n` is a newline and `\\` a backslash; chunks never split an escape.
+Every argument is a string (numbers in decimal, booleans `1`/`0`). Server lines
+keep the 500-byte payload limit; a result is at most 4 KB. Text the model wrote
+before a call is always ended with `NL`, so the call starts on a fresh line.
+
+Calls run one at a time, then the reply continues with more `TXT`, `TOOL` or
+`END`. After `DONE <id> stopped` the client also sends `STOP`; the bridge ends
+the turn (`END stopped`) and tells the model the call was interrupted. At most
+25 rounds of tool calls happen per message. `OUT`/`DONE` with no call pending
+are ignored. A client that runs no tools answers every `CALL` with
+`DONE <id> error`.
+
+```
+S: TXT Let me look at your startup file.
+S: NL
+S: TOOL t1 read
+S: ARG path C:\AUTOEXEC.BAT
+S: CALL
+C: OUT     1 @ECHO OFF\n    2 PATH C:\DOS;C:\NET\n
+C: DONE t1 ok
+S: TXT Your PATH is missing ...
+S: END
+```
+
 The bridge keeps the conversation history, so the XT only ever holds what is on
 screen. Word wrapping is the client's job: the bridge doesn't know the screen
 width.
