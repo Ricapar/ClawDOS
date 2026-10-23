@@ -134,7 +134,8 @@ def build_app(name, spec, env):
                 show_output=ours, env=env)
     lnk = os.path.join(objdir, 'link.lnk')
     with open(lnk, 'w') as f:
-        f.write('system dos\noption quiet, map, eliminate, stack=4096\n')
+        mapfile = os.path.join(BUILD, os.path.splitext(name)[0] + '.map')
+        f.write(f'system dos\noption quiet, map={mapfile}, eliminate, stack=4096\n')
         f.write(f'name {os.path.join(BUILD, name)}\n')
         f.writelines(f'file {o}\n' for o in objs)
     run([find_tool('wlink', WATCOM_BINS), f'@{lnk}'], env=env)

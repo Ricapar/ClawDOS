@@ -31,8 +31,8 @@ static volatile unsigned long total;          /* bytes captured, including dropp
 static void (__interrupt __far *oldInt10)();
 
 /* Runs on the program's stack. Keep it free of calls to our own functions:
-   a helper called from here never ran in testing (most likely the large
-   model's SS == DGROUP assumption, which doesn't hold on a foreign stack). */
+   a helper called from here never ran in testing, and the cause wasn't found
+   (code compiled for SS == DGROUP running on a foreign stack is a suspect). */
 static void __interrupt __far int10Hook(union INTPACK r)
 {
     unsigned char c = r.h.al;
