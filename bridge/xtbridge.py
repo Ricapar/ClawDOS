@@ -22,6 +22,7 @@ ZAI_API_KEY, OPENAI_API_KEY) or a .env file in the repo root.
 import argparse
 import asyncio
 import logging
+import logging.handlers
 import os
 
 import providers
@@ -34,8 +35,22 @@ PROTOCOL_VERSION = 1
 DEFAULT_PORT = 8023
 MAX_LINE = 4096          # longest line accepted from a client
 MAX_TXT = 500            # longest payload sent to a client
+TRACE_TXT = 120          # TXT/OUT lines are cut to this in the wire trace
+DEFAULT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xtbridge.log')
 
 log = logging.getLogger('xtbridge')
+sessions = set()         # connected clients, for spotting stale ones
+connections = 0          # clients ever accepted
+
+
+def trace(peer, direction, raw):
+    """Log one protocol line (bytes, without the newline) at DEBUG."""
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+    text = raw.decode('cp437', 'replace')
+    if text[:4] in ('TXT ', 'OUT ') and len(text) > TRACE_TXT:
+        text = f'{text[:TRACE_TXT]}... ({len(raw)} bytes)'
+    log.debug('%s %s %s', peer, direction, text)
 
 
 # --- protocol ----------------------------------------------------------------
@@ -56,33 +71,53 @@ class Session:
     async def send(self, verb, payload=b''):
         # Keep lines short for the XT's receive buffer; TXT can be split freely.
         while verb == 'TXT' and len(payload) > MAX_TXT:
+            trace(self.peer, '>', b'TXT ' + payload[:MAX_TXT])
             self.writer.write(b'TXT ' + payload[:MAX_TXT] + b'\n')
             payload = payload[MAX_TXT:]
-        line = verb.encode('ascii') + (b' ' + payload[:MAX_TXT] if payload else b'') + b'\n'
-        self.writer.write(line)
+        line = verb.encode('ascii') + (b' ' + payload[:MAX_TXT] if payload else b'')
+        trace(self.peer, '>', line)
+        self.writer.write(line + b'\n')
         await self.writer.drain()
 
     async def run(self):
-        log.info('%s connected', self.peer)
-        await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{" AUTH" if self.args.token else ""}'.encode())
+        global connections
+        connections += 1
+        sessions.add(self)
+        log.info('%s connected (connection #%d, %d open)', self.peer, connections, len(sessions))
+        if len(sessions) > 1:
+            log.info('%s other open connections: %s', self.peer,
+                     ', '.join(str(s.peer) for s in sessions if s is not self))
+        why = 'closed by bridge'
         try:
+            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{" AUTH" if self.args.token else ""}'.encode())
             while True:
                 try:
                     raw = await self.reader.readuntil(b'\n')
                 except asyncio.LimitOverrunError:
+                    log.info('%s line over %d bytes', self.peer, MAX_LINE)
                     await self.send('ERR', b'line too long')
                     await self.reader.read(MAX_LINE)
                     continue
+                trace(self.peer, '<', raw.rstrip(b'\r\n'))
                 verb, _, rest = raw.rstrip(b'\r\n').partition(b' ')
                 if not await self.command(verb.decode('ascii', 'replace').upper(), rest):
+                    why = 'QUIT'
                     break
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
+        except asyncio.IncompleteReadError as e:
+            why = f'closed by client ({len(e.partial)} bytes of a partial line)' if e.partial else 'closed by client'
+        except ConnectionError as e:
+            why = f'{type(e).__name__}: {e}'
+        except Exception:
+            why = 'bridge error'
+            log.exception('%s session failed', self.peer)
         finally:
             if self.task:
                 self.task.cancel()
+            if self.tool:
+                log.info('%s tool %s was still waiting for the XT', self.peer, self.tool[0])
             self.writer.close()
-            log.info('%s disconnected', self.peer)
+            sessions.discard(self)
+            log.info('%s disconnected: %s (%d open)', self.peer, why, len(sessions))
 
     async def command(self, verb, rest):
         if verb == 'QUIT':
@@ -276,6 +311,24 @@ def load_env(path=os.path.join(os.path.dirname(__file__), '..', '.env')):
     return loaded
 
 
+def setup_logging(path, verbose):
+    """INFO (or DEBUG with -v) on the console; everything, including the wire
+    trace, in a rotating log file unless path is '-'."""
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    console = logging.StreamHandler()
+    console.setLevel(logging.DEBUG if verbose else logging.INFO)
+    console.setFormatter(logging.Formatter('%(asctime)s %(message)s', '%H:%M:%S'))
+    root.addHandler(console)
+    for noisy in ('httpx', 'httpcore', 'anthropic', 'asyncio'):
+        logging.getLogger(noisy).setLevel(logging.INFO)
+    if path != '-':
+        f = logging.handlers.RotatingFileHandler(path, maxBytes=5_000_000, backupCount=3, encoding='utf-8')
+        f.setFormatter(logging.Formatter('%(asctime)s.%(msecs)03d %(levelname).1s %(message)s', '%Y-%m-%d %H:%M:%S'))
+        root.addHandler(f)
+        log.info('Logging to %s', os.path.abspath(path))
+
+
 async def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--host', default='0.0.0.0')
@@ -291,10 +344,11 @@ async def main():
                     help='same as --provider mock: offline mock of Claude; send !help for test commands')
     ap.add_argument('--speed', type=float, default=1.0,
                     help='mock only: scale delays (2 = twice as fast, 0 = no delays)')
-    ap.add_argument('-v', '--verbose', action='store_true')
+    ap.add_argument('--log', default=DEFAULT_LOG, metavar='FILE',
+                    help='full debug log with a wire trace (default: bridge/xtbridge.log; "-" for none)')
+    ap.add_argument('-v', '--verbose', action='store_true', help='show the debug log on the console too')
     args = ap.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    setup_logging(args.log, args.verbose)
     loaded = load_env()
     if loaded:
         log.info('Loaded %s from .env', ', '.join(loaded))

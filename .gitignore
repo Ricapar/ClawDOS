@@ -13,3 +13,5 @@ __pycache__/
 /bridge/providers.toml
 # Local secrets (ANTHROPIC_API_KEY etc.; read by bridge/xtbridge.py)
 /.env
+# Bridge debug logs
+/bridge/xtbridge.log*
