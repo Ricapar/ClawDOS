@@ -351,7 +351,11 @@ class AnthropicChat:
                 async with self.client.beta.messages.stream(
                     model=self.model,
                     max_tokens=MAX_TOKENS,
-                    system=self.system,
+                    # Prompt caching: a breakpoint on the system prompt caches the
+                    # tools and system together; the top-level one follows the
+                    # growing conversation, so each round reads what the last wrote.
+                    system=[{'type': 'text', 'text': self.system, 'cache_control': {'type': 'ephemeral'}}],
+                    cache_control={'type': 'ephemeral'},
                     messages=self.messages,
                     tools=anthropic_tools(),
                     output_config={'effort': self.effort},

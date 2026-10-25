@@ -873,7 +873,10 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
         self.assertEqual(msgs[2]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',
                                                'content': 'result of read', 'is_error': False}])
-        self.assertIn('real IBM PC XT', req['system'])
+        self.assertIn('real IBM PC XT', req['system'][0]['text'])
+        # caching: a breakpoint on the system prompt (tools + system), automatic for the rest
+        self.assertEqual(req['system'][-1]['cache_control'], {'type': 'ephemeral'})
+        self.assertEqual(req['cache_control'], {'type': 'ephemeral'})
 
     async def test_parallel_tool_uses(self):
         both = ([], [tool_block('a', 'sysinfo'), tool_block('b', 'dir', path='C:\\')], 'tool_use')
