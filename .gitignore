@@ -15,3 +15,5 @@ __pycache__/
 /.env
 # Bridge debug logs (xtbridge.log, replay.log, saved sessions)
 /bridge/*.log*
+# Conversation logs (JSONL, bridge/convlog.py)
+/bridge/logs/

@@ -23,6 +23,7 @@ plain-text transcript, so switching providers mid-conversation keeps context.
 
 import json
 import os
+import time
 import tomllib
 
 from mockchat import MockChat, Refused
@@ -226,6 +227,33 @@ def system_prompt(p):
     return SYSTEM_PROMPT.format(name=p.get('name', 'a helpful AI assistant')) + '\n\n' + TOOLS_PROMPT
 
 
+def report(chat, round, started, first, **fields):
+    """Tell chat.on_api_call (set by the bridge's session, if any) about one API
+    round: model, stop_reason and usage in fields; started/first are monotonic
+    times of the request and of its first text (None if it had none)."""
+    callback = getattr(chat, 'on_api_call', None)
+    if callback:
+        now = time.monotonic()
+        callback({'round': round, **fields, 'ms': int((now - started) * 1000),
+                  'ttft_ms': int((first - started) * 1000) if first else None})
+
+
+def anthropic_usage(message):
+    u = getattr(message, 'usage', None)
+    return {'input': getattr(u, 'input_tokens', 0) or 0,
+            'output': getattr(u, 'output_tokens', 0) or 0,
+            'cache_read': getattr(u, 'cache_read_input_tokens', 0) or 0,
+            'cache_write': getattr(u, 'cache_creation_input_tokens', 0) or 0}
+
+
+def openai_usage(u):
+    u = u or {}
+    return {'input': u.get('prompt_tokens', 0) or 0,
+            'output': u.get('completion_tokens', 0) or 0,
+            'cache_read': (u.get('prompt_tokens_details') or {}).get('cached_tokens', 0) or 0,
+            'cache_write': 0}
+
+
 # --- Claude (native API) -------------------------------------------------------
 
 def echo_blocks(content):
@@ -296,6 +324,7 @@ class AnthropicChat:
                 if round == MAX_ROUNDS:
                     extra['tool_choice'] = {'type': 'none'}
                     self.messages[-1]['content'].append({'type': 'text', 'text': ROUND_CAP_NOTE})
+                started, first = time.monotonic(), None
                 async with self.client.beta.messages.stream(
                     model=self.model,
                     max_tokens=MAX_TOKENS,
@@ -308,8 +337,11 @@ class AnthropicChat:
                     **extra,
                 ) as stream:
                     async for chunk in stream.text_stream:
+                        first = first or time.monotonic()
                         yield chunk
                     final = await stream.get_final_message()
+                report(self, round, started, first, model=getattr(final, 'model', None) or self.model,
+                       stop_reason=final.stop_reason, usage=anthropic_usage(final))
                 if final.stop_reason == 'refusal':
                     raise Refused('Claude declined to answer that.')
                 kept = echo_blocks(final.content)
@@ -349,7 +381,9 @@ class OpenAIChat:
         self.model = model
         self.system = system_prompt(p)
         self.extra = p.get('extra', {})
+        self.stream_usage = p.get('stream_usage', True)   # false for servers that reject stream_options
         self.messages = []
+        self._finish = self._usage = self._served = self._first = None   # of the last round
 
     def _settle(self, start, answered):
         """After a failed or interrupted reply: forget it if nothing came back,
@@ -374,12 +408,17 @@ class OpenAIChat:
                 body = {'model': self.model, 'stream': True, 'max_tokens': MAX_TOKENS,
                         'messages': [{'role': 'system', 'content': self.system}] + self.messages,
                         'tools': openai_tools(), **self.extra}
+                if self.stream_usage:
+                    body['stream_options'] = {'include_usage': True}
                 if round == MAX_ROUNDS:
                     body['tool_choice'] = 'none'
                 parts, calls = [], {}
+                started = time.monotonic()
                 async for piece in self._stream(body, parts, calls):
                     yield piece
                 finish = self._finish
+                report(self, round, started, self._first, model=self._served or self.model,
+                       stop_reason=finish, usage=openai_usage(self._usage))
                 if finish == 'content_filter' and not parts and not calls:
                     raise Refused('The model declined to answer that.')
                 message = {'role': 'assistant', 'content': ''.join(parts) or None}
@@ -417,6 +456,7 @@ class OpenAIChat:
         """POST one streaming request; yields text, fills parts and calls
         (index -> id/name/arguments), and leaves the finish reason in _finish."""
         self._finish = None
+        self._usage = self._served = self._first = None
         async with self.client.stream('POST', 'chat/completions', json=body) as r:
             if r.status_code != 200:
                 raise APIError(f'API error {r.status_code}: {error_message(await r.aread())}')
@@ -427,12 +467,15 @@ class OpenAIChat:
                 if data == '[DONE]':
                     break
                 event = json.loads(data)
+                self._usage = event.get('usage') or self._usage
+                self._served = event.get('model') or self._served
                 if 'error' in event:   # OpenRouter reports mid-stream failures this way
                     raise APIError(error_message(data.encode()))
                 for choice in event.get('choices', []):
                     delta = choice.get('delta') or {}
                     piece = delta.get('content')
                     if piece:
+                        self._first = self._first or time.monotonic()
                         parts.append(piece)
                         yield piece
                     for tc in delta.get('tool_calls') or []:

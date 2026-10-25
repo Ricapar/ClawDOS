@@ -13,6 +13,7 @@ import asyncio
 import re
 from datetime import datetime
 
+from mockchat import report_round
 from tools import ToolCall, unescape
 
 LINE = re.compile(r'(\S+ \S+) \w (\(.*?\)) (>>|>|<) ?(.*)$')
@@ -86,6 +87,7 @@ class ReplayChat:
         self.history = []
 
     async def reply(self, text):
+        round = 0
         for n, (user, items) in enumerate(self.turns, 1):
             yield f'[replay {n}/{len(self.turns)}] > {user}\n'
             for delay, item in items:
@@ -93,6 +95,9 @@ class ReplayChat:
                     await asyncio.sleep(delay / self.speed)
                 if isinstance(item, ToolCall):
                     item = ToolCall(item.name, dict(item.args))   # fresh for each replay
+                    report_round(self, round, 'tool_use')
+                    round += 1
                 yield item
             yield '\n'
         yield '[replay finished]'
+        report_round(self, round, 'end_turn')

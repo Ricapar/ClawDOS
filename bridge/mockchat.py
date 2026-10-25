@@ -191,6 +191,15 @@ SMALL_TALK = [
 ]
 
 
+def report_round(chat, round, stop_reason):
+    """Offline backends' stand-in for providers.report: no tokens, no time."""
+    callback = getattr(chat, 'on_api_call', None)
+    if callback:
+        callback({'round': round, 'model': chat.model, 'stop_reason': stop_reason,
+                  'usage': {'input': 0, 'output': 0, 'cache_read': 0, 'cache_write': 0},
+                  'ms': 0, 'ttft_ms': None})
+
+
 class MockChat:
     """One mock conversation. `speed` scales every delay; 0 means no waiting."""
 
@@ -215,11 +224,15 @@ class MockChat:
     async def reply(self, text):
         await self.pause(self.rng.uniform(0.4, 1.2))   # time to first token
         command = text.split()[0].lower() if text.startswith('!') else None
-        parts = []
+        parts, round = [], 0
         async for chunk in self.respond(command, text):
             if isinstance(chunk, str):
                 parts.append(chunk)
+            else:
+                report_round(self, round, 'tool_use')
+                round += 1
             yield chunk
+        report_round(self, round, 'end_turn')
         # Only completed replies are remembered, as with the real backend.
         self.history.append((text, ''.join(parts)))
 

@@ -25,7 +25,9 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import time
 
+import convlog
 import providers
 import replay
 from cp437 import from_cp437, to_cp437
@@ -39,6 +41,7 @@ MAX_LINE = 4096          # longest line accepted from a client
 MAX_TXT = 500            # longest payload sent to a client
 TRACE_TXT = 120          # TXT/OUT lines are cut to this in the wire trace
 DEFAULT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xtbridge.log')
+DEFAULT_CONVLOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
 log = logging.getLogger('xtbridge')
 sessions = set()         # connected clients, for spotting stale ones
@@ -63,8 +66,10 @@ class Session:
         self.writer = writer
         self.args = args
         self.backends = backends
-        self.chat = backends.make(args.provider, args.model)
+        self.chat = self.attach(backends.make(args.provider, args.model))
         self.task = None
+        self.clog = convlog.NoLog()  # the conversation log, opened once numbered
+        self.turn = None             # usage and text of the reply in progress
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
         self.tools_sent = 0
@@ -86,6 +91,9 @@ class Session:
         connections += 1
         sessions.add(self)
         log.info('%s connected (connection #%d, %d open)', self.peer, connections, len(sessions))
+        self.clog = convlog.open_log(getattr(self.args, 'convlog', None), self.peer, connections)
+        self.clog.event('session_start', peer=self.peer_text(), connection=connections,
+                        protocol=PROTOCOL_VERSION, **self.chat_fields())
         if len(sessions) > 1:
             log.info('%s other open connections: %s', self.peer,
                      ', '.join(str(s.peer) for s in sessions if s is not self))
@@ -113,13 +121,43 @@ class Session:
             why = 'bridge error'
             log.exception('%s session failed', self.peer)
         finally:
-            if self.task:
-                self.task.cancel()
             if self.tool:
                 log.info('%s tool %s was still waiting for the XT', self.peer, self.tool[0])
+            if self.task and not self.task.done():
+                self.task.cancel()
+                await asyncio.wait([self.task], timeout=2)   # so its turn_end is logged first
             self.writer.close()
             sessions.discard(self)
             log.info('%s disconnected: %s (%d open)', self.peer, why, len(sessions))
+            self.clog.event('session_end', reason=why)
+            self.clog.close()
+
+    def peer_text(self):
+        return f'{self.peer[0]}:{self.peer[1]}' if self.peer else 'unknown'
+
+    def chat_fields(self):
+        """Which backend, model and system prompt the conversation is on."""
+        return {'provider': self.chat.provider, 'model': self.chat.model,
+                'effort': getattr(self.chat, 'effort', None), 'system': getattr(self.chat, 'system', None)}
+
+    def attach(self, chat):
+        chat.on_api_call = self.api_called
+        return chat
+
+    def api_called(self, info):
+        """A backend finished one API round (see providers.report)."""
+        self.flush_text()
+        self.clog.event('api_call', **info)
+        if self.turn:
+            self.turn['rounds'] += 1
+            self.turn['stop'] = info.get('stop_reason')
+            convlog.add_usage(self.turn['usage'], info.get('usage') or {})
+
+    def flush_text(self):
+        """Log the reply text streamed since the last flush as one event."""
+        if self.turn and self.turn['text']:
+            self.clog.event('assistant', text=''.join(self.turn['text']))
+            self.turn['text'] = []
 
     async def command(self, verb, rest):
         if verb == 'QUIT':
@@ -150,7 +188,8 @@ class Session:
         elif verb == 'NEW':
             if self.task:
                 self.task.cancel()
-            self.chat = self.backends.make(self.chat.provider, self.chat.model)
+            self.chat = self.attach(self.backends.make(self.chat.provider, self.chat.model))
+            self.clog.event('new_chat')
             await self.send('OK')
         elif verb == 'STOP':
             if self.task:
@@ -199,8 +238,10 @@ class Session:
         if not providers.has_key(table[key]):
             return f'{key} needs an API key: set {table[key]["api_key_env"]} where the bridge runs.'
         history = transcript(self.chat)
-        self.chat = self.backends.make(key, model or None, history)
+        before = self.backends.describe(self.chat)
+        self.chat = self.attach(self.backends.make(key, model or None, history))
         log.info('%s switched to %s', self.peer, self.backends.describe(self.chat))
+        self.clog.event('model_switch', previous=before, kept=len(history) // 2, **self.chat_fields())
         kept = f', keeping {len(history) // 2} earlier exchange(s)' if history else ''
         return f'Switched to {self.backends.describe(self.chat)}{kept}.'
 
@@ -219,28 +260,38 @@ class Session:
         self.tools_sent += 1
         call.id = f't{self.tools_sent}'
         self.tool = (call.id, asyncio.get_running_loop().create_future(), [])
+        self.clog.event('tool_call', id=call.id, name=call.name, args=call.args)
+        started = time.monotonic()
         try:
             for verb, payload in call_lines(call.id, call):
                 await self.send(verb, to_cp437(payload))
             result = await self.tool[1]
         finally:
             self.tool = None
+        self.clog.event('tool_result', id=call.id, status=result.status, text=result.text,
+                        ms=int((time.monotonic() - started) * 1000))
         log.info('%s tool %s %s -> %s', self.peer, call.id, call.name, result.status)
         log.debug('%s tool %s result: %r', self.peer, call.id, result.text[:400])
         return result
 
     async def answer(self, text):
         log.info('%s >> %s', self.peer, text)
+        self.clog.event('user', text=text)
+        self.turn = {'started': time.monotonic(), 'usage': convlog.no_usage(), 'rounds': 0,
+                     'text': [], 'stop': None}
+        outcome, detail = 'ok', None
         line_open = False            # sent text that isn't followed by NL yet
         reply = self.chat.reply(text)
         try:
             async for item in reply:
                 if isinstance(item, ToolCall):
+                    self.flush_text()
                     if line_open:    # the XT starts tool headers on a fresh line
                         await self.send('NL')
                         line_open = False
                     item.result = await self.run_tool(item)
                     continue
+                self.turn['text'].append(item)
                 *lines, rest = item.split('\n')
                 for line in lines:
                     if line:
@@ -251,22 +302,34 @@ class Session:
                     await self.send('TXT', to_cp437(rest))
                     line_open = True
             await self.send('END')
+            if self.turn['stop'] in ('max_tokens', 'length'):
+                outcome = 'cut_off'
         except asyncio.CancelledError:
+            outcome = 'stopped'
             await self.tell('END', b'stopped')
         except Refused as e:
+            outcome, detail = 'refused', str(e)
             await self.tell('ERR', to_cp437(str(e)))
         except Disconnect:
+            outcome = 'dropped'
             log.info('%s dropped on purpose (mock)', self.peer)
             self.writer.close()
         except (MockAPIError, APIError) as e:
+            outcome, detail = 'error', str(e)
             log.info('%s API error: %s', self.peer, e)
             await self.tell('ERR', to_cp437(str(e)))
         except OSError as e:         # the link went; run() reports that
+            outcome, detail = 'link_lost', str(e)
             log.info('%s reply abandoned: %s', self.peer, e)
         except Exception as e:  # report API trouble to the XT instead of dropping the link
+            outcome, detail = 'error', describe_error(e)
             log.exception('reply failed')
             await self.tell('ERR', to_cp437(describe_error(e)))
         finally:
+            self.flush_text()
+            turn, self.turn = self.turn, None
+            self.clog.event('turn_end', outcome=outcome, detail=detail, rounds=turn['rounds'],
+                            ms=int((time.monotonic() - turn['started']) * 1000), usage=turn['usage'])
             await reply.aclose()
 
     async def tell(self, verb, payload=b''):
@@ -362,6 +425,8 @@ async def main():
                     help='replay only: the Nth connection in the log (default: the last one with a message)')
     ap.add_argument('--speed', type=float, default=1.0,
                     help='mock and replay: scale delays (2 = twice as fast, 0 = no delays)')
+    ap.add_argument('--convlog', default=DEFAULT_CONVLOG, metavar='DIR',
+                    help='conversation log, one JSONL file per connection (default: bridge/logs; "-" for none)')
     ap.add_argument('--log', default=DEFAULT_LOG, metavar='FILE',
                     help='full debug log with a wire trace (default: bridge/xtbridge.log; "-" for none)')
     ap.add_argument('-v', '--verbose', action='store_true', help='show the debug log on the console too')

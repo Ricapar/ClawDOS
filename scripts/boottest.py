@@ -89,7 +89,7 @@ def main():
         with open(bridge_log, 'wb') as f:
             bridge = subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'xtbridge.py'),
                                        '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT),
-                                       '--log', '-', '-v'],
+                                       '--log', '-', '--convlog', '-', '-v'],
                                       stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     proc = subprocess.Popen(cmd, cwd=build.BUILD, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

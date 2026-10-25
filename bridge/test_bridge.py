@@ -119,7 +119,8 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=self.speed,
-                                     token=self.token, config=getattr(self, 'config', None))
+                                     token=self.token, config=getattr(self, 'config', None),
+                                     convlog=getattr(self, 'convlog', None))
         self.server = await xtbridge.start(args)
         port = self.server.sockets[0].getsockname()[1]
         self.c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
@@ -335,6 +336,10 @@ class FakeOpenAI:
                 pieces, finish = self.REPLIES.get(last, (['Fake ', 'says: ', last, '\nbye'], 'stop'))
                 events = [{'choices': [{'delta': {'content': p}}]} for p in pieces]
                 events.append({'choices': [{'delta': {}, 'finish_reason': finish}]})
+                if body.get('stream_options', {}).get('include_usage'):
+                    events.append({'choices': [], 'model': 'fake-1-served',
+                                   'usage': {'prompt_tokens': 30, 'completion_tokens': 7,
+                                             'prompt_tokens_details': {'cached_tokens': 20}}})
             writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n'
                          b': keep-alive\n\n')
             for e in events:
@@ -481,6 +486,99 @@ class Replay(unittest.TestCase):
         self.assertEqual(items[3], (2.0, 'done'))   # counted from DONE, not from CALL
 
 
+class ConvLogTest(BridgeTest):
+    """The JSONL conversation log (bridge/convlog.py)."""
+
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.convlog = self.tmp.name
+        await super().asyncSetUp()
+
+    async def asyncTearDown(self):
+        await super().asyncTearDown()
+        self.tmp.cleanup()
+
+    async def events(self):
+        """Hang up, then read back the one log file."""
+        self.c.writer.close()
+        files = []
+        for _ in range(50):                      # until the session has logged its end
+            await asyncio.sleep(0.02)
+            files = [os.path.join(d, f) for d, _, fs in os.walk(self.tmp.name) for f in fs]
+            if files and 'session_end' in open(files[0], encoding='utf-8').read():
+                break
+        self.assertEqual(len(files), 1)
+        with open(files[0], encoding='utf-8') as f:
+            return [json.loads(line) for line in f]
+
+    async def test_tool_turn(self):
+        await self.c.ask_tools('!tool sysinfo', lambda n, a: ('ok', 'DOS 7.10'))
+        await self.c.send('NEW')
+        await self.c.line()
+        ev = await self.events()
+        for e in ev:
+            self.assertIn('t', e)
+        kinds = [e['type'] for e in ev]
+        self.assertEqual(kinds[0], 'session_start')
+        self.assertEqual(kinds[-1], 'session_end')
+        self.assertEqual(ev[0]['provider'], 'mock')
+        self.assertEqual(ev[kinds.index('user')]['text'], '!tool sysinfo')
+        call = ev[kinds.index('tool_call')]
+        self.assertEqual((call['name'], call['args']), ('sysinfo', {}))
+        result = ev[kinds.index('tool_result')]
+        self.assertEqual((result['id'], result['status'], result['text']), (call['id'], 'ok', 'DOS 7.10'))
+        self.assertIsInstance(result['ms'], int)
+        self.assertIn('api_call', kinds)
+        self.assertIn('Calling sysinfo.', ''.join(e['text'] for e in ev if e['type'] == 'assistant'))
+        end = ev[kinds.index('turn_end')]
+        self.assertEqual(end['outcome'], 'ok')
+        self.assertEqual(set(end['usage']), {'input', 'output', 'cache_read', 'cache_write'})
+        self.assertIn('new_chat', kinds)
+        self.assertLess(kinds.index('turn_end'), kinds.index('new_chat'))
+
+    def test_path(self):
+        import convlog
+        log = convlog.open_log(self.tmp.name, ('172.16.0.229', 2063), 3)
+        log.close()
+        day, name = os.path.relpath(log.path, self.tmp.name).split(os.sep)
+        self.assertRegex(day, r'^\d{4}-\d{2}-\d{2}$')
+        self.assertRegex(name, r'^\d{6}-172\.16\.0\.229-c3\.jsonl$')
+
+
+class ApiCallReports(unittest.IsolatedAsyncioTestCase):
+    """Backends report each API round to chat.on_api_call."""
+
+    async def test_anthropic_usage(self):
+        usage = {'input_tokens': 120, 'output_tokens': 15, 'cache_read_input_tokens': 100,
+                 'cache_creation_input_tokens': 4}
+        fake = FakeAnthropic([TOOL_ROUND + (usage,), DONE_ROUND])
+        chat = providers.AnthropicChat(fake, 'claude-test', 'low', {'name': 'Claude'})
+        seen = []
+        chat.on_api_call = seen.append
+        await drive(chat, 'show me')
+        self.assertEqual([r['round'] for r in seen], [0, 1])
+        self.assertEqual(seen[0]['stop_reason'], 'tool_use')
+        self.assertEqual(seen[0]['model'], 'claude-test-served')
+        self.assertEqual(seen[0]['usage'], {'input': 120, 'output': 15, 'cache_read': 100, 'cache_write': 4})
+        self.assertEqual(seen[1]['usage'], {'input': 0, 'output': 0, 'cache_read': 0, 'cache_write': 0})
+        self.assertIsInstance(seen[0]['ms'], int)
+
+    async def test_openai_usage(self):
+        import httpx
+        fake = FakeOpenAI()
+        port = await fake.start()
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}/v1/') as client:
+            chat = providers.OpenAIChat(client, 'fake-1', {'name': 'Fakey'})
+            seen = []
+            chat.on_api_call = seen.append
+            await drive(chat, 'hello')
+        fake.server.close()
+        self.assertTrue(fake.requests[0][1]['stream_options']['include_usage'])
+        self.assertEqual(len(seen), 1)
+        self.assertEqual((seen[0]['model'], seen[0]['stop_reason']), ('fake-1-served', 'stop'))
+        self.assertEqual(seen[0]['usage'], {'input': 30, 'output': 7, 'cache_read': 20, 'cache_write': 0})
+
+
 class FakeAnthropic:
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
@@ -511,7 +609,9 @@ class FakeAnthropic:
                     yield t
 
             async def get_final_message(self):
-                return types.SimpleNamespace(content=r[1], stop_reason=r[2])
+                usage = types.SimpleNamespace(**r[3]) if len(r) > 3 else None
+                return types.SimpleNamespace(content=r[1], stop_reason=r[2], usage=usage,
+                                             model='claude-test-served')
         del fake
         return Stream()
 

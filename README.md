@@ -28,6 +28,16 @@ client that runs on the XT.
 5. **Emulator**: `python scripts/run86box.py` boots the same image on an
    emulated XT (8088, CGA, XTIDE, NE1000 with NAT networking).
 
+### Logs
+
+The bridge keeps two logs, both gitignored:
+
+- `bridge/xtbridge.log`: a debug log with every protocol line (rotating; `--log FILE`).
+- `bridge/logs/YYYY-MM-DD/*.jsonl`: one file per XT connection, one JSON event per
+  line: what you asked, Claude's replies, tool calls and results, and each API
+  call's model, stop reason and token usage (`--convlog DIR`, `-` for none). Load
+  it with `jq`, pandas or a few lines of Python.
+
 ### Testing without an API key
 
 `python bridge/xtbridge.py --mock` answers like Claude would: a pause, then
