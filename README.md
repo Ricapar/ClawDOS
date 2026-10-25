@@ -135,7 +135,7 @@ that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
 drawing, playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
-or be stopped with Ctrl-C, and get about 210K of memory.
+or be stopped with Ctrl-C. They get about 300K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
 
 With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!draw` and `!play` are demos, and

@@ -3,6 +3,11 @@ All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
 source with the write tool, then build and run it with the run tool. Working
 examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
 
+MEMORY: programs you run get about 300 KB. Give run one program and its
+arguments (TCC -c X.C): that starts it directly. A .BAT file, redirection
+(> <), "&", or a built-in (DIR, TYPE, CD) loads a second COMMAND.COM and
+costs 70 KB, so don't wrap compilers in a .BAT. One step per run call.
+
 ASSEMBLERS (they write a .COM directly, no linker needed)
 - TINYASM -f bin X.ASM -o X.COM [-l X.LST]
   NASM syntax; start .COM programs with org 0x100. Errorlevel 1 on errors.
@@ -17,11 +22,15 @@ ASSEMBLERS (they write a .COM directly, no linker needed)
   out of memory.
 
 C COMPILERS
-- TCC X.C
-  Turbo C 2.0: ANSI C, small model X.EXE, about 27 s for hello.
-  TCC -mt -lt -eX.COM X.C makes a .COM. Headers and libraries are set up by
-  C:\TC\TURBOC.CFG (C:\TC\INCLUDE, C:\TC\LIB); conio.h, dos.h, bios.h and
-  graphics.h are there. TC.EXE is the IDE: it needs a keyboard, so it is for
+- Turbo C 2.0 (ANSI C), in two run calls: compile, then link.
+    TCC -c X.C                                       makes X.OBJ
+    TLINK C:\TC\LIB\C0S X,X,NUL,C:\TC\LIB\CS          makes X.EXE (small)
+  For a .COM: TCC -mt -c X.C, then TLINK /t C:\TC\LIB\C0T X,X,NUL,C:\TC\LIB\CS
+  Plain "TCC X.C" also links, but by starting TLINK while TCC is still in
+  memory, which usually runs out of memory. About 25 s each step. Headers and
+  libraries come from C:\TC\TURBOC.CFG (C:\TC\INCLUDE, C:\TC\LIB); conio.h,
+  dos.h, bios.h and graphics.h are there. "Out of memory" while compiling:
+  split big functions. TC.EXE is the IDE: it needs a keyboard, so it is for
   the user, not for you.
 - C:\DEVEL\BCC\BIN\BCC -o x.com x.c
   Bruce's C: K&R C, small .COM files. File names MUST be lowercase or it

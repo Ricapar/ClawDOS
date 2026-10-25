@@ -113,8 +113,109 @@ static unsigned countLines(void)
     return n;
 }
 
+/* COMMAND.COM's built-in commands: these need the shell. */
+static const char *const builtins[] = {
+    "BREAK", "CALL", "CD", "CHCP", "CHDIR", "CLS", "COPY", "CTTY", "DATE", "DEL", "DIR",
+    "ECHO", "ERASE", "EXIT", "FOR", "GOTO", "IF", "LH", "LOADHIGH", "MD", "MKDIR", "PATH",
+    "PAUSE", "PROMPT", "RD", "REM", "REN", "RENAME", "RMDIR", "SET", "SHIFT", "TIME",
+    "TRUENAME", "TYPE", "VER", "VERIFY", "VOL", NULL
+};
+
+static int exists(const char *path)
+{
+    struct find_t f;
+    return _dos_findfirst(path, _A_NORMAL | _A_RDONLY | _A_ARCH, &f) == 0;
+}
+
+/* `dir` + `name` (+ `ext`) into `out` if that file exists. */
+static int tryFile(char *out, const char *dir, const char *name, const char *ext)
+{
+    unsigned n = strlen(dir);
+    if (n + strlen(name) + strlen(ext) + 2 > 80)
+        return 0;
+    strcpy(out, dir);
+    if (n && out[n - 1] != '\\' && out[n - 1] != ':')
+        strcat(out, "\\");
+    strcat(out, name);
+    strcat(out, ext);
+    return exists(out);
+}
+
+/* If `cmd` is just a program and its arguments, the program's path (in `prog`)
+   and where its arguments start; NULL when it needs COMMAND.COM: redirection,
+   pipes, variables, built-ins, batch files, or a program DOS can't find. Started
+   directly, the program gets the ~70 KB a second COMMAND.COM would take. */
+static const char *direct(const char *cmd, char *prog)
+{
+    static const char *const exts[] = { ".COM", ".EXE", ".BAT", NULL };
+    char name[80], dir[80];
+    const char *args, *path, *ext;
+    unsigned n, i;
+
+    if (strpbrk(cmd, "<>|%\""))
+        return NULL;
+    while (*cmd == ' ')
+        cmd++;
+    n = strcspn(cmd, " /;=,\t");
+    if (n == 0 || n >= sizeof(name))
+        return NULL;
+    memcpy(name, cmd, n);
+    name[n] = 0;
+    strupr(name);
+    args = cmd + n;
+    while (*args == ' ')
+        args++;
+    if (name[n - 1] == ':')
+        return NULL;                          /* "A:": change drive */
+    for (i = 0; builtins[i]; i++)
+        if (!strcmp(name, builtins[i]))
+            return NULL;
+
+    ext = strrchr(name, '.');
+    if (ext && strchr(ext, '\\'))
+        ext = NULL;                           /* a dot in a directory name */
+    if (strpbrk(name, "\\:")) {               /* an explicit path: only there */
+        if (ext)
+            strcpy(prog, name);
+        else
+            for (i = 0; exts[i] && !tryFile(prog, "", name, exts[i]); i++)
+                ;
+        if (!exists(prog))
+            return NULL;
+    } else {                                  /* the current directory, then PATH */
+        path = getenv("PATH");
+        strcpy(dir, ".");
+        for (;;) {
+            if (ext) {
+                if (tryFile(prog, dir, name, ""))
+                    break;
+            } else {
+                for (i = 0; exts[i]; i++)
+                    if (tryFile(prog, dir, name, exts[i]))
+                        break;
+                if (exts[i])
+                    break;
+            }
+            if (path == NULL || !*path)
+                return NULL;
+            n = strcspn(path, ";");
+            if (n >= sizeof(dir))
+                n = sizeof(dir) - 1;
+            memcpy(dir, path, n);
+            dir[n] = 0;
+            path += n + (path[n] == ';');
+        }
+    }
+    ext = strrchr(prog, '.');
+    if (ext == NULL || (stricmp(ext, ".COM") && stricmp(ext, ".EXE")))
+        return NULL;                          /* a batch file needs the shell */
+    return args;
+}
+
 int shell_run(ToolCtx *t, const char *cmd, int holdSecs)
 {
+    static char prog[80];
+    const char *args;
     volatile unsigned long __far *ticks = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
     const char *comspec = getenv("COMSPEC");
     static char buf[TAIL_MAX + 1];    /* too big for our 4 KB stack */
@@ -138,13 +239,19 @@ int shell_run(ToolCtx *t, const char *cmd, int holdSecs)
     /* Ctrl-C stays with the network stack's handler, which ignores it, as in
        mTCP's own shell-outs: the program can't be stopped with Ctrl-C unless
        it installs its own handler. */
+    args = direct(cmd, prog);
     oldInt10 = _dos_getvect(0x10);
     _dos_setvect(0x10, int10Hook);
-    code = spawnl(P_WAIT, comspec, comspec, "/C", cmd, NULL);
+    if (args == NULL)
+        code = spawnl(P_WAIT, comspec, comspec, "/C", cmd, NULL);
+    else if (*args)
+        code = spawnl(P_WAIT, prog, prog, args, NULL);
+    else
+        code = spawnl(P_WAIT, prog, prog, NULL);
     _dos_setvect(0x10, oldInt10);
 
     if (code == -1) {
-        sprintf(buf, "could not start %s: %s", comspec, strerror(errno));
+        sprintf(buf, "could not start %s: %s", args ? prog : comspec, strerror(errno));
         teletype(buf);
         teletype("\n");
         return tool_fail(t, buf);

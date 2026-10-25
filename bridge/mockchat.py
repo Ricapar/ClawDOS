@@ -50,6 +50,7 @@ SCENARIOS = {
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the bridge hangs up mid-reply',
     '!history': 'what the mock remembers of this conversation',
+    '!run': 'run the rest of the message as a DOS command on the XT: !run TCC PRIMES.C',
     '!tool': 'call one XT tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
     '!tooltour': 'call every XT tool in turn and check the results',
     '!draw': 'draw a sunset with the draw tool',
@@ -292,6 +293,9 @@ class MockChat:
             raise Disconnect()
         elif command == '!history':
             async for c in self.stream(self.describe_history()):
+                yield c
+        elif command == '!run':
+            async for c in self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''}):
                 yield c
         elif command == '!tool':
             words = shlex.split(text, posix=False)[1:]

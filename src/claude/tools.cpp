@@ -17,6 +17,7 @@
 #include "toolapi.h"
 #include "dosfs.h"
 #include "memory.h"
+#include "ems.h"
 #include "sysinfo.h"
 #include "sound.h"
 #include "gfx.h"
@@ -163,25 +164,43 @@ static int toolTextart(ToolCtx *t)
     return TS_OK;
 }
 
+/* Somewhere to keep the chat screen while a tool has the display: an EMS page
+   when there is EMS (one page is exactly the CGA's 16 KB), so a program run
+   meanwhile gets that conventional memory, or else the heap. */
+static unsigned short __far *saveScreen(void)
+{
+    unsigned short __far *save = (unsigned short __far *)ems_page();
+    if (save == NULL)
+        save = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
+    if (save != NULL)
+        scr_suspend(save);
+    return save;
+}
+
+static void restoreScreen(unsigned short __far *save)
+{
+    unsigned short __far *page = (unsigned short __far *)ems_page();   /* remap it */
+    scr_resume(save);
+    if (save != page)
+        free(save);
+    ui_redraw();
+}
+
 /* A picture in CGA graphics; the chat comes back afterwards. */
 static int toolDraw(ToolCtx *t)
 {
     const char *script = targ("script");
-    unsigned short *save;
+    unsigned short __far *save;
     unsigned viewed;
     char err[90];
     int rc;
 
     if (script == NULL)
         return tool_fail(t, "missing script");
-    save = (unsigned short *)malloc(SCR_SAVE_BYTES);
-    if (save == NULL)
+    if ((save = saveScreen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
-    scr_suspend(save);
     rc = gfx_draw(script, unattended ? 3 : 0, err, sizeof(err), &viewed);
-    scr_resume(save);
-    free(save);
-    ui_redraw();
+    restoreScreen(save);
     if (rc < 0) {
         tout_printf(t, "%s\n(everything before that line was drawn and shown for %us)\n", err, viewed);
         strncpy(t->summary, err, sizeof(t->summary) - 1);
@@ -202,19 +221,15 @@ static int toolDraw(ToolCtx *t)
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
-    unsigned short *save;
+    unsigned short __far *save;
     int status;
 
     if (cmd && strlen(cmd) > SHELL_CMD_MAX)
         return tool_fail(t, "command too long (max 120)");
-    save = (unsigned short *)malloc(SCR_SAVE_BYTES);
-    if (save == NULL)
+    if ((save = saveScreen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
-    scr_suspend(save);
     status = shell_run(t, cmd, unattended ? 1 : 5);
-    scr_resume(save);
-    free(save);
-    ui_redraw();
+    restoreScreen(save);
     return status;
 }
 
