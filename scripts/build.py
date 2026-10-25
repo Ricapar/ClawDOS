@@ -23,6 +23,7 @@ import fatimg
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, 'tools')
 BUILD = os.path.join(ROOT, 'build')
+EXTERNAL = os.path.join(ROOT, 'external')   # the user's own disk images (gitignored)
 WATCOM = os.path.join(TOOLS, 'openwatcom')
 
 # PicoMEM presents hard disk images as 16 heads x 63 sectors. 65 cylinders keeps
@@ -48,7 +49,7 @@ APPS = {
                                 'lib/memory.c', 'lib/toolapi.c'], 'model': 'l'},
 }
 
-TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini'}
+TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini', '.bas', '.asm', '.c', '.h'}
 
 
 def find_tool(name, extra_dirs=()):
@@ -151,6 +152,50 @@ def build_apps(only=None):
         build_app(name, spec, env)
 
 
+_missing_external = set()
+
+
+def zip_members(path, pattern, source):
+    """[(name, bytes)] of the members of zip `path` matching `pattern`."""
+    with zipfile.ZipFile(path) as z:
+        if pattern.endswith('/**'):                    # a whole tree, keeping its folders
+            top = pattern[:-2].lower()
+            names = [n for n in z.namelist() if n.lower().startswith(top) and not n.endswith('/')]
+            if not names:
+                sys.exit(f'build: nothing matches {source!r}')
+            return [(n[len(top):], z.read(n)) for n in sorted(names)]
+        folder, pat = os.path.split(pattern.lower())   # one folder level: LIB/* is not LIB/I386/*
+        names = [n for n in z.namelist() if os.path.dirname(n.lower()) == folder
+                 and not n.endswith('/') and fnmatch.fnmatch(os.path.basename(n.lower()), pat)]
+        if not names:
+            sys.exit(f'build: nothing matches {source!r}')
+        return [(os.path.basename(n), z.read(n)) for n in sorted(names)]
+
+
+def external_files(spec, source):
+    """external:IMAGE!PATH, both wildcards: files from the user's own floppy
+    images in external/. Optional: without a matching image, nothing."""
+    image_pat, _, member_pat = spec.partition('!')
+    images = sorted(f for f in os.listdir(EXTERNAL) if fnmatch.fnmatch(f.lower(), image_pat.lower())) \
+        if os.path.isdir(EXTERNAL) else []
+    if not images:
+        if image_pat not in _missing_external:
+            _missing_external.add(image_pat)
+            print(f'build: note: no external/{image_pat}; skipping what it would provide')
+        return []
+    out = []
+    for image in images:
+        with open(os.path.join(EXTERNAL, image), 'rb') as f:
+            fs = fatimg.open_fs(bytearray(f.read()))
+        for path, entry in fs.walk():
+            path_l, folder, pat = path.lstrip('/').lower(), *os.path.split(member_pat.lower())
+            if not entry.is_dir and os.path.dirname(path_l) == folder and fnmatch.fnmatch(os.path.basename(path_l), pat):
+                out.append((path.rsplit('/', 1)[-1], fs.read_file(path.lstrip('/'))))
+    if not out:
+        sys.exit(f'build: nothing matches {source!r}')
+    return out
+
+
 def resolve(source):
     """Return [(filename, bytes)] for a manifest source spec."""
     kind, _, spec = source.partition(':')
@@ -158,12 +203,29 @@ def resolve(source):
         zpath, _, member = spec.partition('!')
         with zipfile.ZipFile(os.path.join(TOOLS, 'freedos', 'packages', zpath)) as z:
             return [(os.path.basename(member), z.read(member))]
+    if kind == 'external':
+        return external_files(spec, source)
+    if kind == 'devel' and '!' in spec:
+        zpath, _, member = spec.partition('!')
+        return zip_members(os.path.join(TOOLS, 'devel', zpath), member, source)
     base = {'repo': ROOT, 'build': BUILD, 'mtcp': os.path.join(TOOLS, 'mtcp'),
-            'picomem': os.path.join(TOOLS, 'picomem')}.get(kind)
+            'picomem': os.path.join(TOOLS, 'picomem'), 'devel': os.path.join(TOOLS, 'devel')}.get(kind)
     if base is None:
         sys.exit(f'build: unknown source kind in {source!r}')
+    if spec.endswith('/**'):                           # a whole tree, keeping its folders
+        top = os.path.join(base, spec[:-3])
+        out = []
+        for dirpath, _, files in os.walk(top):
+            for n in sorted(files):
+                rel = os.path.relpath(os.path.join(dirpath, n), top).replace(os.sep, '/')
+                with open(os.path.join(dirpath, n), 'rb') as f:
+                    out.append((rel, f.read()))
+        if not out:
+            sys.exit(f'build: nothing matches {source!r}')
+        return out
     d, pat = os.path.split(os.path.join(base, spec))
-    names = sorted(n for n in os.listdir(d) if fnmatch.fnmatch(n.lower(), pat.lower()))
+    names = sorted(n for n in os.listdir(d)
+                   if fnmatch.fnmatch(n.lower(), pat.lower()) and os.path.isfile(os.path.join(d, n)))
     if not names:
         sys.exit(f'build: nothing matches {source!r}')
     out = []
@@ -189,8 +251,8 @@ def build_image(autotest=None):
         for line in f:
             line = line.split('#', 1)[0].strip()
             if line:
-                dest, source = line.split()
-                entries.append((dest, source))
+                dest, source = line.split(None, 1)   # sources may contain spaces
+                entries.append((dest, source.strip()))
     if autotest:
         entries.append(('AUTOTEST.BAT', 'repo:' + os.path.relpath(autotest, ROOT)))
 

@@ -1,0 +1,47 @@
+Dev tools: TINYASM WASM JWASMR TCC BCC GWBASIC LDEBUG
+All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
+source with the write tool, then build and run it with the run tool. Working
+examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
+
+ASSEMBLERS (they write a .COM directly, no linker needed)
+- TINYASM -f bin X.ASM -o X.COM [-l X.LST]
+  NASM syntax; start .COM programs with org 0x100. Errorlevel 1 on errors.
+  About 5 s. Out-of-range conditional jumps are not lengthened for you:
+  invert the test and use jmp.
+- WASM X
+  Wolfware Asm, MASM-like syntax, makes X.COM (origin 100h is automatic).
+  About 5 s. Manual: C:\DEVEL\DOC\WASM\WASM.TXT
+- JWASMR -bin -FoX.COM X.ASM
+  JWasm: full MASM syntax (.model tiny / .code / org 100h / end start);
+  -mz instead of -bin makes an .EXE. About 18 s; very big sources can run
+  out of memory.
+
+C COMPILERS
+- TCC X.C
+  Turbo C 2.0: ANSI C, small model X.EXE, about 27 s for hello.
+  TCC -mt -lt -eX.COM X.C makes a .COM. Headers and libraries are set up by
+  C:\TC\TURBOC.CFG (C:\TC\INCLUDE, C:\TC\LIB); conio.h, dos.h, bios.h and
+  graphics.h are there. TC.EXE is the IDE: it needs a keyboard, so it is for
+  the user, not for you.
+- C:\DEVEL\BCC\BIN\BCC -o x.com x.c
+  Bruce's C: K&R C, small .COM files. File names MUST be lowercase or it
+  silently skips compiling. Slow: about 80 s for hello. Prefer TCC.
+
+BASIC
+- GWBASIC X.BAS
+  GW-BASIC (Microsoft's 1983 source, MIT licence). End every program with
+  SYSTEM, or it waits at Ok for a keyboard that never comes. PRINT goes to
+  the screen, not to redirected output; to capture results write a file:
+  OPEN "O",#1,"OUT.TXT" : PRINT #1, ... : CLOSE #1, then read OUT.TXT.
+  About 6 s.
+
+DEBUGGING
+- LDEBUG X.COM < SCRIPT.TXT
+  lDebug, a stronger FreeDOS DEBUG: the same commands (a, u, d, t, g, q),
+  and it stops cleanly at the end of the script. Manual (large):
+  C:\DEVEL\DOC\LDEBUG\LDEBUG.TXT. Plain DEBUG still works too.
+
+NOT AVAILABLE
+Pacific C hangs on this 8088. NASM 2, FASM, Open Watcom and DJGPP need a 386.
+Builds take seconds to a minute here, so keep programs small and fix all the
+errors you can see before rebuilding.

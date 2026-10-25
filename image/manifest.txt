@@ -5,6 +5,9 @@
 #   fdpkg:ZIP!MEMBER     member of a FreeDOS 1.4 package (tools/freedos/packages)
 #   mtcp:NAME            mTCP binary (tools/mtcp)
 #   picomem:NAME         PicoMEM driver (tools/picomem)
+#   devel:PATH or devel:ZIP!MEMBER   development tools (tools/devel)
+#   external:IMAGE!PATH  file on the user's own floppy images in external/ (optional)
+# Names may use wildcards (one folder level); FOLDER/** copies a whole tree.
 # A DEST ending in / keeps the source file name.
 
 KERNEL.SYS          fdpkg:BASE/KERNEL.ZIP!BIN/KERNL86.SYS
@@ -42,3 +45,44 @@ CLAUDEXT/               build:hello.exe
 CLAUDEXT/               build:claude.exe
 
 TESTS/                  build:cxtunit.exe
+TESTS/DEV/              repo:image/tests/dev/*
+
+# Development tools that run on the 8088 (docs/research/XT 8088 development tools.md;
+# fetched by scripts/setup-tools.ps1). Each tool's licence goes along in DEVEL/DOC.
+DEVEL/BIN/              devel:tinyasm.zip!DEVEL/TINYASM/TINYASM.EXE
+DEVEL/DOC/TINYASM/      devel:tinyasm.zip!DEVEL/TINYASM/LICENSE
+DEVEL/DOC/TINYASM/      devel:tinyasm.zip!DEVEL/TINYASM/README
+DEVEL/BIN/              devel:wasm.zip!DEVEL/WASM/WASM.COM
+DEVEL/DOC/WASM/         devel:wasm.zip!DEVEL/WASM/*.TXT
+DEVEL/BIN/              devel:jwasm.zip!DEVEL/JWASM/JWasmr.exe
+DEVEL/DOC/JWASM/        devel:jwasm.zip!DEVEL/JWASM/License.txt
+DEVEL/DOC/JWASM/        devel:jwasm.zip!DEVEL/JWASM/Readme.txt
+DEVEL/BIN/              devel:ldebug.zip!BIN/ldebug.com
+DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/license.txt
+DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/ldebug.txt
+DEVEL/BIN/              devel:gwbasic.zip!DEVEL/GWBASIC/GWBASIC.EXE
+DEVEL/DOC/GWBASIC/      repo:image/devel/GWBASIC.TXT
+DEVEL/BCC/              devel:bcc.zip!DEVEL/BCC/**
+
+# Turbo C 2.0 from the user's own floppy images in external/ (skipped if absent).
+TC/                     external:*Turbo C v2.0*Disk 1*!TCHELP.TCH
+TC/                     external:*Turbo C v2.0*Disk 1*!THELP.*
+TC/                     external:*Turbo C v2.0*Disk 1*!README
+TC/                     external:*Turbo C v2.0*Disk 2*!*
+TC/                     external:*Turbo C v2.0*Disk 3*!*
+TC/                     external:*Turbo C v2.0*Disk 5*!TLIB.EXE
+TC/                     external:*Turbo C v2.0*Disk 6*!*.COM
+TC/                     external:*Turbo C v2.0*Disk 6*!*.ARC
+TC/INCLUDE/             external:*Turbo C v2.0*Disk 4*!*.H
+TC/INCLUDE/SYS/         external:*Turbo C v2.0*Disk 4*!SYS/*.H
+TC/LIB/                 external:*Turbo C v2.0*Disk 4*!*.OBJ
+TC/LIB/                 external:*Turbo C v2.0*Disk 4*!*.LIB
+TC/LIB/                 external:*Turbo C v2.0*Disk 5*!*.OBJ
+TC/LIB/                 external:*Turbo C v2.0*Disk 5*!*.LIB
+TC/LIB/                 external:*Turbo C v2.0*Disk 6*!*.OBJ
+TC/LIB/                 external:*Turbo C v2.0*Disk 6*!*.LIB
+TC/EXAMPLES/            external:*Turbo C v2.0*Disk 6*!*.C
+TC/                     repo:image/tc/TURBOC.CFG
+
+# Claude's first memory: what it can build with on this machine.
+MEMORY/                 repo:image/memory/DEVTOOLS.TXT

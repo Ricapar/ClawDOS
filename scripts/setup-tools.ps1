@@ -98,4 +98,25 @@ if ($box -and -not (Test-Path "$($box.FullName)\roms\machines")) {
     Remove-Item -Recurse $tmp
 }
 
+# Development tools for the XT image (they run on the 8088; see
+# docs/research/XT 8088 development tools.md). FreeDOS 1.4 devel packages come
+# from ibiblio or, when it is down, a mirror.
+New-Item -ItemType Directory -Force "$tools\devel" | Out-Null
+$fdMirrors = "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/$fdVer/devel",
+             'https://sunsite.icm.edu.pl/packages/freedos/repositories/latest/devel'
+foreach ($p in 'tinyasm', 'wasm', 'ldebug', 'jwasm', 'bcc') {
+    if (-not (Test-Path "$tools\devel\$p.zip")) {
+        foreach ($m in $fdMirrors) {
+            curl.exe -sSfL -o "$tools\devel\$p.zip" "$m/$p.zip"
+            if ($LASTEXITCODE -eq 0) { break }
+        }
+        if ($LASTEXITCODE -ne 0) { throw "could not download FreeDOS package $p" }
+    }
+}
+# GW-BASIC assembled from Microsoft's MIT-licensed source (TK Chia)
+$gwbVer = '20261005'
+if (-not (Test-Path "$tools\devel\gwbasic.zip")) {
+    $f = Get-File "https://codeberg.org/tkchia/GW-BASIC/releases/download/$gwbVer/GWB26A05.ZIP" "GWB26A05.ZIP"
+    Copy-Item $f "$tools\devel\gwbasic.zip"
+}
 Write-Host 'Toolchain ready. Dot-source scripts\env.ps1 to put it on PATH.'

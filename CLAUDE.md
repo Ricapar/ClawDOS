@@ -12,6 +12,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   `--expect TEXT` fails unless TEXT is in the serial or bridge log: `image/tests/tools.bat --bridge --expect
   "tool tour: PASS"` runs every XT tool; `image/tests/drop.bat --bridge --expect "connection #2"` checks a lost link; `image/tests/watch.bat --bridge --expect "VRAM watch #1"` checks CLAUDE `-watch`; `image/tests/memory.bat --bridge --expect "memory_write -> ok"` checks memory tools never ask; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/cxtunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
+- Real 8088 check: `python scripts/xttest.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
+  as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
   `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAUDE -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
@@ -24,6 +26,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   video memory into the bridge log, `-noscroll` turns off hardware scrolling.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
   the state they change `volatile`.
+- Dev tools on the image (C:\DEVEL, C:\TC; Turbo C comes from the user's own floppies in external/, never commit
+  them): see docs/research/ and image/memory/DEVTOOLS.TXT, the memory that tells Claude about them.
 - Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
 - Commit to main freely as checkpoints.
 

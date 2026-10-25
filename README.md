@@ -39,6 +39,29 @@ becomes the assistant's name. Files are re-read at the start of every
 conversation, so an edit applies from the next chat (F2 on the XT) without
 restarting the bridge.
 
+### Programming on the XT
+
+The image carries development tools that were tested on an 8088 at 4.77 MHz
+(`python scripts/xttest.py image/tests/devtools.bat` re-runs that test in 86Box):
+
+| Tool | What | Hello world |
+|---|---|---|
+| `TINYASM` | NASM-syntax assembler, makes .COM files (BSD) | ~5 s |
+| `WASM` | Wolfware assembler, MASM-like (MIT) | ~5 s |
+| `JWASMR` | JWasm, full MASM syntax, .COM or .EXE (Open Watcom licence) | ~18 s |
+| `TCC` | Turbo C 2.0, from your own disks (see below) | ~27 s |
+| `BCC` | Bruce's C, K&R C to .COM (GPL); lowercase file names only | ~80 s |
+| `GWBASIC` | GW-BASIC built from Microsoft's MIT-licensed source | ~6 s |
+| `LDEBUG` | lDebug, a scriptable FreeDOS DEBUG (Fair License) | |
+
+They live in `C:\DEVEL` (licences in `C:\DEVEL\DOC`) and `C:\TC`, and
+`C:\MEMORY\DEVTOOLS.TXT`, Claude's first memory, tells it how to use them.
+Examples are in `C:\TESTS\DEV`. Turbo C is commercial: the build copies it from
+your own floppy images in `external/` (e.g. `Borland - Turbo C v2.0 - Disk 3 of
+6 - Command Line and Utilities.img`) and leaves it out if they aren't there.
+Pacific C was tried and hangs on an 8088. `docs/research/` has the survey of
+what else runs on an XT and what a licensed copy would add.
+
 ### Memories
 
 Claude keeps notes on the XT itself, in `C:\MEMORY\NAME.TXT` (first line: a
