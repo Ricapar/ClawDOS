@@ -94,6 +94,19 @@ static int quitAfterReply;            /* -q: leave once the -m message is answer
 static const char *toolVerb;          /* spinner verb while a tool runs */
 static char host[80];
 static char backend[80];
+static char token[64];
+
+/* Link liveness: the bridge answers PING at any time, even mid-reply. */
+#define PING_IDLE   (60 * 18)         /* ticks of silence before a PING when idle */
+#define PING_BUSY   (20 * 18)         /* ...and while waiting for Claude */
+#define PONG_WAIT   (15 * 18)         /* no answer by then: the link is dead */
+#define RETRY_WAIT  (10 * 18)         /* between reconnect attempts */
+static int linkUp;
+static unsigned long lastRx;          /* ticks when the bridge last sent a line */
+static int pinged;
+static unsigned long pingedAt;
+static unsigned long retryAt;
+static char offlineNote[100];
 
 static char input[INPUT_MAX + 1];
 static int inputLen, inputPos;
@@ -519,6 +532,10 @@ static void submit(void)
             histCount++;
     }
     histPos = -1;
+    if (!linkUp) {
+        note("Not connected to the bridge; your message is still in the box.", A_ERR);
+        return;
+    }
     if (!stricmp(input, "/new") || !stricmp(input, "/clear")) {
         setInput("");
         newChat();
@@ -532,9 +549,9 @@ static void submit(void)
     echoUser(input);
     if (bridge.send("MSG", input)) {
         note(bridge.errorText(), A_ERR);
-    } else {
-        setState(WAITING);
+        return;                       /* keep the text for another try */
     }
+    setState(WAITING);
     setInput("");
 }
 
@@ -774,7 +791,8 @@ static void fatal(const char *text)
     con_newline();
     statusNote = "Press any key to exit.";
     setState(IDLE);
-    biosKeyRead();
+    if (!quitAfterReply)              /* unattended runs have nobody to press it */
+        biosKeyRead();
     bridge.close();
     XTBridge::stopStack();
     scr_done();
@@ -795,9 +813,92 @@ static int waitLine(int secs)
     return 0;
 }
 
+/* Connect and say hello. Returns NULL, or what went wrong (link closed). */
+static const char *connectBridge(void)
+{
+    if (bridge.connect(host, XTBRIDGE_PORT))
+        return bridge.errorText();
+    if (waitLine(10) <= 0 || strcmp(bridge.verb(), "HELLO")) {
+        bridge.close();
+        return "The bridge didn't say hello.";
+    }
+    if (strstr(bridge.payload(), "AUTH")) {
+        bridge.send("AUTH", token);
+        if (waitLine(10) <= 0 || strcmp(bridge.verb(), "OK")) {
+            bridge.close();
+            return "The bridge rejected our CLAUDE_TOKEN.";
+        }
+    }
+    bridge.send("INFO");
+    if (waitLine(10) > 0 && !strcmp(bridge.verb(), "INFO"))
+        strncpy(backend, bridge.payload(), sizeof(backend) - 1);
+    linkUp = 1;
+    lastRx = *biosTicks;
+    pinged = 0;
+    return NULL;
+}
+
+/* The link is gone: say so, drop whatever was in flight, and retry later
+   instead of leaving the chat. */
+static void linkLost(const char *why)
+{
+    bridge.close();
+    linkUp = 0;
+    tools_reset();
+    toolVerb = NULL;
+    queued = 0;
+    if (state != IDLE)
+        note("The reply was cut off.", A_ERR);
+    note(why, A_ERR);
+    setState(IDLE);
+    if (quitAfterReply) {             /* unattended: one reconnect, then fail */
+        const char *err = connectBridge();
+        fatal(err ? err : "Lost the bridge mid-reply (reconnected, then gave up).");
+    }
+    retryAt = *biosTicks + 5 * 18;
+    sprintf(offlineNote, "Bridge offline; reconnecting to %s ...", host);
+    statusNote = offlineNote;
+    drawStatus();
+    drawHint();
+}
+
+static void reconnect(void)
+{
+    const char *err;
+
+    sprintf(offlineNote, "Reconnecting to %s ...", host);
+    statusNote = offlineNote;
+    drawStatus();
+    err = connectBridge();
+    if (err) {
+        sprintf(offlineNote, "Bridge offline (%.40s) - retrying in 10s. F10 quits.", err);
+        drawStatus();
+        retryAt = *biosTicks + RETRY_WAIT;
+        return;
+    }
+    statusNote = NULL;
+    note("Reconnected to the bridge. It doesn't remember the earlier conversation.", A_DIM);
+    drawFooter();
+}
+
+/* Ping a quiet bridge; give up on one that doesn't answer. */
+static void checkLink(void)
+{
+    unsigned long now = *biosTicks;
+
+    if (pinged) {
+        if (now - pingedAt > PONG_WAIT)
+            linkLost("The bridge stopped answering.");
+    } else if (now - lastRx > (state == IDLE ? PING_IDLE : PING_BUSY)) {
+        if (bridge.send("PING"))
+            linkLost(bridge.errorText());
+        else
+            pinged = 1, pingedAt = now;
+    }
+}
+
 int main(int argc, char *argv[])
 {
-    char token[64] = "";
     char note_[120];
     int nosnow = 0, unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
@@ -853,18 +954,9 @@ int main(int argc, char *argv[])
     statusNote = note_;
     drawFooter();
 
-    if (bridge.connect(host, XTBRIDGE_PORT))
-        fatal(bridge.errorText());
-    if (waitLine(10) <= 0 || strcmp(bridge.verb(), "HELLO"))
-        fatal("The bridge didn't say hello.");
-    if (strstr(bridge.payload(), "AUTH")) {
-        bridge.send("AUTH", token);
-        if (waitLine(10) <= 0 || strcmp(bridge.verb(), "OK"))
-            fatal("The bridge rejected our CLAUDE_TOKEN.");
-    }
-    bridge.send("INFO");
-    if (waitLine(10) > 0 && !strcmp(bridge.verb(), "INFO"))
-        strncpy(backend, bridge.payload(), sizeof(backend) - 1);
+    const char *err = connectBridge();
+    if (err)
+        fatal(err);
 
     welcome();
     statusNote = NULL;
@@ -877,14 +969,20 @@ int main(int argc, char *argv[])
     unsigned long lastSpin = *biosTicks;
 
     while (!quitting) {
-        int rc = bridge.poll();
-        if (rc > 0) {
-            handleLine(bridge.verb(), bridge.payload());
-            continue;
-        }
-        if (rc < 0) {
-            drawHint();
-            fatal(bridge.errorText());
+        if (linkUp) {
+            int rc = bridge.poll();
+            if (rc > 0) {
+                pinged = 0;
+                handleLine(bridge.verb(), bridge.payload());
+                lastRx = *biosTicks;      /* after it: a tool may have run a while */
+                continue;
+            }
+            if (rc < 0)
+                linkLost(bridge.errorText());
+            else
+                checkLink();
+        } else if ((long)(*biosTicks - retryAt) >= 0) {
+            reconnect();
         }
         if (XTBridge::breakPressed)
             break;
@@ -896,7 +994,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    bridge.send("QUIT");
+    if (linkUp)
+        bridge.send("QUIT");
     bridge.close();
     XTBridge::stopStack();
     scr_done();

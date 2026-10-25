@@ -11,6 +11,9 @@ void tools_toggle_safe(void);
    answered "stopped" without running. */
 void tools_stopping(int on);
 
+/* Forget a half-received call and any STOP in progress (the link was lost). */
+void tools_reset(void);
+
 /* Handle a protocol line if it belongs to a tool call; returns 1 if consumed.
    A CALL runs the tool before returning. */
 int  tools_line(const char *verb, const char *payload);

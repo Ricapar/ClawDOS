@@ -255,6 +255,15 @@ void tools_init(int safeMode, int noUser)
 
 void tools_stopping(int on) { stopping = on; }
 
+void tools_reset(void)
+{
+    callId[0] = 0;
+    callName[0] = 0;
+    targ_reset();
+    argsOverflow = 0;
+    stopping = 0;
+}
+
 int tools_safe(void) { return safe; }
 void tools_toggle_safe(void) { safe = !safe; }
 
@@ -406,7 +415,9 @@ int tools_line(const char *verb, const char *payload)
         return 1;
     }
     if (!strcmp(verb, "CALL")) {
-        runCall();
+        if (callId[0])                /* not a call cut short by a lost link */
+            runCall();
+        callId[0] = 0;
         return 1;
     }
     return 0;

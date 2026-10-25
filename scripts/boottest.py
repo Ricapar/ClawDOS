@@ -29,6 +29,10 @@ DONE = b'CLAUDEXT-TEST-DONE'
 # aliasing behaviour; 86Box (run86box.py) remains the accurate 8088 check.
 CPUTYPE = '80186'
 
+# The mock bridge gets its own port so a real bridge on 8023 can keep running
+# (and isn't reached, with its API key, by test traffic). Tests use 10.0.2.2:18023.
+TEST_BRIDGE_PORT = 18023
+
 
 def dosbox():
     # Prefer the portable MinGW build from setup-tools.ps1: it has SLiRP networking.
@@ -57,7 +61,7 @@ def main():
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the serial or bridge log (repeatable)')
     ap.add_argument('--bridge', action='store_true',
-                    help='run the mock bridge (xtbridge.py --mock) on port 8023 during the test')
+                    help=f'run the mock bridge (xtbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
     a = ap.parse_args()
 
     if not a.no_build:
@@ -84,7 +88,8 @@ def main():
     if a.bridge:
         with open(bridge_log, 'wb') as f:
             bridge = subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'xtbridge.py'),
-                                       '--mock', '--speed', '0', '--port', '8023', '-v'],
+                                       '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT),
+                                       '--log', '-', '-v'],
                                       stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     proc = subprocess.Popen(cmd, cwd=build.BUILD, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
