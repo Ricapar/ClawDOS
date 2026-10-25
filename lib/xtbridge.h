@@ -66,7 +66,7 @@ class XTBridge {
 
   private:
     TcpSocket *sock;
-    uint8_t dead;                     /* poll() reported the connection gone */
+    uint8_t dead;                     /* poll() or a failed send found the link gone */
     char  rx[XTBRIDGE_LINE_MAX];
     uint16_t rxLen;
     uint16_t consumed;

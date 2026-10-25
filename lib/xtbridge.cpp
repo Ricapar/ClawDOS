@@ -147,6 +147,8 @@ int XTBridge::poll(void)
 {
     if (sock == NULL)
         return -1;
+    if (dead)                             /* a send failed: report it here */
+        return -1;
     if (consumed) {                       /* drop the line handed out last time */
         rxLen -= consumed;
         memmove(rx, rx + consumed, rxLen);
@@ -178,7 +180,7 @@ int8_t XTBridge::send(const char *verb, const char *payload)
     static char tx[XTBRIDGE_LINE_MAX + 16];
     uint16_t len, off = 0;
 
-    if (sock == NULL)
+    if (sock == NULL || dead)
         return -1;
     len = strlen(verb);
     memcpy(tx, verb, len);
@@ -195,14 +197,19 @@ int8_t XTBridge::send(const char *verb, const char *payload)
     clockTicks_t start = TIMER_GET_CURRENT();
     while (off < len) {
         int16_t n = sock->send((uint8_t *)tx + off, len - off);
+        /* A line that didn't go out (or only partly) leaves the bridge and us
+           out of step: the link is no use any more, so say so and let the
+           caller reconnect rather than carry on as if it had been sent. */
         if (n < 0) {
             err = "Send failed";
+            dead = 1;
             return -1;
         }
         off += n;
         Utils::processPackets();
         if (Timer_diff(start, TIMER_GET_CURRENT()) > TIMEOUT_TICKS) {
-            err = "Send timed out";
+            err = "Send timed out (the network stalled)";
+            dead = 1;
             return -1;
         }
     }
