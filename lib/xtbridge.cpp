@@ -16,7 +16,10 @@
 
 #include "xtbridge.h"
 
-#define TIMEOUT_TICKS (10 * 18ul)
+/* How long one line may take to go out. WiFi stalls on the real XT last tens
+   of seconds and then recover; giving up sooner drops a link that would have
+   carried on, and loses whatever tool result was being sent. */
+#define TIMEOUT_TICKS (30 * 18ul)
 
 volatile uint8_t XTBridge::breakPressed = 0;
 

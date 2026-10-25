@@ -26,6 +26,7 @@ import logging
 import logging.handlers
 import os
 import secrets
+import socket
 import time
 
 import convlog
@@ -101,6 +102,16 @@ class Session:
         self.memories = None         # the XT's memory index for this conversation, once listed
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
+        # asyncio turns Nagle off, so each streamed TXT fragment would be its own
+        # tiny packet: a burst of them overflows the XT's few receive buffers,
+        # and the drops stall the link for tens of seconds while Windows backs
+        # off retransmitting. With Nagle on they are coalesced into full packets.
+        sock = writer.get_extra_info('socket')
+        if sock is not None:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 0)
+            except OSError:
+                pass
         self.tools_sent = 0
         self.tool = None             # (id, future, OUT chunks) of the call in progress
         purge_parked()
