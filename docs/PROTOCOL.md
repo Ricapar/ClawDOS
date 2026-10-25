@@ -27,6 +27,7 @@ receive buffer on the XT always holds a whole line.
 | `MSG <text>` | Send a user message. The reply streams back as `TXT`/`NL` lines, then `END` or `ERR`. One at a time (`ERR busy` otherwise). |
 | `STOP` | Cancel the reply in progress. |
 | `NEW` | Start a new conversation. |
+| `LOG text` | Diagnostics for the bridge's log (CLAUDE `-watch`); no reply. |
 | `INFO`, `PING`, `QUIT` | Housekeeping. CLAUDE.EXE pings a bridge that has been quiet for 60 s (20 s while waiting for a reply) and treats no answer within 15 s as a lost link. |
 
 A `MSG` starting with `/model` (or `/provider`) is answered by the bridge

@@ -128,6 +128,9 @@ class Session:
         if verb == 'PING':
             await self.send('PONG')
             return True
+        if verb == 'LOG':            # diagnostics from the XT (CLAUDE -watch); no reply
+            log.info('%s XT: %s', self.peer, from_cp437(rest))
+            return True
         if verb == 'AUTH':
             self.authed = not self.args.token or from_cp437(rest) == self.args.token
             await self.send('OK' if self.authed else 'ERR', b'' if self.authed else b'bad token')
