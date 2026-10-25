@@ -605,10 +605,13 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
 
     def test_composed_prompt(self):
         system = providers.system_prompt({'name': 'Claude', 'prompt_text': 'Be {name}-like.'})
-        self.assertIn('IBM PC XT', system)                  # the built-in core...
-        self.assertIn('real IBM PC XT', system)             # ...and the tools section stay
-        self.assertTrue(system.endswith('Be Claude-like.'))  # the file comes last
-        self.assertNotIn('fairly short', providers.system_prompt({'name': 'Claude'}))
+        self.assertTrue(system.startswith('Be Claude-like.\n\n'))   # the file is the prompt...
+        self.assertIn('real IBM PC XT', system)                     # ...then the tools add-on
+        self.assertNotIn('code page 437', system)                   # nothing else built in
+        self.assertFalse(hasattr(providers, 'SYSTEM_PROMPT'))
+        default = providers.system_prompt({'name': 'Claude'})        # no text given: default.txt
+        self.assertTrue(default.startswith('You are Claude, chatting'))
+        self.assertIn('code page 437', default)
 
     def test_backends_reload_each_conversation(self):
         table = providers.load_providers()

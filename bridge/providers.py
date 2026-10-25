@@ -55,15 +55,6 @@ BUILTIN = {
     'mock': {'type': 'mock', 'name': 'Claude', 'model': 'mock'},
 }
 
-SYSTEM_PROMPT = """\
-You are {name}, chatting with someone through Claude-XT on a 1983 IBM PC XT \
-(Intel 8088 at 4.77 MHz, 640 KB RAM, CGA display), connected to you over a \
-network bridge. Your replies appear on an 80-column text-mode screen using \
-code page 437, so write plain text: no Markdown syntax such as **bold**, # \
-headings, tables, or code fences, because it would show up literally. Simple \
-lists with "-" are fine. Latency-sensitive; begin your visible answer \
-immediately."""
-
 
 class ConfigError(Exception):
     pass
@@ -241,13 +232,11 @@ def transcript(chat):
 
 
 def system_prompt(p):
-    """The built-in prompt, then the prompt file's text (Backends puts it in
-    p['prompt_text']) with {name} filled in."""
+    """The prompt file's text (Backends puts it in p['prompt_text']; else
+    prompts/default.txt) with {name} filled in, then the add-ons: the tools."""
     name = p.get('name', 'a helpful AI assistant')
-    system = SYSTEM_PROMPT.format(name=name) + '\n\n' + TOOLS_PROMPT
-    if p.get('prompt_text'):
-        system += '\n\n' + p['prompt_text'].replace('{name}', name)
-    return system
+    text = p.get('prompt_text') or prompts.load(prompts.DEFAULT)
+    return text.replace('{name}', name) + '\n\n' + TOOLS_PROMPT
 
 
 def report(chat, round, started, first, **fields):

@@ -1,10 +1,11 @@
 """System prompt files: bridge/prompts/<name>.txt, chosen with --prompt NAME.
 
-A prompt file steers the conversation (tone, length, role). It goes on top of
-the built-in prompt (providers.SYSTEM_PROMPT and tools.TOOLS_PROMPT), which
-keeps what the XT needs: plain text for an 80-column CP437 screen, and how the
-tools work. {name} in a file becomes the assistant's name. Files are read each
-time a conversation starts, so edits apply without restarting the bridge.
+The file is the system prompt; the bridge appends its add-ons after it (how the
+tools work, tools.TOOLS_PROMPT). So a prompt must itself tell the model about
+the screen: plain text for 80 columns of code page 437, no Markdown; copy
+default.txt to start a new one. {name} becomes the assistant's name. Files are
+read each time a conversation starts, so edits apply without restarting the
+bridge.
 """
 
 import os

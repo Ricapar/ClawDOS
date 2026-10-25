@@ -30,12 +30,14 @@ client that runs on the XT.
 
 ### System prompts
 
-The bridge builds each conversation's system prompt from a built-in part (the
-XT's screen and the tools, which keep the display working) plus a prompt file
-of your own: `bridge/prompts/NAME.txt`, chosen with `--prompt NAME` (default:
-`default.txt`). Put tone, length or a role in it; `{name}` becomes the
-assistant's name. Files are re-read at the start of every conversation, so an
-edit applies from the next chat (F2 on the XT) without restarting the bridge.
+The system prompt comes from a file: `bridge/prompts/NAME.txt`, chosen with
+`--prompt NAME` (default: `default.txt`). The bridge appends its add-ons after
+it: how the XT's tools work, and (soon) the index of the XT's memories. Since
+the file is the whole prompt, it must tell the model about the screen (plain
+text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
+becomes the assistant's name. Files are re-read at the start of every
+conversation, so an edit applies from the next chat (F2 on the XT) without
+restarting the bridge.
 
 ### Logs
 
