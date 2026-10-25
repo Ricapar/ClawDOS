@@ -120,6 +120,10 @@ def tour_steps():
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
         ('draw', {'script': TOUR_DRAW}, 'ok', None),
         ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
+        ('memory_write', {'name': 'CXTTOUR', 'text': 'Tour memory\nSecond line.'}, 'ok', None),
+        ('memory_list', {}, 'ok', 'CXTTOUR'),
+        ('memory_read', {'name': 'cxttour'}, 'ok', 'Second line.'),
+        ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
         # captured output, not the screen-text fallback
         ('run', {'command': 'VER'}, 'ok', lambda r: 'FreeCom' in r and '(screen text)' not in r),
     ]

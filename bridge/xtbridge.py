@@ -70,6 +70,7 @@ class Session:
         self.task = None
         self.clog = convlog.NoLog()  # the conversation log, opened once numbered
         self.turn = None             # usage and text of the reply in progress
+        self.memories = None         # the XT's memory index for this conversation, once listed
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
         self.tools_sent = 0
@@ -142,7 +143,20 @@ class Session:
 
     def attach(self, chat):
         chat.on_api_call = self.api_called
+        providers.set_memories(chat, getattr(self, 'memories', None))
         return chat
+
+    async def list_memories(self):
+        """Once per conversation, on a backend with a system prompt: list the XT's
+        memories (an ordinary tool call) and add them to the prompt."""
+        if self.memories is not None or not providers.uses_system_prompt(self.chat):
+            return
+        result = await self.run_tool(ToolCall('memory_list', {}))
+        if result.status != 'ok':
+            log.info('%s no memory list: %s %s', self.peer, result.status, result.text[:80])
+        self.memories = result.text if result.status == 'ok' else ''
+        providers.set_memories(self.chat, self.memories)
+        self.clog.event('system_prompt', text=self.chat.system)
 
     def api_called(self, info):
         """A backend finished one API round (see providers.report)."""
@@ -188,6 +202,7 @@ class Session:
         elif verb == 'NEW':
             if self.task:
                 self.task.cancel()
+            self.memories = None
             self.chat = self.attach(self.backends.make(self.chat.provider, self.chat.model))
             self.clog.event('new_chat')
             await self.send('OK')
@@ -283,6 +298,7 @@ class Session:
         line_open = False            # sent text that isn't followed by NL yet
         reply = self.chat.reply(text)
         try:
+            await self.list_memories()
             async for item in reply:
                 if isinstance(item, ToolCall):
                     self.flush_text()

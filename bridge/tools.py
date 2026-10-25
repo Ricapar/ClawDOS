@@ -41,8 +41,8 @@ PLAY_HELP = (
     "Tn tempo 32-255 quarter notes per minute (default 120); a dot after a note makes it 1.5 "
     "times as long; MN normal, ML legato, MS staccato. Esc stops playback.")
 
-# name, class (R read-only, H harmless output, W changes something), description,
-# params {key: (description, required)}
+# name, class (R read-only, H harmless output, W changes something and may need
+# the user's OK, M memory: never asks), description, params {key: (description, required)}
 TOOLS = [
     {'name': 'sysinfo', 'cls': 'R',
      'description': "Describe the XT: DOS version, total and free memory, EMS, drives with "
@@ -108,13 +108,43 @@ TOOLS = [
                     "6 brown, 7 grey, 8 dark grey, 9-F bright versions; E yellow, F white); "
                     "~~ is a literal ~. Lines over 78 columns are cut, at most 40 lines.",
      'params': {'text': ("The text, with newlines between lines", True)}},
+    {'name': 'memory_list', 'cls': 'M',
+     'description': "List your memories on this machine (C:\\MEMORY): name, size and first line "
+                    "of each. The list as of the start of the conversation is already in your "
+                    "instructions.",
+     'params': {}},
+    {'name': 'memory_read', 'cls': 'M',
+     'description': "Read one of your memories in full.",
+     'params': {'name': ("The memory's name, e.g. TRAINS", True)}},
+    {'name': 'memory_write', 'cls': 'M',
+     'description': "Save a memory for future conversations, replacing any with the same name. "
+                    "Never needs the user's approval. Make the first line a one-line summary; "
+                    "at most 4000 bytes.",
+     'params': {'name': ("1-8 letters, digits, _ or -, e.g. TRAINS", True),
+                'text': ("The memory's text", True)}},
 ]
 
 BY_NAME = {t['name']: t for t in TOOLS}
 
 # The argument shown next to the tool name in transcripts.
 HEADER_KEY = {'dir': 'path', 'read': 'path', 'write': 'path', 'delete': 'path', 'mkdir': 'path',
-              'rename': 'from', 'run': 'command', 'peek': 'addr', 'poke': 'addr', 'port': 'port'}
+              'rename': 'from', 'run': 'command', 'peek': 'addr', 'poke': 'addr', 'port': 'port',
+              'memory_read': 'name', 'memory_write': 'name'}
+
+MEMORY_PROMPT = """\
+Memories: this machine keeps notes you saved in earlier conversations, in \
+C:\\MEMORY. Read one with memory_read when it is relevant. Save what is worth \
+knowing next time with memory_write: what the user told you about themselves or \
+this machine, what you built or tried together, what worked and what didn't. \
+Give each memory a short name and make its first line a one-line summary; \
+writing a name again replaces it, so read before updating. Memories now \
+(name, bytes, first line):
+{index}"""
+
+
+def memory_prompt(index):
+    """The memories add-on for the system prompt, from memory_list's output."""
+    return MEMORY_PROMPT.format(index=index.strip() or '(none)')
 
 TOOLS_PROMPT = """\
 You also have tools that run on this real IBM PC XT itself (FreeDOS, 8088, CGA): \

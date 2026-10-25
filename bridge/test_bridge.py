@@ -56,6 +56,18 @@ class Client:
 class ToolClient(Client):
     """A fake XT that answers tool calls. respond(name, args) -> (status, text)."""
 
+    memories = 'no memories yet'
+
+    def default_respond(self, name, args):
+        if name == 'memory_list':
+            return 'ok', self.memories
+        return 'ok', 'done'
+
+    async def ask(self, text):
+        """Client.ask, answering any tool calls on the way."""
+        reply, _, verb = await self.ask_tools(text, self.default_respond)
+        return reply, verb, self.last_payload
+
     async def ask_tools(self, text, respond, raw=None):
         """Send MSG; return (reply text, [(name, args)], final verb)."""
         await self.send('MSG ' + text)
@@ -84,6 +96,7 @@ class ToolClient(Client):
                     await self.send('OUT ' + escape(result[i:i + 300]))
                 await self.send(f'DONE {tid} {status}')
             else:
+                self.last_payload = rest
                 return ''.join(out), calls, verb
 
 
@@ -109,6 +122,12 @@ def tour_responder(bad_readback=False):
             return 'ok', '0000:04F0  43 58 54  CXT'
         if name == 'run':
             return 'ok', 'exit code 0\nFreeCom version 0.86'
+        if name == 'memory_write' and not args['name'].isalnum():
+            return 'error', 'bad memory name'
+        if name == 'memory_list':
+            return 'ok', 'CXTTOUR       27  Tour memory'
+        if name == 'memory_read':
+            return 'ok', 'Tour memory\nSecond line.'
         return 'ok', 'done'
     return respond
 
@@ -255,7 +274,7 @@ class Tools(BridgeTest):
     async def test_tooltour_reports(self):
         text, calls, verb = await self.c.ask_tools('!tooltour', tour_responder())
         self.assertEqual(verb, 'END')
-        self.assertEqual(len(calls), 18)
+        self.assertEqual(len(calls), 22)
         self.assertIn('tool tour: PASS', text)
         text, _, _ = await self.c.ask_tools('!tooltour', tour_responder(bad_readback=True))
         self.assertIn('tool tour: FAIL', text)
@@ -349,7 +368,9 @@ class FakeOpenAI:
         writer.close()
 
 
-class Providers(BridgeTest):
+class FakeBackendTest(BridgeTest):
+    """A session with an OpenAI-compatible fake backend available as 'fake'."""
+
     async def asyncSetUp(self):
         self.fake = FakeOpenAI()
         port = await self.fake.start()
@@ -366,6 +387,8 @@ class Providers(BridgeTest):
         self.fake.server.close()
         self.tmp.cleanup()
 
+
+class Providers(FakeBackendTest):
     async def test_list_and_switch_keeps_history(self):
         await self.c.ask('hello there')
         text, verb, _ = await self.c.ask('/model')
@@ -408,10 +431,10 @@ class Providers(BridgeTest):
         await self.c.ask('/model fake')
         text, calls, verb = await self.c.ask_tools('use tool', lambda n, a: ('ok', '1 @ECHO OFF'))
         self.assertEqual(verb, 'END')
-        self.assertEqual(calls, [('read', {'path': 'C:\\A.BAT'})])
+        self.assertEqual(calls, [('memory_list', {}), ('read', {'path': 'C:\\A.BAT'})])
         body = self.fake.requests[-1][1]
         self.assertEqual([m['role'] for m in body['messages']], ['system', 'user', 'assistant', 'tool'])
-        self.assertEqual(len(body['tools']), 14)
+        self.assertEqual(len(body['tools']), 17)
         self.assertEqual(body['messages'][2]['tool_calls'][0]['function']['name'], 'read')
         self.assertEqual(body['messages'][3], {'role': 'tool', 'tool_call_id': 'call_1',
                                                'content': '1 @ECHO OFF'})
@@ -420,7 +443,7 @@ class Providers(BridgeTest):
     async def test_openai_bad_json_args(self):
         await self.c.ask('/model fake')
         _, calls, verb = await self.c.ask_tools('bad args', lambda n, a: ('ok', 'x'))
-        self.assertEqual((calls, verb), ([], 'END'))
+        self.assertEqual((calls, verb), ([('memory_list', {})], 'END'))
         self.assertTrue(self.fake.requests[-1][1]['messages'][-1]['content'].startswith('Error:'))
 
     async def test_openai_failures(self):
@@ -631,6 +654,50 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
             await xtbridge.start(args)
 
 
+class Memories(FakeBackendTest):
+    """The bridge lists the XT's memories at the start of each conversation on a
+    backend with a system prompt, and adds them to it."""
+
+    INDEX = 'TRAINS        41  Rich likes model trains'
+
+    async def system_sent(self):
+        head, body = self.fake.requests[-1]
+        return body['messages'][0]['content']
+
+    async def test_first_message_lists_memories(self):
+        await self.c.ask('/model fake')
+        seen = []
+
+        def respond(name, args):
+            seen.append(name)
+            return 'ok', self.INDEX
+        text, calls, verb = await self.c.ask_tools('hello', respond)
+        self.assertEqual(verb, 'END')
+        self.assertEqual(seen, ['memory_list'])
+        system = await self.system_sent()
+        self.assertTrue(system.startswith('You are Fakey'))
+        self.assertIn('memory_write', system)
+        self.assertTrue(system.endswith(self.INDEX))
+        # not again for the second message, but again after NEW
+        await self.c.ask_tools('again', respond)
+        self.assertEqual(seen, ['memory_list'])
+        self.assertTrue((await self.system_sent()).endswith(self.INDEX))
+        await self.c.send('NEW')
+        await self.c.line()
+        await self.c.ask_tools('fresh', respond)
+        self.assertEqual(seen, ['memory_list', 'memory_list'])
+
+    async def test_failed_list_is_harmless(self):
+        await self.c.ask('/model fake')
+        text, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('error', 'unknown tool memory_list'))
+        self.assertEqual((text, verb), ('Fake says: hello\nbye', 'END'))
+        self.assertIn('(none)', await self.system_sent())
+
+    async def test_mock_does_not_list(self):
+        text, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('ok', 'x'))
+        self.assertEqual((calls, verb), ([], 'END'))
+
+
 class FakeAnthropic:
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
@@ -730,7 +797,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((items[1].name, items[1].args), ('read', {'path': 'C:\\A.BAT'}))
         self.assertEqual(items[2:], ['done'])
         req = self.fake.requests[1]
-        self.assertEqual(len(req['tools']), 14)
+        self.assertEqual(len(req['tools']), 17)
         msgs = req['messages']
         self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
         self.assertEqual(msgs[2]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',

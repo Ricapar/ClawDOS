@@ -56,13 +56,15 @@ class Encoding(unittest.TestCase):
 class Schemas(unittest.TestCase):
     def test_schemas(self):
         names = [t['name'] for t in TOOLS]
-        self.assertEqual(len(names), 14)
-        self.assertEqual(len(set(names)), 14)
+        self.assertEqual(len(names), 17)
+        self.assertEqual(len(set(names)), 17)
         cls = {t['name']: t['cls'] for t in TOOLS}
         self.assertEqual({n for n, c in cls.items() if c == 'R'}, {'sysinfo', 'dir', 'read', 'peek'})
         self.assertEqual({n for n, c in cls.items() if c == 'H'}, {'draw', 'play', 'textart'})
         self.assertEqual({n for n, c in cls.items() if c == 'W'},
                          {'write', 'delete', 'mkdir', 'rename', 'run', 'poke', 'port'})
+        self.assertEqual({n for n, c in cls.items() if c == 'M'},
+                         {'memory_list', 'memory_read', 'memory_write'})
         for t, a in zip(TOOLS, anthropic_tools()):
             schema = a['input_schema']
             required = [k for k, (_, req) in t['params'].items() if req]
@@ -70,7 +72,7 @@ class Schemas(unittest.TestCase):
             for prop in schema['properties'].values():
                 self.assertEqual(prop['type'], 'string')
         o = openai_tools()
-        self.assertEqual(len(o), 14)
+        self.assertEqual(len(o), 17)
         self.assertEqual(o[0]['type'], 'function')
         self.assertEqual(o[0]['function']['name'], TOOLS[0]['name'])
 

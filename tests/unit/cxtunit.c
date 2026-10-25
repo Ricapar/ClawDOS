@@ -8,6 +8,7 @@
 #include "play.h"
 #include "basdraw.h"
 #include "raster.h"
+#include "memory.h"
 
 static int passed, failed;
 
@@ -263,6 +264,31 @@ static unsigned count(int k)
     return n;
 }
 
+static void testMemory(void)
+{
+    char out[MEM_SUMMARY + 1];
+
+    CHECK("mem name plain", mem_name_ok("TRAINS"));
+    CHECK("mem name lower", mem_name_ok("trains"));
+    CHECK("mem name 8", mem_name_ok("ABCD_E-9"));
+    CHECK("mem name empty", !mem_name_ok(""));
+    CHECK("mem name 9", !mem_name_ok("ABCDEFGHI"));
+    CHECK("mem name dot", !mem_name_ok("A.TXT"));
+    CHECK("mem name path", !mem_name_ok("..\\X"));
+    CHECK("mem name space", !mem_name_ok("A B"));
+
+    mem_summary("First line\r\nsecond", 19, out);
+    CHECK_STR("mem summary", out, "First line");
+    mem_summary("\r\n\n   Indented\n", 15, out);
+    CHECK_STR("mem summary skips blank", out, "Indented");
+    mem_summary("", 0, out);
+    CHECK_STR("mem summary empty", out, "");
+    mem_summary("x\x1A tail", 7, out);
+    CHECK_STR("mem summary eof", out, "x");
+    mem_summary("0123456789012345678901234567890123456789012345678901234567890123456789", 70, out);
+    CHECK_STR("mem summary cut", out, "012345678901234567890123456789012345678901234567890123456...");
+}
+
 static void testRaster(void)
 {
     Raster big = { 0, bPlot, bPoint, NULL, 319, 199 };
@@ -313,6 +339,7 @@ int main(void)
     testPlay();
     testDraw();
     testRaster();
+    testMemory();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

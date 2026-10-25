@@ -32,12 +32,22 @@ client that runs on the XT.
 
 The system prompt comes from a file: `bridge/prompts/NAME.txt`, chosen with
 `--prompt NAME` (default: `default.txt`). The bridge appends its add-ons after
-it: how the XT's tools work, and (soon) the index of the XT's memories. Since
+it: how the XT's tools work, and the index of the XT's memories. Since
 the file is the whole prompt, it must tell the model about the screen (plain
 text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
 becomes the assistant's name. Files are re-read at the start of every
 conversation, so an edit applies from the next chat (F2 on the XT) without
 restarting the bridge.
+
+### Memories
+
+Claude keeps notes on the XT itself, in `C:\MEMORY\NAME.TXT` (first line: a
+one-line summary; at most 4000 bytes each). At the start of every conversation
+the bridge runs `memory_list` on the XT (you'll see a `Memories` line) and puts
+the list into the system prompt, so Claude knows what it saved before and reads
+a memory in full when it's relevant. The memory tools never ask in safe mode.
+Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or ask Claude to (that uses
+`delete`, which does ask). The mock and replay backends don't list memories.
 
 ### Logs
 
@@ -95,10 +105,11 @@ transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 | `draw` | Draw a CGA picture from a GW-BASIC-style script (SCREEN, LINE, CIRCLE, PAINT, DRAW, PRINT...) |
 | `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
 | `textart` | Print coloured CP437 text art into the chat |
+| `memory_list`, `memory_read`, `memory_write` | Claude's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
 
 **Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
 that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
-drawing and playing music never ask. `-unsafe` starts with it off, and `-q`
+drawing, playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
 or be stopped with Ctrl-C, and get about 210K of memory.
@@ -112,7 +123,7 @@ With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 | Path | What |
 |---|---|
 | `src/claude/` | CLAUDE.EXE |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `sysinfo`, `shell`, `basdraw` + `raster` + `gfx` (drawing), `play` + `sound` (music) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `basdraw` + `raster` + `gfx` (drawing), `play` + `sound` (music) |
 | `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |

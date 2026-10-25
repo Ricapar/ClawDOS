@@ -16,6 +16,7 @@
 
 #include "toolapi.h"
 #include "dosfs.h"
+#include "memory.h"
 #include "sysinfo.h"
 #include "sound.h"
 #include "gfx.h"
@@ -32,7 +33,8 @@ struct ToolDef {
     const char *name;
     const char *title;                /* shown as Title(arg) */
     const char *headerKey;            /* argument shown in the header */
-    char cls;                         /* R read-only, H harmless output, W writes */
+    char cls;                         /* R read-only, H harmless output, W writes (asks
+                                         in safe mode), M memory (never asks) */
     const char *busy;                 /* spinner verb */
     ToolFn fn;
 };
@@ -231,6 +233,10 @@ static const ToolDef tools[] = {
     { "play",    "Play",    NULL,      'H', "Playing",    tool_play },
     { "draw",    "Draw",    NULL,      'H', "Drawing",    toolDraw },
     { "run",     "Run",     "command", 'W', "Running",    toolRun },
+    /* 'M': memories are the model's own notes, so it never has to ask */
+    { "memory_list",  "Memories", NULL,   'M', "Remembering", tool_memory_list },
+    { "memory_read",  "Memory",   "name", 'M', "Remembering", tool_memory_read },
+    { "memory_write", "Remember", "name", 'M', "Remembering", tool_memory_write },
 };
 
 

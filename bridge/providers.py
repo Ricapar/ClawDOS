@@ -30,8 +30,8 @@ import tomllib
 import prompts
 from mockchat import MockChat, Refused
 from replay import ReplayChat
-from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, openai_tools,
-                   stringify, summary)
+from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, memory_prompt,
+                   openai_tools, stringify, summary)
 
 log = logging.getLogger('xtbridge')
 
@@ -239,6 +239,17 @@ def system_prompt(p):
     return text.replace('{name}', name) + '\n\n' + TOOLS_PROMPT
 
 
+def uses_system_prompt(chat):
+    return hasattr(chat, 'base_system')
+
+
+def set_memories(chat, index):
+    """Put the memories add-on (memory_list's output; None: not listed) after
+    the chat's system prompt."""
+    if uses_system_prompt(chat):
+        chat.system = chat.base_system + ('' if index is None else '\n\n' + memory_prompt(index))
+
+
 def report(chat, round, started, first, **fields):
     """Tell chat.on_api_call (set by the bridge's session, if any) about one API
     round: model, stop_reason and usage in fields; started/first are monotonic
@@ -297,7 +308,7 @@ class AnthropicChat:
         self.client = client
         self.model = model
         self.effort = effort
-        self.system = system_prompt(p)
+        self.system = self.base_system = system_prompt(p)
         self.messages = []
 
     def _add_user(self, text):
@@ -391,7 +402,7 @@ class OpenAIChat:
     def __init__(self, client, model, p):
         self.client = client
         self.model = model
-        self.system = system_prompt(p)
+        self.system = self.base_system = system_prompt(p)
         self.extra = p.get('extra', {})
         self.stream_usage = p.get('stream_usage', True)   # false for servers that reject stream_options
         self.messages = []
