@@ -3,5 +3,5 @@ FILES=20
 BUFFERS=15
 LASTDRIVE=H
 SHELL=C:\COMMAND.COM C:\ /E:1024 /P
-; Uncomment once EMS is enabled in the PicoMEM BIOS (Memory menu):
-;DEVICE=C:\PICOMEM\PMEMM.EXE /n
+; EMS via PicoMEM. Enable EMS in the PicoMEM BIOS (Memory menu) first.
+DEVICE=C:\PICOMEM\PMEMM.EXE /n
