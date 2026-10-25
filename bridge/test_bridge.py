@@ -140,6 +140,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=self.speed,
                                      token=self.token, config=getattr(self, 'config', None),
                                      convlog=getattr(self, 'convlog', None))
+        xtbridge.conversations.clear()
         self.server = await xtbridge.start(args)
         port = self.server.sockets[0].getsockname()[1]
         self.c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
@@ -153,7 +154,8 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
 
 class MockProtocol(BridgeTest):
     async def test_hello_info_ping(self):
-        self.assertEqual(self.hello, ('HELLO', b'XTBRIDGE 1'))
+        self.assertEqual(self.hello[0], 'HELLO')
+        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 SESSION [0-9a-f]{8}$')
         await self.c.send('INFO')
         verb, rest = await self.c.line()
         self.assertEqual(verb, 'INFO')
@@ -300,7 +302,8 @@ class Auth(BridgeTest):
     token = 'sekrit'
 
     async def test_auth(self):
-        self.assertEqual(self.hello, ('HELLO', b'XTBRIDGE 1 AUTH'))
+        self.assertEqual(self.hello[0], 'HELLO')
+        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 AUTH SESSION [0-9a-f]{8}$')
         await self.c.send('MSG hi')
         self.assertEqual(await self.c.line(), ('ERR', b'AUTH required'))
         await self.c.send('AUTH wrong')
@@ -696,6 +699,74 @@ class Memories(FakeBackendTest):
     async def test_mock_does_not_list(self):
         text, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('ok', 'x'))
         self.assertEqual((calls, verb), ([], 'END'))
+
+
+class Resume(BridgeTest):
+    """A reconnecting XT gets its conversation back (RESUME <session>)."""
+
+    async def connect(self):
+        port = self.server.sockets[0].getsockname()[1]
+        c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
+        verb, rest = await c.line()
+        self.assertEqual(verb, 'HELLO')
+        return c, rest.decode()
+
+    def session(self, hello):
+        words = hello.split()
+        return words[words.index('SESSION') + 1]
+
+    async def hang_up(self, c):
+        c.writer.close()
+        for _ in range(50):                     # until the bridge has parked it
+            await asyncio.sleep(0.02)
+            if not any(s.client is c.writer for s in xtbridge.sessions if hasattr(s, 'client')):
+                if all(conv.session is None for conv in xtbridge.conversations.values()):
+                    break
+
+    async def test_hello_names_a_session(self):
+        token = self.session(self.hello[1].decode())
+        self.assertRegex(token, r'^[0-9a-f]{8}$')
+
+    async def test_resume_keeps_the_conversation(self):
+        token = self.session(self.hello[1].decode())
+        await self.c.ask('the first message')
+        await self.hang_up(self.c)
+        c2, hello2 = await self.connect()
+        self.assertNotEqual(self.session(hello2), token)
+        await c2.send('RESUME ' + token)
+        self.assertEqual(await c2.line(), ('OK', b'resumed'))
+        text, verb, _ = await c2.ask('!history')
+        self.assertIn('the first message', text)
+        c2.writer.close()
+
+    async def test_unknown_or_expired_session(self):
+        c2, _ = await self.connect()
+        await c2.send('RESUME 0badc0de')
+        self.assertEqual(await c2.line(), ('ERR', b'unknown session'))
+        token = self.session(self.hello[1].decode())
+        await self.c.ask('remember me')
+        await self.hang_up(self.c)
+        old = xtbridge.PARK_SECONDS
+        xtbridge.PARK_SECONDS = 0
+        try:
+            await c2.send('RESUME ' + token)
+            self.assertEqual(await c2.line(), ('ERR', b'unknown session'))
+        finally:
+            xtbridge.PARK_SECONDS = old
+        c2.writer.close()
+
+    async def test_takes_over_a_stale_connection(self):
+        token = self.session(self.hello[1].decode())
+        await self.c.ask('before the drop')
+        c2, _ = await self.connect()            # the bridge still thinks c is open
+        await c2.send('RESUME ' + token)
+        self.assertEqual(await c2.line(), ('OK', b'resumed'))
+        with self.assertRaises((EOFError, ConnectionError)):
+            for _ in range(5):
+                await self.c.line(timeout=2)
+        text, _, _ = await c2.ask('!history')
+        self.assertIn('before the drop', text)
+        c2.writer.close()
 
 
 class FakeAnthropic:

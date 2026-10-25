@@ -25,6 +25,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import secrets
 import time
 
 import convlog
@@ -46,6 +47,33 @@ DEFAULT_CONVLOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs
 log = logging.getLogger('xtbridge')
 sessions = set()         # connected clients, for spotting stale ones
 connections = 0          # clients ever accepted
+PARK_SECONDS = 30 * 60   # how long a dropped XT's conversation waits for RESUME
+
+
+class Conversation:
+    """What a reconnecting XT gets back with RESUME <token>: its chat (history,
+    backend, model) and memory index. Held by a Session while connected, parked
+    for PARK_SECONDS after its connection drops."""
+
+    def __init__(self):
+        self.token = secrets.token_hex(4)
+        while self.token in conversations:
+            self.token = secrets.token_hex(4)
+        self.chat = None
+        self.memories = None
+        self.session = None      # the Session using it; None while parked
+        self.parked_at = None
+        conversations[self.token] = self
+
+
+conversations = {}       # token -> Conversation
+
+
+def purge_parked():
+    now = time.monotonic()
+    for token, conv in list(conversations.items()):
+        if conv.session is None and now - conv.parked_at >= PARK_SECONDS:
+            del conversations[token]
 
 
 def trace(peer, direction, raw):
@@ -75,6 +103,9 @@ class Session:
         self.peer = writer.get_extra_info('peername')
         self.tools_sent = 0
         self.tool = None             # (id, future, OUT chunks) of the call in progress
+        purge_parked()
+        self.conv = Conversation()
+        self.conv.session = self
 
     async def send(self, verb, payload=b''):
         # Keep lines short for the XT's receive buffer; TXT can be split freely.
@@ -94,13 +125,14 @@ class Session:
         log.info('%s connected (connection #%d, %d open)', self.peer, connections, len(sessions))
         self.clog = convlog.open_log(getattr(self.args, 'convlog', None), self.peer, connections)
         self.clog.event('session_start', peer=self.peer_text(), connection=connections,
-                        protocol=PROTOCOL_VERSION, **self.chat_fields())
+                        protocol=PROTOCOL_VERSION, conversation=self.conv.token, **self.chat_fields())
         if len(sessions) > 1:
             log.info('%s other open connections: %s', self.peer,
                      ', '.join(str(s.peer) for s in sessions if s is not self))
         why = 'closed by bridge'
         try:
-            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{" AUTH" if self.args.token else ""}'.encode())
+            auth = ' AUTH' if self.args.token else ''
+            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{auth} SESSION {self.conv.token}'.encode())
             while True:
                 try:
                     raw = await self.reader.readuntil(b'\n')
@@ -129,9 +161,40 @@ class Session:
                 await asyncio.wait([self.task], timeout=2)   # so its turn_end is logged first
             self.writer.close()
             sessions.discard(self)
+            if self.conv.session is self:      # not taken over: keep it for a RESUME
+                self.conv.chat, self.conv.memories = self.chat, self.memories
+                self.conv.session, self.conv.parked_at = None, time.monotonic()
             log.info('%s disconnected: %s (%d open)', self.peer, why, len(sessions))
             self.clog.event('session_end', reason=why)
             self.clog.close()
+
+    async def resume(self, token):
+        """RESUME <token>: carry on the conversation of an earlier connection,
+        parked or (if the bridge never noticed it drop) still attached."""
+        purge_parked()
+        conv = conversations.get(token)
+        if conv is None or conv is self.conv:
+            await self.send('ERR', b'unknown session')
+            return
+        old = conv.session
+        parked_s = None
+        if old is not None:              # a stale connection: take the conversation over
+            log.info('%s takes over conversation %s from %s', self.peer, token, old.peer)
+            conv.chat, conv.memories = old.chat, old.memories
+            conv.session = None
+            if old.task and not old.task.done():
+                old.task.cancel()
+            old.writer.close()
+        else:
+            parked_s = int(time.monotonic() - conv.parked_at)
+        del conversations[self.conv.token]
+        self.conv, conv.session = conv, self
+        self.memories = conv.memories
+        self.chat = self.attach(conv.chat)
+        log.info('%s resumed conversation %s', self.peer, token)
+        self.clog.event('session_resume', conversation=token, parked_s=parked_s,
+                        took_over=old.peer_text() if old else None)
+        await self.send('OK', b'resumed')
 
     def peer_text(self):
         return f'{self.peer[0]}:{self.peer[1]}' if self.peer else 'unknown'
@@ -189,6 +252,9 @@ class Session:
             return True
         if not self.authed:
             await self.send('ERR', b'AUTH required')
+            return True
+        if verb == 'RESUME':
+            await self.resume(from_cp437(rest).strip())
             return True
         if verb == 'OUT':
             if self.tool:

@@ -10,8 +10,8 @@ receive buffer on the XT always holds a whole line.
 
 | Line | Meaning |
 |---|---|
-| `HELLO XTBRIDGE 1` | Greeting on connect. Ends in ` AUTH` if the client must authenticate first. |
-| `OK` | Command accepted (`AUTH`, `NEW`). |
+| `HELLO XTBRIDGE 1 [AUTH] SESSION <id>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`. |
+| `OK` | Command accepted (`AUTH`, `NEW`, `RESUME` as `OK resumed`). |
 | `INFO <text>` | Backend description (reply to `INFO`). |
 | `TXT <text>` | A piece of the reply. Never contains a newline; append it to the current line. |
 | `NL` | Line break in the reply. |
@@ -24,6 +24,7 @@ receive buffer on the XT always holds a whole line.
 | Line | Meaning |
 |---|---|
 | `AUTH <token>` | Shared secret, when the bridge was started with `--token`. |
+| `RESUME <id>` | After a lost link: carry on the conversation the earlier `HELLO` named (history, backend, memories). The bridge keeps a dropped connection's conversation for 30 minutes, and takes it over from a connection it still thinks is open. `ERR unknown session` otherwise: carry on with the new one. |
 | `MSG <text>` | Send a user message. The reply streams back as `TXT`/`NL` lines, then `END` or `ERR`. One at a time (`ERR busy` otherwise). |
 | `STOP` | Cancel the reply in progress. |
 | `NEW` | Start a new conversation. |

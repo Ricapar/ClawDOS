@@ -109,6 +109,9 @@ static unsigned long pingedAt;
 static unsigned long retryAt;
 static char offlineNote[100];
 static XTBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
+static char session[16];              /* the bridge's name for our conversation, for RESUME */
+static int resumed;                   /* the last connect carried the conversation on */
+static int cutOff;                    /* the link died in the middle of a reply */
 static char lostReport[200];          /* why the last link died, for the bridge's log */
 
 static char input[INPUT_MAX + 1];
@@ -821,9 +824,16 @@ static const char *connectBridge(void)
 {
     if (bridge.connect(host, XTBRIDGE_PORT))
         return bridge.errorText();
+    char fresh[sizeof(session)] = "";
+    const char *s;
+
     if (waitLine(10) <= 0 || strcmp(bridge.verb(), "HELLO")) {
         bridge.close();
         return "The bridge didn't say hello.";
+    }
+    if ((s = strstr(bridge.payload(), "SESSION ")) != NULL) {   /* "XTBRIDGE 1 [AUTH] SESSION id" */
+        strncpy(fresh, s + 8, sizeof(fresh) - 1);
+        fresh[strcspn(fresh, " ")] = 0;
     }
     if (strstr(bridge.payload(), "AUTH")) {
         bridge.send("AUTH", token);
@@ -832,6 +842,15 @@ static const char *connectBridge(void)
             return "The bridge rejected our CLAUDE_TOKEN.";
         }
     }
+    /* After a lost link, ask for the old conversation back. An older bridge,
+       or one that has forgotten it, answers ERR and we carry on with a new one. */
+    resumed = 0;
+    if (session[0]) {
+        bridge.send("RESUME", session);
+        resumed = waitLine(10) > 0 && !strcmp(bridge.verb(), "OK");
+    }
+    if (!resumed)
+        strcpy(session, fresh);
     bridge.send("INFO");
     if (waitLine(10) > 0 && !strcmp(bridge.verb(), "INFO"))
         strncpy(backend, bridge.payload(), sizeof(backend) - 1);
@@ -870,7 +889,8 @@ static void linkLost(const char *why)
     tools_reset();
     toolVerb = NULL;
     queued = 0;
-    if (state != IDLE)
+    cutOff = state != IDLE;
+    if (cutOff)
         note("The reply was cut off.", A_ERR);
     note(why, A_ERR);
     setState(IDLE);
@@ -900,7 +920,13 @@ static void reconnect(void)
         return;
     }
     statusNote = NULL;
-    note("Reconnected to the bridge. It doesn't remember the earlier conversation.", A_DIM);
+    if (!resumed)
+        note("Reconnected to the bridge. It doesn't remember the earlier conversation.", A_DIM);
+    else if (cutOff)
+        note("Reconnected; the conversation carries on. The last reply was cut off: "
+             "ask Claude to continue if you need the rest.", A_DIM);
+    else
+        note("Reconnected; the conversation carries on.", A_DIM);
     drawFooter();
 }
 
