@@ -29,6 +29,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 ## Constraints
 - 8086 instruction set only (`wcc/wpp -0`, NASM `cpu 8086`).
 - Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
+  The real IBM CGA does NOT wrap its display at the end of its 16 KB (86Box's does): the window must stay inside it.
   A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
 - Code linking mTCP (lib/xtbridge, CLAUDE.EXE) is GPLv3.
 - Watcom on Windows: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).

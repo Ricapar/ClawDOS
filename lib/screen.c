@@ -6,9 +6,12 @@
 #include "screen.h"
 
 #define VRAM_SEG     0xB800
-#define VRAM_WORDS   0x2000          /* CGA: 16 KB, wraps at 8K cells */
+#define VRAM_WORDS   0x2000          /* CGA: 16 KB, 8K cells */
 #define WRAP(x)      ((x) & (VRAM_WORDS - 1))
-#define HIST_MAX     (VRAM_WORDS / SCR_COLS - SCR_ROWS)   /* 77 rows */
+#define VRAM_ROWS    (VRAM_WORDS / SCR_COLS)              /* 102 whole rows */
+#define HIST_MAX     (VRAM_ROWS - SCR_ROWS)               /* 77 rows */
+#define KEEP_ROWS    25              /* scrollback kept when the window moves back */
+#define MOVE_ROWS    4               /* rows copied per vertical blank meanwhile */
 #define CRTC_INDEX   0x3D4
 #define CRTC_STATUS  0x3DA
 
@@ -325,6 +328,38 @@ void scr_footer(int rows, unsigned char attr)
 
 int scr_footer_rows(void) { return foot; }
 
+/* The IBM CGA doesn't wrap its display at the end of video memory: the CRTC
+   goes on counting into addresses with no RAM behind them, which show as
+   garbage (86Box's CGA does wrap, so it can't show this). So the window must
+   never run past the last whole row. Before it would, move the live screen
+   and some scrollback back to the start of VRAM, a few rows per vertical
+   blank (no snow, and it isn't on screen yet), then point the CRTC at it. */
+static void rebase(void)
+{
+    unsigned short __far *vram = (unsigned short __far *)MK_FP(VRAM_SEG, 0);
+    int keep = history < KEEP_ROWS ? history : KEEP_ROWS;
+    unsigned from = top - keep * SCR_COLS;              /* past the copy's end */
+    unsigned n = (keep + SCR_ROWS) * SCR_COLS, done, k;
+
+    for (done = 0; done < n; done += k) {
+        k = n - done < MOVE_ROWS * SCR_COLS ? n - done : MOVE_ROWS * SCR_COLS;
+        _disable();
+        wait_vblank();
+        _fmemcpy(vram + done, vram + from + done, k * 2);
+        _enable();
+    }
+    if (shadow)
+        _fmemcpy(shadow, shadow + from, n * 2);
+    top = keep * SCR_COLS;
+    history = keep;
+    if (view > history)
+        view = history;
+    _disable();
+    wait_vblank();
+    set_start_now();
+    _enable();
+}
+
 void scr_scroll(unsigned char attr)
 {
     int bottom = SCR_ROWS - foot;   /* first footer row */
@@ -342,14 +377,17 @@ void scr_scroll(unsigned char attr)
            So the new blank row and the footer are rewritten one row further
            on, during vertical blanking along with the new start address. */
         static unsigned short rows[(SCR_FOOT_MAX + 1) * SCR_COLS];
-        unsigned off = cell_off(bottom, 0);     /* becomes row bottom-1 */
-        unsigned n = (foot + 1) * SCR_COLS;
+        unsigned off, n = (foot + 1) * SCR_COLS;
+
+        if (top + (SCR_ROWS + 1) * SCR_COLS > VRAM_ROWS * SCR_COLS)
+            rebase();
+        off = cell_off(bottom, 0);              /* becomes row bottom-1 */
 
         for (c = 0; c < SCR_COLS; c++)
             rows[c] = blank;
         if (foot)
             memcpy(rows + SCR_COLS, mirror[bottom - MIRROR_TOP], foot * sizeof(mirror[0]));
-        top = WRAP(top + SCR_COLS);
+        top += SCR_COLS;
         if (history < HIST_MAX)
             history++;
         if (view && view < history)

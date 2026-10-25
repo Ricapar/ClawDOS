@@ -1,9 +1,10 @@
 /* Claude-XT screen: direct 80x25 color text-mode output for CGA (and compatibles).
  *
  * On a real CGA the whole screen scrolls in hardware by moving the CRTC start
- * address through the card's 16 KB of video RAM, which wraps around. That
- * makes scrolling cost one row of writes instead of 24, and leaves the last
- * ~77 lines in VRAM as free scrollback. Writes wait for horizontal retrace
+ * address down through the card's 16 KB of video RAM. That makes scrolling
+ * cost one row of writes instead of 24, and leaves the rows above the screen
+ * as free scrollback (25 to 77 of them). The display doesn't wrap at the end
+ * of VRAM, so near the end the screen is moved back to the start. Writes wait for horizontal retrace
  * so the IBM CGA doesn't show "snow"; scr_set_snowcheck(0) turns that off for
  * cards that don't need it. Other adapters fall back to software scrolling.
  *
