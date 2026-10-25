@@ -450,6 +450,37 @@ class DotEnv(unittest.TestCase):
         self.assertEqual(xtbridge.load_env(os.path.join(d, 'missing')), [])
 
 
+class Replay(unittest.TestCase):
+    LOG = """2026-10-24 22:45:23.660 I ('1.2.3.4', 2063) connected (connection #1, 1 open)
+2026-10-24 22:46:05.000 I ('1.2.3.4', 2063) >> play something
+2026-10-24 22:46:06.000 D ('1.2.3.4', 2063) > TXT Here
+2026-10-24 22:46:06.500 D ('1.2.3.4', 2063) > NL
+2026-10-24 22:46:07.000 D ('1.2.3.4', 2063) > TOOL t1 play
+2026-10-24 22:46:07.000 D ('1.2.3.4', 2063) > ARG music T120 C\\nD
+2026-10-24 22:46:07.000 D ('1.2.3.4', 2063) > ARG music  E
+2026-10-24 22:46:07.000 D ('1.2.3.4', 2063) > CALL
+2026-10-24 22:46:27.000 D ('1.2.3.4', 2063) < DONE t1 ok
+2026-10-24 22:46:29.000 D ('1.2.3.4', 2063) > TXT done
+2026-10-24 22:46:29.000 D ('1.2.3.4', 2063) > END
+"""
+
+    def test_parse(self):
+        import replay
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'x.log')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(self.LOG)
+            turns = replay.parse_log(path)
+        self.assertEqual(len(turns), 1)
+        user, items = turns[0]
+        self.assertEqual(user, 'play something')
+        self.assertEqual([i for _, i in items[:2]], ['Here', '\n'])
+        delay, call = items[2]
+        self.assertEqual((call.name, call.args), ('play', {'music': 'T120 C\nD E'}))
+        self.assertEqual(delay, 0.5)
+        self.assertEqual(items[3], (2.0, 'done'))   # counted from DONE, not from CALL
+
+
 class FakeAnthropic:
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""

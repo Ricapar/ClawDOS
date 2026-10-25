@@ -26,6 +26,7 @@ import os
 import tomllib
 
 from mockchat import MockChat, Refused
+from replay import ReplayChat
 from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, openai_tools,
                    stringify, summary)
 
@@ -131,6 +132,8 @@ class Backends:
         model = model or p['model']
         if p['type'] == 'mock':
             chat = MockChat(self.speed)
+        elif p['type'] == 'replay':
+            chat = ReplayChat(p['turns'], self.speed)
         elif p['type'] == 'anthropic':
             chat = AnthropicChat(self.client(key), model, p.get('effort', 'low'), p)
         else:

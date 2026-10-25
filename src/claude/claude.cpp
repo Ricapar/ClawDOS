@@ -6,7 +6,7 @@
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAUDE [host[:port]] [-nosnow] [-unsafe] [-q] [-m message] [-i text]
+ *   CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
@@ -900,7 +900,7 @@ static void checkLink(void)
 int main(int argc, char *argv[])
 {
     char note_[120];
-    int nosnow = 0, unsafe = 0, quick = 0;
+    int nosnow = 0, noscroll = 0, unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     int i;
@@ -908,6 +908,8 @@ int main(int argc, char *argv[])
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-nosnow") || !stricmp(argv[i], "/nosnow")) {
             nosnow = 1;
+        } else if (!stricmp(argv[i], "-noscroll") || !stricmp(argv[i], "/noscroll")) {
+            noscroll = 1;
         } else if (!stricmp(argv[i], "-unsafe") || !stricmp(argv[i], "/unsafe")) {
             unsafe = 1;
         } else if (!stricmp(argv[i], "-q") || !stricmp(argv[i], "/q")) {
@@ -918,9 +920,11 @@ int main(int argc, char *argv[])
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
             printf("CLAUDE " VERSION " - chat with Claude via an XTBridge\n\n"
-                   "Usage: CLAUDE [host[:port]] [-nosnow] [-unsafe] [-q] [-m message] [-i text]\n\n"
+                   "Usage: CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q] [-m message]\n"
+                   "              [-i text]\n\n"
                    "Without a host, CLAUDE_BRIDGE from the mTCP config file is used.\n"
                    "-nosnow  skip CGA retrace waits (faster on clones and EGA/VGA)\n"
+                   "-noscroll  scroll by copying text, not by moving the CGA start address\n"
                    "-unsafe  start with safe mode off: tools run without asking\n"
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
@@ -947,7 +951,9 @@ int main(int argc, char *argv[])
     scr_init();
     if (nosnow)
         scr_set_snowcheck(0);
-    con_track_cursor(0);              /* the cursor lives in the input box */
+    if (noscroll)
+        scr_set_hwscroll(0);
+    con_track_cursor(0);             /* the cursor lives in the input box */
     con_init();
     scr_footer(footerRows(), A_TEXT);
     sprintf(note_, "Connecting to the bridge at %s ...", host);

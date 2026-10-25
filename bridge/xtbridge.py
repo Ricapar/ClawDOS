@@ -11,6 +11,7 @@ code page 437 to the XT (see docs/PROTOCOL.md) and HTTPS to the model's API.
   python bridge/xtbridge.py --provider zai --model glm-4.6
   python bridge/xtbridge.py --mock                  # offline mock of Claude (no key)
   python bridge/xtbridge.py --token SECRET          # require AUTH from clients
+  python bridge/xtbridge.py --replay bridge/xtbridge.log   # play a logged session back
 
 From the XT, "/model" lists providers and "/model openrouter:some/model"
 switches the current conversation. providers.py has the built-in providers;
@@ -26,6 +27,7 @@ import logging.handlers
 import os
 
 import providers
+import replay
 from cp437 import from_cp437, to_cp437
 from mockchat import Disconnect, MockAPIError, Refused
 from providers import APIError, Backends, ConfigError, transcript
@@ -342,12 +344,18 @@ async def main():
     ap.add_argument('--token', help='shared secret clients must send with AUTH')
     ap.add_argument('--mock', '--echo', action='store_true',
                     help='same as --provider mock: offline mock of Claude; send !help for test commands')
+    ap.add_argument('--replay', metavar='LOG',
+                    help='play back a session from a debug log (see replay.py); any message starts it')
+    ap.add_argument('--connection', type=int, metavar='N',
+                    help='replay only: the Nth connection in the log (default: the last one with a message)')
     ap.add_argument('--speed', type=float, default=1.0,
-                    help='mock only: scale delays (2 = twice as fast, 0 = no delays)')
+                    help='mock and replay: scale delays (2 = twice as fast, 0 = no delays)')
     ap.add_argument('--log', default=DEFAULT_LOG, metavar='FILE',
                     help='full debug log with a wire trace (default: bridge/xtbridge.log; "-" for none)')
     ap.add_argument('-v', '--verbose', action='store_true', help='show the debug log on the console too')
     args = ap.parse_args()
+    if args.replay and args.log == DEFAULT_LOG:   # don't append to what may be the replay's source
+        args.log = os.path.join(os.path.dirname(DEFAULT_LOG), 'replay.log')
     setup_logging(args.log, args.verbose)
     loaded = load_env()
     if loaded:
@@ -365,6 +373,15 @@ async def start(args):
     """Start listening; returns the asyncio server. Sets args.backend_name."""
     table = providers.load_providers(getattr(args, 'config', None))
     args.provider = 'mock' if args.mock else (getattr(args, 'provider', None) or 'anthropic')
+    if getattr(args, 'replay', None):
+        try:
+            turns = replay.parse_log(args.replay, getattr(args, 'connection', None))
+        except (OSError, ValueError, IndexError) as e:
+            raise ConfigError(f'replay: {e}')
+        table['replay'] = {'type': 'replay', 'name': 'Claude', 'model': os.path.basename(args.replay),
+                           'turns': turns}
+        args.provider = 'replay'
+        log.info('Replaying %d turn(s) from %s', len(turns), args.replay)
     args.model = getattr(args, 'model', None)
     if args.provider not in table:
         raise ConfigError(f'unknown provider {args.provider} (have: {", ".join(table)})')

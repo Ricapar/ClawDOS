@@ -38,6 +38,7 @@ class MockAPIError(Exception):
 SCENARIOS = {
     '!help': 'list these test commands',
     '!scroll': '60 numbered lines, for scrolling and PgUp/PgDn scrollback',
+    '!burst': '200 short lines all at once, like a reply that finished thinking (fast scrolling)',
     '!long': 'several paragraphs of prose, for word wrap',
     '!wide': 'a 120-character word and a 1500-byte line (hard wrap, TXT splitting)',
     '!cp437': 'accented letters, symbols, box drawing, and Unicode the bridge must approximate',
@@ -236,6 +237,8 @@ class MockChat:
             for i in range(1, 61):
                 await self.pause(0.02)
                 yield f'Line {i} of 60: the quick brown fox jumps over the lazy dog.\n'
+        elif command == '!burst':
+            yield ''.join(f'- Burst line {i} of 200: CPU, RAM, BIOS, video.\n' for i in range(1, 201))
         elif command == '!long':
             async for c in self.stream(LOREM):
                 yield c
