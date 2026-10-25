@@ -107,7 +107,7 @@ class Session:
                     break
         except asyncio.IncompleteReadError as e:
             why = f'closed by client ({len(e.partial)} bytes of a partial line)' if e.partial else 'closed by client'
-        except ConnectionError as e:
+        except OSError as e:         # resets, and Windows giving up on an XT that stopped ACKing
             why = f'{type(e).__name__}: {e}'
         except Exception:
             why = 'bridge error'
@@ -252,20 +252,29 @@ class Session:
                     line_open = True
             await self.send('END')
         except asyncio.CancelledError:
-            await self.send('END', b'stopped')
+            await self.tell('END', b'stopped')
         except Refused as e:
-            await self.send('ERR', to_cp437(str(e)))
+            await self.tell('ERR', to_cp437(str(e)))
         except Disconnect:
             log.info('%s dropped on purpose (mock)', self.peer)
             self.writer.close()
         except (MockAPIError, APIError) as e:
             log.info('%s API error: %s', self.peer, e)
-            await self.send('ERR', to_cp437(str(e)))
+            await self.tell('ERR', to_cp437(str(e)))
+        except OSError as e:         # the link went; run() reports that
+            log.info('%s reply abandoned: %s', self.peer, e)
         except Exception as e:  # report API trouble to the XT instead of dropping the link
             log.exception('reply failed')
-            await self.send('ERR', to_cp437(describe_error(e)))
+            await self.tell('ERR', to_cp437(describe_error(e)))
         finally:
             await reply.aclose()
+
+    async def tell(self, verb, payload=b''):
+        """send(), for wrapping up a reply: the link may already be gone."""
+        try:
+            await self.send(verb, payload)
+        except OSError:
+            pass
 
 
 def describe_error(e):

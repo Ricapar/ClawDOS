@@ -337,6 +337,8 @@ static void runCall(void)
     ToolCtx t;
     int status = -1;
 
+    if (tool_idle)                    /* ACK the call before a long tool keeps us busy */
+        tool_idle();
     tout_reset(&t);
     t.unattended = unattended;
     if (stopping) {                   /* sent before our STOP reached the bridge */

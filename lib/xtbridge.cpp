@@ -208,3 +208,8 @@ int8_t XTBridge::send(const char *verb, const char *payload)
     }
     return 0;
 }
+
+void XTBridge::service(void)
+{
+    Utils::processPackets();
+}

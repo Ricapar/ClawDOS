@@ -41,6 +41,9 @@ void tout_hexdump(ToolCtx *t, const unsigned char __far *p, unsigned n,
 int  tool_fail(ToolCtx *t, const char *msg);      /* error text + summary; TS_ERROR */
 
 int  tool_esc(void);           /* drains typed keys; 1 if Esc was among them */
+/* Called by tool_esc, which long-running tools call often: the app keeps its
+   network connection alive from here (NULL: nothing to do). */
+extern void (*tool_idle)(void);
 const char *dos_error(int code);
 
 typedef int (*ToolFn)(ToolCtx *t);

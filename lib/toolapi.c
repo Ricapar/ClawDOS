@@ -180,9 +180,14 @@ int tool_fail(ToolCtx *t, const char *msg)
     return TS_ERROR;
 }
 
+void (*tool_idle)(void);
+
 int tool_esc(void)
 {
     int esc = 0;
+
+    if (tool_idle)
+        tool_idle();
     while (_bios_keybrd(_KEYBRD_READY)) {
         if ((_bios_keybrd(_KEYBRD_READ) & 0xFF) == 27)
             esc = 1;

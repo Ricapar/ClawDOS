@@ -27,6 +27,7 @@
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
+#include "toolapi.h"
 #include "ui.h"
 
 #define VERSION   "0.2"
@@ -1027,6 +1028,7 @@ int main(int argc, char *argv[])
     quitAfterReply = quick && firstMessage != NULL;
     if (XTBridge::startStack())
         return 1;
+    tool_idle = XTBridge::service;    /* keep ACKing the bridge during long tools */
     if (!host[0] && XTBridge::configValue("CLAUDE_BRIDGE", host, sizeof(host)) != 0) {
         fprintf(stderr, "No bridge given. Use CLAUDE host[:port], or add a line like\n"
                         "  CLAUDE_BRIDGE 192.168.1.10:8023\n"

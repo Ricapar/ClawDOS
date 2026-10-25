@@ -25,6 +25,11 @@ class XTBridge {
     static int8_t startStack(void);
     static void   stopStack(void);
 
+    /* Let the stack send what it has queued (ACKs for data we've read) and take
+       in new packets. Call it at least every few seconds while busy elsewhere:
+       a peer whose data goes unacknowledged for ~20 s drops the connection. */
+    static void   service(void);
+
     /* Our IP address as "a.b.c.d" (valid after startStack). buf >= 16 bytes. */
     static void localAddress(char *buf);
 
