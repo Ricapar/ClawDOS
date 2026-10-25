@@ -15,7 +15,8 @@ client that runs on the XT.
    `python scripts/build.py --bridge 172.16.0.100:8023` → `build\CLAUDEXT.IMG`
    (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAUDE_BRIDGE`)
 3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
-   `ANTHROPIC_API_KEY` (or `ant auth login`), then `python bridge/xtbridge.py`.
+   `ANTHROPIC_API_KEY` (in the environment or a `.env` file in the repo root, or
+   `ant auth login`), then `python bridge/xtbridge.py`.
    Other providers: `--provider openrouter`, `zai`, `openai` or `ollama` (keys in
    `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`); see "Other models" below.
    No API key yet? `--mock` runs an offline stand-in for Claude (see below). The XT connects in on TCP port 8023,

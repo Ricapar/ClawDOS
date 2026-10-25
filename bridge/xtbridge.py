@@ -16,12 +16,13 @@ From the XT, "/model" lists providers and "/model openrouter:some/model"
 switches the current conversation. providers.py has the built-in providers;
 bridge/providers.toml adds your own. API keys come from the environment
 (ANTHROPIC_API_KEY or an `ant auth login` profile, OPENROUTER_API_KEY,
-ZAI_API_KEY, OPENAI_API_KEY).
+ZAI_API_KEY, OPENAI_API_KEY) or a .env file in the repo root.
 """
 
 import argparse
 import asyncio
 import logging
+import os
 
 import providers
 from cp437 import from_cp437, to_cp437
@@ -251,6 +252,30 @@ def describe_error(e):
     return f'{type(e).__name__}: {e}'[:200]
 
 
+def load_env(path=os.path.join(os.path.dirname(__file__), '..', '.env')):
+    """Read KEY=value lines from a .env file into os.environ. Variables already
+    set in the environment win. Returns the names loaded."""
+    loaded = []
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return loaded
+    for line in lines:
+        line = line.strip()
+        if line.startswith('export '):
+            line = line[7:].lstrip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = (part.strip() for part in line.split('=', 1))
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 async def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--host', default='0.0.0.0')
@@ -270,6 +295,9 @@ async def main():
     args = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    loaded = load_env()
+    if loaded:
+        log.info('Loaded %s from .env', ', '.join(loaded))
     try:
         server = await start(args)
     except ConfigError as e:

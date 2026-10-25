@@ -432,6 +432,24 @@ class Providers(BridgeTest):
         self.assertEqual(roles, ['system', 'user', 'assistant', 'user'])
 
 
+class DotEnv(unittest.TestCase):
+    def test_load_env(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, '.env')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('# comment\nCXT_ENV_A=plain\nexport CXT_ENV_B="quoted"\nCXT_ENV_C=from-file\njunk\n')
+            os.environ['CXT_ENV_C'] = 'from-env'
+            try:
+                self.assertEqual(xtbridge.load_env(path), ['CXT_ENV_A', 'CXT_ENV_B'])
+                self.assertEqual(os.environ['CXT_ENV_A'], 'plain')
+                self.assertEqual(os.environ['CXT_ENV_B'], 'quoted')
+                self.assertEqual(os.environ['CXT_ENV_C'], 'from-env')
+            finally:
+                for k in ('CXT_ENV_A', 'CXT_ENV_B', 'CXT_ENV_C'):
+                    os.environ.pop(k, None)
+        self.assertEqual(xtbridge.load_env(os.path.join(d, 'missing')), [])
+
+
 class FakeAnthropic:
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
