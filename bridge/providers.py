@@ -22,14 +22,18 @@ plain-text transcript, so switching providers mid-conversation keeps context.
 """
 
 import json
+import logging
 import os
 import time
 import tomllib
 
+import prompts
 from mockchat import MockChat, Refused
 from replay import ReplayChat
 from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, openai_tools,
                    stringify, summary)
+
+log = logging.getLogger('xtbridge')
 
 ROUND_CAP_NOTE = 'Tool limit reached; answer now without tools.'
 
@@ -57,9 +61,8 @@ You are {name}, chatting with someone through Claude-XT on a 1983 IBM PC XT \
 network bridge. Your replies appear on an 80-column text-mode screen using \
 code page 437, so write plain text: no Markdown syntax such as **bold**, # \
 headings, tables, or code fences, because it would show up literally. Simple \
-lists with "-" are fine. Keep replies conversational and fairly short; the \
-screen is small and text draws slowly. Latency-sensitive; begin your visible \
-answer immediately."""
+lists with "-" are fine. Latency-sensitive; begin your visible answer \
+immediately."""
 
 
 class ConfigError(Exception):
@@ -104,10 +107,23 @@ def has_key(p):
 class Backends:
     """Creates chats for (provider, model), sharing one HTTP client per provider."""
 
-    def __init__(self, providers, speed=1.0):
+    def __init__(self, providers, speed=1.0, prompt=prompts.DEFAULT, prompt_dir=None):
         self.providers = providers
         self.speed = speed
         self.clients = {}
+        self.prompt = prompt
+        self.prompt_dir = prompt_dir
+        self.prompt_text = None   # the last good read, if the file goes away
+
+    def load_prompt(self):
+        """Read the prompt file afresh, so edits apply to the next conversation."""
+        try:
+            self.prompt_text = prompts.load(self.prompt, self.prompt_dir)
+        except prompts.PromptError as e:
+            if self.prompt_text is None:
+                raise ConfigError(str(e))
+            log.warning('%s; keeping the prompt read earlier', e)
+        return self.prompt_text
 
     def client(self, key):
         if key not in self.clients:
@@ -129,7 +145,7 @@ class Backends:
         return self.clients[key]
 
     def make(self, key, model=None, transcript=()):
-        p = self.providers[key]
+        p = dict(self.providers[key], prompt_text=self.load_prompt())
         model = model or p['model']
         if p['type'] == 'mock':
             chat = MockChat(self.speed)
@@ -151,7 +167,8 @@ class Backends:
     def describe(self, chat):
         if isinstance(chat, MockChat):
             return 'mock Claude (offline, send !help)'
-        return f'{chat.provider}: {chat.model}'
+        prompt = '' if self.prompt == prompts.DEFAULT else f', prompt {self.prompt}'
+        return f'{chat.provider}: {chat.model}{prompt}'
 
     async def close(self):
         for c in self.clients.values():
@@ -224,7 +241,13 @@ def transcript(chat):
 
 
 def system_prompt(p):
-    return SYSTEM_PROMPT.format(name=p.get('name', 'a helpful AI assistant')) + '\n\n' + TOOLS_PROMPT
+    """The built-in prompt, then the prompt file's text (Backends puts it in
+    p['prompt_text']) with {name} filled in."""
+    name = p.get('name', 'a helpful AI assistant')
+    system = SYSTEM_PROMPT.format(name=name) + '\n\n' + TOOLS_PROMPT
+    if p.get('prompt_text'):
+        system += '\n\n' + p['prompt_text'].replace('{name}', name)
+    return system
 
 
 def report(chat, round, started, first, **fields):

@@ -137,7 +137,7 @@ class Session:
 
     def chat_fields(self):
         """Which backend, model and system prompt the conversation is on."""
-        return {'provider': self.chat.provider, 'model': self.chat.model,
+        return {'provider': self.chat.provider, 'model': self.chat.model, 'prompt': self.backends.prompt,
                 'effort': getattr(self.chat, 'effort', None), 'system': getattr(self.chat, 'system', None)}
 
     def attach(self, chat):
@@ -413,6 +413,9 @@ async def main():
     ap.add_argument('--provider', default='anthropic',
                     help='backend new conversations start on (see providers.py)')
     ap.add_argument('--model', help="model to use instead of the provider's default")
+    ap.add_argument('--prompt', default='default', metavar='NAME',
+                    help='system prompt file bridge/prompts/NAME.txt, on top of the built-in one '
+                         '(re-read for each conversation)')
     ap.add_argument('--effort', choices=['low', 'medium', 'high', 'xhigh', 'max'],
                     help='anthropic only: reasoning effort (default low)')
     ap.add_argument('--config', help='provider config file (default: bridge/providers.toml if present)')
@@ -467,7 +470,8 @@ async def start(args):
         p['effort'] = args.effort
     if not providers.has_key(p):
         raise ConfigError(f'{args.provider} needs an API key in {p["api_key_env"]}')
-    backends = Backends(table, getattr(args, 'speed', 1.0))
+    backends = Backends(table, getattr(args, 'speed', 1.0), getattr(args, 'prompt', None) or 'default',
+                        getattr(args, 'prompt_dir', None))
     args.backend_name = backends.describe(backends.make(args.provider, args.model))
 
     async def handle(reader, writer):

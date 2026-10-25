@@ -28,6 +28,15 @@ client that runs on the XT.
 5. **Emulator**: `python scripts/run86box.py` boots the same image on an
    emulated XT (8088, CGA, XTIDE, NE1000 with NAT networking).
 
+### System prompts
+
+The bridge builds each conversation's system prompt from a built-in part (the
+XT's screen and the tools, which keep the display working) plus a prompt file
+of your own: `bridge/prompts/NAME.txt`, chosen with `--prompt NAME` (default:
+`default.txt`). Put tone, length or a role in it; `{name}` becomes the
+assistant's name. Files are re-read at the start of every conversation, so an
+edit applies from the next chat (F2 on the XT) without restarting the bridge.
+
 ### Logs
 
 The bridge keeps two logs, both gitignored:

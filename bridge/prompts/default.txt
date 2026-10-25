@@ -1,0 +1,1 @@
+Keep replies conversational and fairly short; the screen is small and text draws slowly.

@@ -15,7 +15,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
   `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAUDE -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
-- Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
+- Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
+  adds bridge/prompts/NAME.txt to the built-in system prompt); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
   Tools: schemas in bridge/tools.py, executors dispatched by src/claude/tools.cpp; mock `!tool NAME k=v` calls one,
   `!tooltour` all. CLAUDE `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.

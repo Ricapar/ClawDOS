@@ -579,6 +579,55 @@ class ApiCallReports(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen[0]['usage'], {'input': 30, 'output': 7, 'cache_read': 20, 'cache_write': 0})
 
 
+class Prompts(unittest.IsolatedAsyncioTestCase):
+    """System prompt files (bridge/prompts/*.txt, bridge/prompts.py)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        self.write('default', 'Be brief.')
+        self.write('tutor', 'You are {name}, a patient tutor.')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, name, text):
+        with open(os.path.join(self.dir, name + '.txt'), 'w', encoding='utf-8') as f:
+            f.write(text + '\n')
+
+    def test_names_and_load(self):
+        import prompts
+        self.assertEqual(prompts.names(self.dir), ['default', 'tutor'])
+        self.assertEqual(prompts.load('tutor', self.dir), 'You are {name}, a patient tutor.')
+        with self.assertRaises(prompts.PromptError) as cm:
+            prompts.load('nope', self.dir)
+        self.assertIn('default, tutor', str(cm.exception))
+
+    def test_composed_prompt(self):
+        system = providers.system_prompt({'name': 'Claude', 'prompt_text': 'Be {name}-like.'})
+        self.assertIn('IBM PC XT', system)                  # the built-in core...
+        self.assertIn('real IBM PC XT', system)             # ...and the tools section stay
+        self.assertTrue(system.endswith('Be Claude-like.'))  # the file comes last
+        self.assertNotIn('fairly short', providers.system_prompt({'name': 'Claude'}))
+
+    def test_backends_reload_each_conversation(self):
+        table = providers.load_providers()
+        b = providers.Backends(table, prompt='tutor', prompt_dir=self.dir)
+        chat = b.make('anthropic')
+        self.assertIn('Claude, a patient tutor.', chat.system)
+        self.write('tutor', 'Answer in rhyme.')
+        self.assertIn('Answer in rhyme.', b.make('anthropic').system)
+        self.assertEqual(b.describe(chat), 'anthropic: claude-opus-5-5, prompt tutor')
+        self.assertEqual(providers.Backends(table, prompt_dir=self.dir).describe(chat),
+                         'anthropic: claude-opus-5-5')
+
+    async def test_start_rejects_unknown_prompt(self):
+        args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=0, token=None,
+                                     config=None, prompt='nope', prompt_dir=self.dir)
+        with self.assertRaises(providers.ConfigError):
+            await xtbridge.start(args)
+
+
 class FakeAnthropic:
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
