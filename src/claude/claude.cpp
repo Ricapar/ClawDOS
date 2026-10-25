@@ -108,6 +108,8 @@ static int pinged;
 static unsigned long pingedAt;
 static unsigned long retryAt;
 static char offlineNote[100];
+static XTBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
+static char lostReport[200];          /* why the last link died, for the bridge's log */
 
 static char input[INPUT_MAX + 1];
 static int inputLen, inputPos;
@@ -836,13 +838,33 @@ static const char *connectBridge(void)
     linkUp = 1;
     lastRx = *biosTicks;
     pinged = 0;
+    XTBridge::counters(&rxNet);
+    if (lostReport[0]) {              /* tell the bridge's log what happened */
+        bridge.send("LOG", lostReport);
+        lostReport[0] = 0;
+    }
     return NULL;
+}
+
+/* What the network did between the bridge's last line and now. Packets sent
+   and retransmitted with nothing received: our side kept talking into a dead
+   link (WiFi). Nothing sent: we never got the data out. */
+static void noteLinkLoss(const char *why)
+{
+    XTBridge::Counters now;
+    XTBridge::counters(&now);
+    sprintf(lostReport, "Link lost (%.50s) %lus after the bridge's last line; since then: "
+                        "sent %lu, retransmitted %lu, received %lu, send errors %lu, dropped %lu",
+            why, (*biosTicks - lastRx) * 10 / 182, now.sent - rxNet.sent,
+            now.retransmitted - rxNet.retransmitted, now.received - rxNet.received,
+            now.sendErrors - rxNet.sendErrors, now.dropped - rxNet.dropped);
 }
 
 /* The link is gone: say so, drop whatever was in flight, and retry later
    instead of leaving the chat. */
 static void linkLost(const char *why)
 {
+    noteLinkLoss(why);
     bridge.close();
     linkUp = 0;
     tools_reset();
@@ -1071,6 +1093,7 @@ int main(int argc, char *argv[])
             int rc = bridge.poll();
             if (rc > 0) {
                 pinged = 0;
+                XTBridge::counters(&rxNet);
                 handleLine(bridge.verb(), bridge.payload());
                 lastRx = *biosTicks;      /* after it: a tool may have run a while */
                 continue;

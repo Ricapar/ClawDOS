@@ -33,6 +33,13 @@ class XTBridge {
     /* Our IP address as "a.b.c.d" (valid after startStack). buf >= 16 bytes. */
     static void localAddress(char *buf);
 
+    /* mTCP's running totals, for working out what the network did when a
+       link dies (see claude.cpp's linkLost). */
+    struct Counters {
+        uint32_t sent, received, retransmitted, sendErrors, dropped;
+    };
+    static void counters(Counters *c);
+
     /* Look up an app setting (e.g. "CLAUDE_BRIDGE") in the mTCP config file. */
     static int8_t configValue(const char *key, char *val, uint16_t len);
 

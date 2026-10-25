@@ -213,3 +213,12 @@ void XTBridge::service(void)
 {
     Utils::processPackets();
 }
+
+void XTBridge::counters(Counters *c)
+{
+    c->sent = Packets_sent;
+    c->received = Packets_received;
+    c->retransmitted = Tcp::Packets_Retransmitted;
+    c->sendErrors = Packets_send_errs;
+    c->dropped = Packets_dropped;
+}
