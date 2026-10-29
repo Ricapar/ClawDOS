@@ -23,6 +23,7 @@ ZAI_API_KEY, OPENAI_API_KEY) or a .env file in the repo root.
 import argparse
 import asyncio
 import datetime
+import itertools
 import logging
 import logging.handlers
 import os
@@ -48,7 +49,7 @@ DEFAULT_CONVLOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs
 
 log = logging.getLogger('xtbridge')
 sessions = set()         # connected clients, for spotting stale ones
-connections = 0          # clients ever accepted
+CONNECTIONS = itertools.count(1)   # numbers the clients as they are accepted
 PARK_SECONDS = 30 * 60   # how long a dropped XT's conversation waits for RESUME
 
 
@@ -67,14 +68,24 @@ class Conversation:
         self.parked_at = None
         conversations[self.token] = self
 
+    def expired(self, now):
+        """True if parked for longer than PARK_SECONDS as of time.monotonic() `now`."""
+        return self.session is None and now - self.parked_at >= PARK_SECONDS
+
+    def park(self, chat, memories):
+        """Keep the chat and memories for a RESUME; no session is using them now."""
+        self.chat, self.memories = chat, memories
+        self.session, self.parked_at = None, time.monotonic()
+
 
 conversations = {}       # token -> Conversation
 
 
 def purge_parked():
+    """Forget the conversations that have waited longer than PARK_SECONDS."""
     now = time.monotonic()
     for token, conv in list(conversations.items()):
-        if conv.session is None and now - conv.parked_at >= PARK_SECONDS:
+        if conv.expired(now):
             del conversations[token]
 
 
@@ -90,7 +101,9 @@ def trace(peer, direction, raw):
 
 # --- protocol ----------------------------------------------------------------
 
-class Session:
+class Session:   # pylint: disable=too-many-instance-attributes  # one connection's state
+    """One XT connection: reads its commands and streams the replies back."""
+
     def __init__(self, reader, writer, args, backends):
         self.reader = reader
         self.writer = writer
@@ -120,6 +133,7 @@ class Session:
         self.conv.session = self
 
     async def send(self, verb, payload=b''):
+        """Send one protocol line."""
         # Keep lines short for the XT's receive buffer; TXT can be split freely.
         while verb == 'TXT' and len(payload) > MAX_TXT:
             trace(self.peer, '>', b'TXT ' + payload[:MAX_TXT])
@@ -131,12 +145,12 @@ class Session:
         await self.writer.drain()
 
     async def run(self):
-        global connections
-        connections += 1
+        """Serve the connection until it ends."""
+        number = next(CONNECTIONS)
         sessions.add(self)
-        log.info('%s connected (connection #%d, %d open)', self.peer, connections, len(sessions))
-        self.clog = convlog.open_log(getattr(self.args, 'convlog', None), self.peer, connections)
-        self.clog.event('session_start', peer=self.peer_text(), connection=connections,
+        log.info('%s connected (connection #%d, %d open)', self.peer, number, len(sessions))
+        self.clog = convlog.open_log(getattr(self.args, 'convlog', None), self.peer, number)
+        self.clog.event('session_start', peer=self.peer_text(), connection=number,
                         protocol=PROTOCOL_VERSION, conversation=self.conv.token, **self.chat_fields())
         if len(sessions) > 1:
             log.info('%s other open connections: %s', self.peer,
@@ -164,7 +178,7 @@ class Session:
             why = f'closed by client ({len(e.partial)} bytes of a partial line)' if e.partial else 'closed by client'
         except OSError as e:         # resets, and Windows giving up on an XT that stopped ACKing
             why = f'{type(e).__name__}: {e}'
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught  # last resort: log it, don't kill the server
             why = 'bridge error'
             log.exception('%s session failed', self.peer)
         finally:
@@ -176,8 +190,7 @@ class Session:
             self.writer.close()
             sessions.discard(self)
             if self.conv.session is self:      # not taken over: keep it for a RESUME
-                self.conv.chat, self.conv.memories = self.chat, self.memories
-                self.conv.session, self.conv.parked_at = None, time.monotonic()
+                self.conv.park(self.chat, self.memories)
             log.info('%s disconnected: %s (%d open)', self.peer, why, len(sessions))
             self.clog.event('session_end', reason=why)
             self.clog.close()
@@ -211,6 +224,7 @@ class Session:
         await self.send('OK', b'resumed')
 
     def peer_text(self):
+        """The client's address as host:port."""
         return f'{self.peer[0]}:{self.peer[1]}' if self.peer else 'unknown'
 
     def chat_fields(self):
@@ -219,6 +233,7 @@ class Session:
                 'effort': getattr(self.chat, 'effort', None), 'system': getattr(self.chat, 'system', None)}
 
     def attach(self, chat):
+        """Hook `chat` up to this session (usage logging, memories); returns it."""
         chat.on_api_call = self.api_called
         providers.set_memories(chat, getattr(self, 'memories', None))
         return chat
@@ -251,25 +266,27 @@ class Session:
             self.turn['text'] = []
 
     async def command(self, verb, rest):
+        """Handle one line from the client; False once it has said QUIT."""
         if verb == 'QUIT':
             await self.send('BYE')
             return False
         if verb == 'PING':
             await self.send('PONG')
-            return True
-        if verb == 'LOG':            # diagnostics from the XT (CLAUDE -watch); no reply
+        elif verb == 'LOG':          # diagnostics from the XT (CLAUDE -watch); no reply
             log.info('%s XT: %s', self.peer, from_cp437(rest))
-            return True
-        if verb == 'AUTH':
+        elif verb == 'AUTH':
             self.authed = not self.args.token or from_cp437(rest) == self.args.token
             await self.send('OK' if self.authed else 'ERR', b'' if self.authed else b'bad token')
-            return True
-        if not self.authed:
+        elif not self.authed:
             await self.send('ERR', b'AUTH required')
-            return True
-        if verb == 'RESUME':
+        elif verb == 'RESUME':
             await self.resume(from_cp437(rest).strip())
-            return True
+        else:
+            await self.chat_command(verb, rest)
+        return True
+
+    async def chat_command(self, verb, rest):
+        """The commands of an authenticated client that act on the chat."""
         if verb == 'OUT':
             if self.tool:
                 self.tool[2].append(from_cp437(rest))
@@ -290,18 +307,20 @@ class Session:
             if self.task:
                 self.task.cancel()
         elif verb == 'MSG':
-            text = from_cp437(rest).strip()
-            if self.task and not self.task.done():
-                await self.send('ERR', b'busy')
-            elif not text:
-                await self.send('ERR', b'empty message')
-            elif text.split()[0].lower() in ('/model', '/provider'):
-                await self.say(self.switch(text.split(None, 1)[1:]))
-            else:
-                self.task = asyncio.create_task(self.answer(text))
+            await self.message(from_cp437(rest).strip())
         else:
             await self.send('ERR', b'unknown command')
-        return True
+
+    async def message(self, text):
+        """MSG <text>: start answering it, or run a /model command."""
+        if self.task and not self.task.done():
+            await self.send('ERR', b'busy')
+        elif not text:
+            await self.send('ERR', b'empty message')
+        elif text.split()[0].lower() in ('/model', '/provider'):
+            await self.say(self.switch(text.split(None, 1)[1:]))
+        else:
+            self.task = asyncio.create_task(self.answer(text))
 
     async def say(self, text):
         """A whole reply written by the bridge itself."""
@@ -340,9 +359,10 @@ class Session:
         kept = f', keeping {len(history) // 2} earlier exchange(s)' if history else ''
         return f'Switched to {self.backends.describe(self.chat)}{kept}.'
 
-    def tool_done(self, id, status):
-        if not self.tool or self.tool[0] != id or status not in STATUSES:
-            log.info('%s stray DONE %s %s ignored', self.peer, id, status)
+    def tool_done(self, tool_id, status):
+        """DONE <id> <status>: the XT finished the tool call in progress."""
+        if not self.tool or self.tool[0] != tool_id or status not in STATUSES:
+            log.info('%s stray DONE %s %s ignored', self.peer, tool_id, status)
             return
         fut = self.tool[1]
         if not fut.done():
@@ -369,37 +389,42 @@ class Session:
         log.debug('%s tool %s result: %r', self.peer, call.id, result.text[:400])
         return result
 
+    async def relay(self, reply):
+        """Stream the model's `reply` to the XT, running its tool calls; returns
+        the outcome ('ok', or 'cut_off' if the model ran out of tokens)."""
+        await self.list_memories()
+        line_open = False            # sent text that isn't followed by NL yet
+        async for item in reply:
+            if isinstance(item, ToolCall):
+                self.flush_text()
+                if line_open:    # the XT starts tool headers on a fresh line
+                    await self.send('NL')
+                    line_open = False
+                item.result = await self.run_tool(item)
+                continue
+            self.turn['text'].append(item)
+            *lines, rest = item.split('\n')
+            for line in lines:
+                if line:
+                    await self.send('TXT', to_cp437(line))
+                await self.send('NL')
+                line_open = False
+            if rest:
+                await self.send('TXT', to_cp437(rest))
+                line_open = True
+        await self.send('END')
+        return 'cut_off' if self.turn['stop'] in ('max_tokens', 'length') else 'ok'
+
     async def answer(self, text):
+        """Answer the user's `text` with the chat backend, logging the turn."""
         log.info('%s >> %s', self.peer, text)
         self.clog.event('user', text=text)
         self.turn = {'started': time.monotonic(), 'usage': convlog.no_usage(), 'rounds': 0,
                      'text': [], 'stop': None}
         outcome, detail = 'ok', None
-        line_open = False            # sent text that isn't followed by NL yet
         reply = self.chat.reply(text)
         try:
-            await self.list_memories()
-            async for item in reply:
-                if isinstance(item, ToolCall):
-                    self.flush_text()
-                    if line_open:    # the XT starts tool headers on a fresh line
-                        await self.send('NL')
-                        line_open = False
-                    item.result = await self.run_tool(item)
-                    continue
-                self.turn['text'].append(item)
-                *lines, rest = item.split('\n')
-                for line in lines:
-                    if line:
-                        await self.send('TXT', to_cp437(line))
-                    await self.send('NL')
-                    line_open = False
-                if rest:
-                    await self.send('TXT', to_cp437(rest))
-                    line_open = True
-            await self.send('END')
-            if self.turn['stop'] in ('max_tokens', 'length'):
-                outcome = 'cut_off'
+            outcome = await self.relay(reply)
         except asyncio.CancelledError:
             outcome = 'stopped'
             await self.tell('END', b'stopped')
@@ -417,7 +442,7 @@ class Session:
         except OSError as e:         # the link went; run() reports that
             outcome, detail = 'link_lost', str(e)
             log.info('%s reply abandoned: %s', self.peer, e)
-        except Exception as e:  # report API trouble to the XT instead of dropping the link
+        except Exception as e:  # pylint: disable=broad-exception-caught  # report API trouble to the XT, don't drop the link
             outcome, detail = 'error', describe_error(e)
             log.exception('reply failed')
             await self.tell('ERR', to_cp437(describe_error(e)))
@@ -436,19 +461,25 @@ class Session:
             pass
 
 
-def describe_error(e):
+def httpx_message(e):
+    """The message for an httpx transport failure, or None if `e` is not one."""
     try:
-        import httpx
-        if isinstance(e, httpx.TimeoutException):
-            return 'The model API timed out.'
-        if isinstance(e, httpx.TransportError):
-            return 'Bridge could not reach the model API.'
+        import httpx  # pylint: disable=import-outside-toplevel  # optional: only providers using it need it
     except ImportError:
-        pass
+        return None
+    if isinstance(e, httpx.TimeoutException):
+        return 'The model API timed out.'
+    if isinstance(e, httpx.TransportError):
+        return 'Bridge could not reach the model API.'
+    return None
+
+
+def anthropic_message(e):
+    """The message for an Anthropic SDK error, or None if `e` is not one."""
     try:
-        import anthropic
+        import anthropic  # pylint: disable=import-outside-toplevel  # optional, like httpx
     except ImportError:
-        return f'{type(e).__name__}: {e}'[:200]
+        return None
     if isinstance(e, anthropic.AuthenticationError):
         return 'Bridge has no valid Anthropic API key.'
     if isinstance(e, anthropic.RateLimitError):
@@ -457,7 +488,12 @@ def describe_error(e):
         return f'API error {e.status_code}: {e.message}'[:200]
     if isinstance(e, anthropic.APIConnectionError):
         return 'Bridge could not reach the Claude API.'
-    return f'{type(e).__name__}: {e}'[:200]
+    return None
+
+
+def describe_error(e):
+    """A short message for the XT's screen about an unexpected exception."""
+    return httpx_message(e) or anthropic_message(e) or f'{type(e).__name__}: {e}'[:200]
 
 
 def load_env(path=os.path.join(os.path.dirname(__file__), '..', '.env')):
@@ -503,6 +539,7 @@ def setup_logging(path, verbose):
 
 
 async def main():
+    """Parse the command line and serve until interrupted."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--host', default='0.0.0.0')
     ap.add_argument('--port', type=int, default=DEFAULT_PORT)
@@ -539,7 +576,7 @@ async def main():
     try:
         server = await start(args)
     except ConfigError as e:
-        raise SystemExit(f'xtbridge: {e}')
+        raise SystemExit(f'xtbridge: {e}') from e
     log.info('XTBridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
     async with server:
         await server.serve_forever()
@@ -553,7 +590,7 @@ async def start(args):
         try:
             turns = replay.parse_log(args.replay, getattr(args, 'connection', None))
         except (OSError, ValueError, IndexError) as e:
-            raise ConfigError(f'replay: {e}')
+            raise ConfigError(f'replay: {e}') from e
         table['replay'] = {'type': 'replay', 'name': 'Claude', 'model': os.path.basename(args.replay),
                            'turns': turns}
         args.provider = 'replay'

@@ -102,6 +102,7 @@ TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
 
 
 def tour_steps():
+    """The tool tour's steps: (tool, args, expected status, expected text or check)."""
     steps = [
         ('sysinfo', {}, 'ok', 'DOS'),
         ('dir', {'path': 'C:\\'}, 'ok', 'AUTOEXEC.BAT'),
@@ -205,11 +206,11 @@ SMALL_TALK = [
 ]
 
 
-def report_round(chat, round, stop_reason):
+def report_round(chat, index, stop_reason):
     """Offline backends' stand-in for providers.report: no tokens, no time."""
     callback = getattr(chat, 'on_api_call', None)
     if callback:
-        callback({'round': round, 'model': chat.model, 'stop_reason': stop_reason,
+        callback({'round': index, 'model': chat.model, 'stop_reason': stop_reason,
                   'usage': {'input': 0, 'output': 0, 'cache_read': 0, 'cache_write': 0},
                   'ms': 0, 'ttft_ms': None})
 
@@ -223,6 +224,7 @@ class MockChat:
         self.history = []   # (user text, reply text) pairs
 
     async def pause(self, seconds):
+        """Sleep for `seconds` scaled by the speed (not at all when speed is 0)."""
         if self.speed > 0:
             await asyncio.sleep(seconds / self.speed)
 
@@ -236,99 +238,126 @@ class MockChat:
             i += n
 
     async def reply(self, text):
+        """Stream the reply to one user message, remembering it once complete."""
         await self.pause(self.rng.uniform(0.4, 1.2))   # time to first token
         command = text.split()[0].lower() if text.startswith('!') else None
-        parts, round = [], 0
+        parts, rounds = [], 0
         async for chunk in self.respond(command, text):
             if isinstance(chunk, str):
                 parts.append(chunk)
             else:
-                report_round(self, round, 'tool_use')
-                round += 1
+                report_round(self, rounds, 'tool_use')
+                rounds += 1
             yield chunk
-        report_round(self, round, 'end_turn')
+        report_round(self, rounds, 'end_turn')
         # Only completed replies are remembered, as with the real backend.
         self.history.append((text, ''.join(parts)))
 
     async def respond(self, command, text):
+        """Yield the reply to one message: text chunks and ToolCalls. `command`
+        is the lowercased first word if the message starts with "!", else None."""
         if command is None:
-            async for c in self.stream(self.small_talk(text)):
-                yield c
-        elif command == '!help':
-            lines = ['Mock bridge test commands:\n']
-            lines += [f'  {k:<10} {v}\n' for k, v in SCENARIOS.items()]
-            lines.append('Anything else gets a canned conversational reply.')
-            async for c in self.stream(''.join(lines), per_token=0.01):
-                yield c
-        elif command == '!scroll':
-            for i in range(1, 61):
-                await self.pause(0.02)
-                yield f'Line {i} of 60: the quick brown fox jumps over the lazy dog.\n'
-        elif command == '!burst':
-            yield ''.join(f'- Burst line {i} of 200: CPU, RAM, BIOS, video.\n' for i in range(1, 201))
-        elif command == '!long':
-            async for c in self.stream(LOREM):
-                yield c
-        elif command == '!wide':
-            yield 'A 120-character word: ' + ''.join(chr(65 + i % 26) for i in range(120)) + '\n'
-            yield 'A 1500-byte line: ' + ' '.join(f'word{i:03}' for i in range(170)) + '\n'
-            yield 'Done.'
-        elif command == '!cp437':
-            async for c in self.stream(CP437_SAMPLE, per_token=0.01):
-                yield c
-        elif command == '!markdown':
-            async for c in self.stream(MARKDOWN_SAMPLE, per_token=0.01):
-                yield c
-        elif command == '!slow':
-            for w in 'This reply trickles out one word per second so you can press Esc to stop it.'.split():
-                await self.pause(1.0)
-                yield w + ' '
-        elif command == '!stall':
-            await self.pause(30)
-            yield 'Sorry for the wait. That was a 30-second stall.'
-        elif command == '!error':
-            async for c in self.stream('Starting a reply, and then '):
-                yield c
-            raise MockAPIError('API error 529: Overloaded (simulated)')
-        elif command == '!refuse':
-            raise Refused('Claude declined to answer that. (simulated)')
-        elif command == '!cutoff':
-            async for c in self.stream(LOREM.split('\n\n')[0]):
-                yield c
-            yield '\n[reply cut off: too long]'
-        elif command == '!drop':
-            async for c in self.stream('This sentence will never be fin'):
-                yield c
-            raise Disconnect()
-        elif command == '!history':
-            async for c in self.stream(self.describe_history()):
-                yield c
-        elif command == '!run':
-            async for c in self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''}):
-                yield c
-        elif command == '!tool':
-            words = shlex.split(text, posix=False)[1:]
-            if not words:
-                yield 'Usage: !tool NAME key=value ...'
-                return
-            args = {}
-            for w in words[1:]:
-                key, _, value = w.strip('"').partition('=')
-                args[key] = value.strip('"')
-            async for c in self.call(words[0], args):
-                yield c
-        elif command == '!draw':
-            async for c in self.call('draw', {'script': DRAW_DEMO}):
-                yield c
-        elif command == '!play':
-            async for c in self.call('play', {'music': PLAY_DEMO}):
-                yield c
-        elif command == '!tooltour':
-            async for c in self.tooltour():
-                yield c
+            source = self.stream(self.small_talk(text))
         else:
-            async for c in self.stream(f'Unknown test command {command}. Send !help for the list.'):
-                yield c
+            handler = getattr(self, '_cmd_' + command[1:], None) if command[1:].isalnum() else None
+            if handler is None:
+                source = self.stream(f'Unknown test command {command}. Send !help for the list.')
+            else:
+                source = handler(text)
+        async for c in source:
+            yield c
+
+    async def _cmd_help(self, _text):
+        lines = ['Mock bridge test commands:\n']
+        lines += [f'  {k:<10} {v}\n' for k, v in SCENARIOS.items()]
+        lines.append('Anything else gets a canned conversational reply.')
+        async for c in self.stream(''.join(lines), per_token=0.01):
+            yield c
+
+    async def _cmd_scroll(self, _text):
+        for i in range(1, 61):
+            await self.pause(0.02)
+            yield f'Line {i} of 60: the quick brown fox jumps over the lazy dog.\n'
+
+    async def _cmd_burst(self, _text):
+        yield ''.join(f'- Burst line {i} of 200: CPU, RAM, BIOS, video.\n' for i in range(1, 201))
+
+    async def _cmd_long(self, _text):
+        async for c in self.stream(LOREM):
+            yield c
+
+    async def _cmd_wide(self, _text):
+        yield 'A 120-character word: ' + ''.join(chr(65 + i % 26) for i in range(120)) + '\n'
+        yield 'A 1500-byte line: ' + ' '.join(f'word{i:03}' for i in range(170)) + '\n'
+        yield 'Done.'
+
+    async def _cmd_cp437(self, _text):
+        async for c in self.stream(CP437_SAMPLE, per_token=0.01):
+            yield c
+
+    async def _cmd_markdown(self, _text):
+        async for c in self.stream(MARKDOWN_SAMPLE, per_token=0.01):
+            yield c
+
+    async def _cmd_slow(self, _text):
+        for w in 'This reply trickles out one word per second so you can press Esc to stop it.'.split():
+            await self.pause(1.0)
+            yield w + ' '
+
+    async def _cmd_stall(self, _text):
+        await self.pause(30)
+        yield 'Sorry for the wait. That was a 30-second stall.'
+
+    async def _cmd_error(self, _text):
+        async for c in self.stream('Starting a reply, and then '):
+            yield c
+        raise MockAPIError('API error 529: Overloaded (simulated)')
+
+    async def _cmd_refuse(self, _text):
+        raise Refused('Claude declined to answer that. (simulated)')
+        yield   # never reached: makes this an async generator like the others
+
+    async def _cmd_cutoff(self, _text):
+        async for c in self.stream(LOREM.split('\n\n', maxsplit=1)[0]):
+            yield c
+        yield '\n[reply cut off: too long]'
+
+    async def _cmd_drop(self, _text):
+        async for c in self.stream('This sentence will never be fin'):
+            yield c
+        raise Disconnect()
+
+    async def _cmd_history(self, _text):
+        async for c in self.stream(self.describe_history()):
+            yield c
+
+    async def _cmd_run(self, text):
+        async for c in self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''}):
+            yield c
+
+    async def _cmd_tool(self, text):
+        words = shlex.split(text, posix=False)[1:]
+        if not words:
+            yield 'Usage: !tool NAME key=value ...'
+            return
+        args = {}
+        for w in words[1:]:
+            key, _, value = w.strip('"').partition('=')
+            args[key] = value.strip('"')
+        async for c in self.call(words[0], args):
+            yield c
+
+    async def _cmd_draw(self, _text):
+        async for c in self.call('draw', {'script': DRAW_DEMO}):
+            yield c
+
+    async def _cmd_play(self, _text):
+        async for c in self.call('play', {'music': PLAY_DEMO}):
+            yield c
+
+    async def _cmd_tooltour(self, _text):
+        async for c in self.tooltour():
+            yield c
 
     async def call(self, name, args):
         """Announce a tool call (without ending the line), make it, report it."""
@@ -341,6 +370,7 @@ class MockChat:
             yield c
 
     async def tooltour(self):
+        """Call every tool in turn and end with a PASS or FAIL verdict."""
         yield 'Touring the XT tools.\n'
         failure = None
         for i, (name, args, status, want) in enumerate(tour_steps(), 1):
@@ -356,6 +386,7 @@ class MockChat:
         yield verdict
 
     def small_talk(self, text):
+        """A canned reply to an ordinary message."""
         lowered = text.lower()
         for pattern, answer in SMALL_TALK:
             if re.search(pattern, lowered):
@@ -373,6 +404,7 @@ class MockChat:
         return reply
 
     def describe_history(self):
+        """What the mock remembers, for !history."""
         if not self.history:
             return 'Nothing yet: this is the first message of the conversation.'
         out = [f'I remember {len(self.history)} earlier message(s):\n']

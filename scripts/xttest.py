@@ -20,9 +20,9 @@ import subprocess
 import sys
 import time
 
-import build
 import fatimg
 import run86box
+import build
 
 IMAGE = os.path.join(build.BUILD, 'xttest.img')
 
@@ -48,6 +48,7 @@ def close_86box(proc):
 
 
 def main():
+    """Build the image, run the test batch file in 86Box and report whether its marker appeared."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('test')
     ap.add_argument('--log', default='DEVTEST.LOG', help='log file in C:\\ written by the test')
@@ -64,14 +65,15 @@ def main():
 
     running = subprocess.run(['powershell', '-NoProfile', '-Command',
                               'Get-Process 86Box -ErrorAction SilentlyContinue'],
-                             capture_output=True, text=True).stdout.strip()
+                             capture_output=True, text=True, check=False).stdout.strip()
     if running:
         sys.exit('xttest: 86Box is already running; close it first')
     vm = os.path.join(build.BUILD, '86box')
     os.makedirs(vm, exist_ok=True)
-    with open(os.path.join(vm, '86box.cfg'), 'w') as f:
+    with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(run86box.CFG.format(speed=4772728, cyl=build.CYLINDERS, image=IMAGE))
-    proc = subprocess.Popen([run86box.find_86box(), '-P', vm])
+    # Not a context manager: 86Box is closed by close_86box() once the log has the marker.
+    proc = subprocess.Popen([run86box.find_86box(), '-P', vm])  # pylint: disable=consider-using-with
 
     started = time.time()
     log = None

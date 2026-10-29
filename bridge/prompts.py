@@ -15,10 +15,11 @@ DEFAULT = 'default'
 
 
 class PromptError(Exception):
-    pass
+    """A named prompt file could not be read."""
 
 
 def names(folder=None):
+    """The prompt names available in `folder` (default: bridge/prompts)."""
     folder = folder or PROMPT_DIR
     try:
         return sorted(f[:-4] for f in os.listdir(folder) if f.lower().endswith('.txt'))
@@ -27,10 +28,11 @@ def names(folder=None):
 
 
 def load(name, folder=None):
+    """The text of prompt `name`; raises PromptError if there is none."""
     folder = folder or PROMPT_DIR
     try:
         with open(os.path.join(folder, name + '.txt'), encoding='utf-8') as f:
             return f.read().strip()
-    except OSError:
+    except OSError as e:
         have = ', '.join(names(folder)) or 'none'
-        raise PromptError(f'no prompt "{name}" in {folder} (have: {have})')
+        raise PromptError(f'no prompt "{name}" in {folder} (have: {have})') from e

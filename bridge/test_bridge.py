@@ -3,6 +3,7 @@
 
   python bridge/test_bridge.py
 """
+# pylint: disable=too-many-lines  # one file holds the whole protocol suite
 
 import asyncio
 import copy
@@ -15,18 +16,25 @@ import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# pylint: disable=wrong-import-position  # sys.path must be set before these imports
 import mockchat  # noqa: E402
 import providers  # noqa: E402
-import tools  # noqa: E402
 import xtbridge  # noqa: E402
+import convlog  # noqa: E402
+import prompts  # noqa: E402
+import replay  # noqa: E402
+import tools  # noqa: E402
 from tools import ToolCall, ToolResult, escape, unescape  # noqa: E402
+# pylint: enable=wrong-import-position
 
 
 class Client:
+    """Test side of an XT: reads and writes protocol lines on a stream pair."""
     def __init__(self, reader, writer):
         self.reader, self.writer = reader, writer
 
     async def line(self, timeout=5):
+        """Read one protocol line; return (verb, payload bytes)."""
         raw = await asyncio.wait_for(self.reader.readline(), timeout)
         if not raw:
             raise EOFError
@@ -35,6 +43,7 @@ class Client:
         return verb.decode(), rest
 
     async def send(self, text):
+        """Send one line, encoded as cp437."""
         self.writer.write(text.encode('cp437') + b'\n')
         await self.writer.drain()
 
@@ -57,8 +66,10 @@ class ToolClient(Client):
     """A fake XT that answers tool calls. respond(name, args) -> (status, text)."""
 
     memories = 'no memories yet'
+    last_payload = ''
 
-    def default_respond(self, name, args):
+    def default_respond(self, name, _args):
+        """Stock answers: a memory list for memory_list, 'done' for anything else."""
         if name == 'memory_list':
             return 'ok', self.memories
         return 'ok', 'done'
@@ -68,10 +79,10 @@ class ToolClient(Client):
         reply, _, verb = await self.ask_tools(text, self.default_respond)
         return reply, verb, self.last_payload
 
-    async def ask_tools(self, text, respond, raw=None):
+    async def ask_tools(self, text, respond, raw=None):  # pylint: disable=too-many-locals  # one test-harness loop
         """Send MSG; return (reply text, [(name, args)], final verb)."""
         await self.send('MSG ' + text)
-        out, calls, call = [], [], None
+        out, calls, call = [], [], ['', '', {}]
         while True:
             verb, rest = await self.line()
             if raw is not None:
@@ -102,7 +113,7 @@ class ToolClient(Client):
 
 def tour_responder(bad_readback=False):
     """Plausible XT answers for the mock's !tooltour."""
-    def respond(name, args):
+    def respond(name, args):  # pylint: disable=too-many-return-statements,too-many-branches  # canned answers
         if name in mockchat.TOUR_EXPECT and mockchat.TOUR_EXPECT[name] == 'error':
             return 'error', f'unknown tool {name}'
         if name == 'sysinfo':
@@ -144,6 +155,7 @@ def tour_responder(bad_readback=False):
 
 
 class BridgeTest(unittest.IsolatedAsyncioTestCase):
+    """A bridge on an ephemeral port with the mock backend, and a connected client."""
     token = None
     speed = 0   # no delays
 
@@ -164,7 +176,9 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
 
 
 class MockProtocol(BridgeTest):
+    """Plain chat against the mock backend."""
     async def test_hello_info_ping(self):
+        """HELLO carries the session and the time; INFO and PING answer."""
         self.assertEqual(self.hello[0], 'HELLO')
         self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 SESSION [0-9a-f]{8} '
                                         rb'TIME \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$')
@@ -176,6 +190,7 @@ class MockProtocol(BridgeTest):
         self.assertEqual(await self.c.line(), ('PONG', b''))
 
     async def test_small_talk_and_history(self):
+        """Replies see the earlier messages."""
         text, verb, _ = await self.c.ask('hello there')
         self.assertEqual(verb, 'END')
         self.assertIn('mock bridge', text)
@@ -185,6 +200,7 @@ class MockProtocol(BridgeTest):
         self.assertIn('2 earlier', text)
 
     async def test_new_clears_history(self):
+        """NEW forgets the conversation."""
         await self.c.ask('hello')
         await self.c.send('NEW')
         self.assertEqual(await self.c.line(), ('OK', b''))
@@ -192,16 +208,19 @@ class MockProtocol(BridgeTest):
         self.assertIn('first message', text)
 
     async def test_scroll(self):
+        """A long reply arrives complete."""
         text, verb, _ = await self.c.ask('!scroll')
         self.assertEqual(verb, 'END')
         self.assertEqual(text.count('\n'), 60)
 
     async def test_wide_lines_are_split(self):
+        """Over-wide lines are split into protocol-sized pieces."""
         text, verb, _ = await self.c.ask('!wide')
         self.assertEqual(verb, 'END')
         self.assertIn('word169', text)
 
     async def test_cp437(self):
+        """Characters are converted to code page 437."""
         text, _, _ = await self.c.ask('!cp437')
         self.assertIn('café', text)
         self.assertIn('╔══╦══╗', text)
@@ -209,6 +228,7 @@ class MockProtocol(BridgeTest):
         self.assertIn('->', text)
 
     async def test_error_refuse_cutoff(self):
+        """Errors, refusals and cut-off replies; only completed replies are remembered."""
         _, verb, msg = await self.c.ask('!error')
         self.assertEqual((verb, msg), ('ERR', 'API error 529: Overloaded (simulated)'))
         _, verb, msg = await self.c.ask('!refuse')
@@ -220,10 +240,12 @@ class MockProtocol(BridgeTest):
         self.assertIn('1 earlier', text)   # only !cutoff completed
 
     async def test_drop(self):
+        """A simulated dropped link closes the connection."""
         with self.assertRaises(EOFError):
             await self.c.ask('!drop')
 
     async def test_unknown_and_empty(self):
+        """Unknown test commands, empty messages and unknown verbs."""
         text, _, _ = await self.c.ask('!bogus')
         self.assertIn('Unknown test command', text)
         await self.c.send('MSG   ')
@@ -233,9 +255,11 @@ class MockProtocol(BridgeTest):
 
 
 class RealTiming(BridgeTest):
+    """Tests that need the mock's real pacing."""
     speed = 1
 
     async def test_stop_and_busy(self):
+        """STOP ends a running reply; a MSG meanwhile is busy."""
         await self.c.send('MSG !stall')
         await self.c.send('MSG again')
         self.assertEqual(await self.c.line(), ('ERR', b'busy'))
@@ -246,25 +270,30 @@ class RealTiming(BridgeTest):
 
 
 class Tools(BridgeTest):
+    """Tool calls over the wire, via the mock's !tool commands."""
     async def test_tool_roundtrip(self):
+        """A call arrives as TOOL/ARG/CALL and its result is echoed back."""
         text, calls, verb = await self.c.ask_tools(
-            '!tool read path=C:\AUTOEXEC.BAT lines=5', lambda n, a: ('ok', '1 @ECHO OFF'))
+            r'!tool read path=C:\AUTOEXEC.BAT lines=5', lambda n, a: ('ok', '1 @ECHO OFF'))
         self.assertEqual(verb, 'END')
-        self.assertEqual(calls, [('read', {'path': 'C:\AUTOEXEC.BAT', 'lines': '5'})])
+        self.assertEqual(calls, [('read', {'path': r'C:\AUTOEXEC.BAT', 'lines': '5'})])
         self.assertIn('read -> ok: 1 @ECHO OFF', text)
 
     async def test_text_flushed_before_tool(self):
+        """Text before a tool call is flushed with a NL first."""
         raw = []
         await self.c.ask_tools('!tool sysinfo', lambda n, a: ('ok', 'DOS'), raw)
         i = raw.index('TOOL')
         self.assertEqual(raw[i - 1], 'NL')
 
     async def test_quoted_values(self):
-        _, calls, _ = await self.c.ask_tools('!tool write path=C:\X.TXT "text=hello world"',
+        """Quoted values in !tool arguments keep their spaces."""
+        _, calls, _ = await self.c.ask_tools(r'!tool write path=C:\X.TXT "text=hello world"',
                                              lambda n, a: ('ok', 'wrote'))
         self.assertEqual(calls[0][1]['text'], 'hello world')
 
     async def test_long_arg_chunks(self):
+        """A long argument arrives in several ARG lines."""
         raw = []
         _, calls, verb = await self.c.ask_tools('!draw', lambda n, a: ('ok', 'drawn'), raw)
         self.assertEqual(verb, 'END')
@@ -274,18 +303,21 @@ class Tools(BridgeTest):
         self.assertIn('CIRCLE', script)
 
     async def test_denied_and_error_statuses(self):
-        text, _, _ = await self.c.ask_tools('!tool delete path=C:\X', lambda n, a: ('denied', ''))
+        """Denied and error results reach the model."""
+        text, _, _ = await self.c.ask_tools(r'!tool delete path=C:\X', lambda n, a: ('denied', ''))
         self.assertIn('-> denied', text)
-        text, _, _ = await self.c.ask_tools('!tool delete path=C:\X', lambda n, a: ('error', 'nope'))
+        text, _, _ = await self.c.ask_tools(r'!tool delete path=C:\X', lambda n, a: ('error', 'nope'))
         self.assertIn('-> error: nope', text)
 
     async def test_stray_done_ignored(self):
+        """DONE and OUT with no call in progress are ignored."""
         await self.c.send('DONE t9 ok')
         await self.c.send('OUT junk')
         await self.c.send('PING')
         self.assertEqual(await self.c.line(), ('PONG', b''))
 
     async def test_tooltour_reports(self):
+        """The !tooltour checks every tool and reports PASS or FAIL."""
         text, calls, verb = await self.c.ask_tools('!tooltour', tour_responder())
         self.assertEqual(verb, 'END')
         self.assertEqual(len(calls), len(mockchat.tour_steps()))
@@ -295,12 +327,14 @@ class Tools(BridgeTest):
 
 
 class ToolTiming(BridgeTest):
+    """Tool calls with the mock's real pacing."""
     speed = 1
 
     async def test_stop_mid_tool_then_continue(self):
+        """STOP while a tool runs; the chat carries on afterwards."""
         await self.c.send('MSG !tool sysinfo')
         while True:
-            verb, rest = await self.c.line()
+            verb, _ = await self.c.line()
             if verb == 'CALL':
                 break
         await self.c.send('DONE t1 stopped')
@@ -311,9 +345,11 @@ class ToolTiming(BridgeTest):
 
 
 class Auth(BridgeTest):
+    """A bridge with an access token."""
     token = 'sekrit'
 
     async def test_auth(self):
+        """Commands are refused until AUTH gives the right token."""
         self.assertEqual(self.hello[0], 'HELLO')
         self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 AUTH SESSION [0-9a-f]{8} TIME \S+$')
         await self.c.send('MSG hi')
@@ -337,12 +373,15 @@ class FakeOpenAI:
 
     def __init__(self):
         self.requests = []
+        self.server = None
 
     async def start(self):
+        """Listen on an ephemeral port; return it."""
         self.server = await asyncio.start_server(self.handle, '127.0.0.1', 0)
         return self.server.sockets[0].getsockname()[1]
 
     async def handle(self, reader, writer):
+        """Serve one request: parse it, record it, stream the canned reply."""
         head = await reader.readuntil(b'\r\n\r\n')
         length = int(next(l.split(b':')[1] for l in head.split(b'\r\n')
                           if l.lower().startswith(b'content-length')))
@@ -389,9 +428,9 @@ class FakeBackendTest(BridgeTest):
     async def asyncSetUp(self):
         self.fake = FakeOpenAI()
         port = await self.fake.start()
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with  # cleaned up in asyncTearDown
         self.config = os.path.join(self.tmp.name, 'providers.toml')
-        with open(self.config, 'w') as f:
+        with open(self.config, 'w', encoding='utf-8') as f:
             f.write(f'[fake]\ntype = "openai"\nname = "Fakey"\nbase_url = "http://127.0.0.1:{port}/v1"\n'
                     f'model = "fake-1"\napi_key_env = "CXT_TEST_KEY"\nextra = {{ temperature = 0.5 }}\n')
         os.environ['CXT_TEST_KEY'] = 'k123'
@@ -404,7 +443,9 @@ class FakeBackendTest(BridgeTest):
 
 
 class Providers(FakeBackendTest):
+    """Switching backends with /model, against the fake OpenAI server."""
     async def test_list_and_switch_keeps_history(self):
+        """/model lists, switches, and keeps the history."""
         await self.c.ask('hello there')
         text, verb, _ = await self.c.ask('/model')
         self.assertEqual(verb, 'END')
@@ -436,6 +477,7 @@ class Providers(FakeBackendTest):
         self.assertIn('3 earlier', text)
 
     async def test_switch_errors(self):
+        """Bad provider names and missing API keys are reported."""
         text, _, _ = await self.c.ask('/model nope:x')
         self.assertIn('Unknown provider', text)
         os.environ.pop('CXT_TEST_KEY')
@@ -443,6 +485,7 @@ class Providers(FakeBackendTest):
         self.assertIn('set CXT_TEST_KEY', text)
 
     async def test_openai_tool_call(self):
+        """OpenAI tool calls reach the XT and their results go back."""
         await self.c.ask('/model fake')
         text, calls, verb = await self.c.ask_tools('use tool', lambda n, a: ('ok', '1 @ECHO OFF'))
         self.assertEqual(verb, 'END')
@@ -456,12 +499,14 @@ class Providers(FakeBackendTest):
         self.assertIn('Fake says: 1 @ECHO OFF', text)
 
     async def test_openai_bad_json_args(self):
+        """Unparseable tool arguments become an error result."""
         await self.c.ask('/model fake')
         _, calls, verb = await self.c.ask_tools('bad args', lambda n, a: ('ok', 'x'))
         self.assertEqual((calls, verb), ([('memory_list', {})], 'END'))
         self.assertTrue(self.fake.requests[-1][1]['messages'][-1]['content'].startswith('Error:'))
 
     async def test_openai_failures(self):
+        """OpenAI failures end the turn with an error and leave no history."""
         await self.c.ask('/model fake:fake-2')
         text, verb, _ = await self.c.ask('cut')
         self.assertEqual((text, verb), ('Too long\n[reply cut off: too long]', 'END'))
@@ -476,7 +521,9 @@ class Providers(FakeBackendTest):
 
 
 class DotEnv(unittest.TestCase):
+    """Loading a .env file."""
     def test_load_env(self):
+        """Variables already in the environment win over the file."""
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, '.env')
             with open(path, 'w', encoding='utf-8') as f:
@@ -494,6 +541,7 @@ class DotEnv(unittest.TestCase):
 
 
 class Replay(unittest.TestCase):
+    """Parsing a bridge log for replay."""
     LOG = """2026-10-24 22:45:23.660 I ('1.2.3.4', 2063) connected (connection #1, 1 open)
 2026-10-24 22:46:05.000 I ('1.2.3.4', 2063) >> play something
 2026-10-24 22:46:06.000 D ('1.2.3.4', 2063) > TXT Here
@@ -508,7 +556,7 @@ class Replay(unittest.TestCase):
 """
 
     def test_parse(self):
-        import replay
+        """Turns, tool calls and delays are recovered from the log."""
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, 'x.log')
             with open(path, 'w', encoding='utf-8') as f:
@@ -528,7 +576,7 @@ class ConvLogTest(BridgeTest):
     """The JSONL conversation log (bridge/convlog.py)."""
 
     async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with  # cleaned up in asyncTearDown
         self.convlog = self.tmp.name
         await super().asyncSetUp()
 
@@ -543,13 +591,16 @@ class ConvLogTest(BridgeTest):
         for _ in range(50):                      # until the session has logged its end
             await asyncio.sleep(0.02)
             files = [os.path.join(d, f) for d, _, fs in os.walk(self.tmp.name) for f in fs]
-            if files and 'session_end' in open(files[0], encoding='utf-8').read():
-                break
+            if files:
+                with open(files[0], encoding='utf-8') as f:
+                    if 'session_end' in f.read():
+                        break
         self.assertEqual(len(files), 1)
         with open(files[0], encoding='utf-8') as f:
             return [json.loads(line) for line in f]
 
     async def test_tool_turn(self):
+        """A tool turn is logged from session start to end."""
         await self.c.ask_tools('!tool sysinfo', lambda n, a: ('ok', 'DOS 7.10'))
         await self.c.send('NEW')
         await self.c.line()
@@ -575,7 +626,7 @@ class ConvLogTest(BridgeTest):
         self.assertLess(kinds.index('turn_end'), kinds.index('new_chat'))
 
     def test_path(self):
-        import convlog
+        """Log files are named by day, peer and connection."""
         log = convlog.open_log(self.tmp.name, ('172.16.0.229', 2063), 3)
         log.close()
         day, name = os.path.relpath(log.path, self.tmp.name).split(os.sep)
@@ -587,6 +638,7 @@ class ApiCallReports(unittest.IsolatedAsyncioTestCase):
     """Backends report each API round to chat.on_api_call."""
 
     async def test_anthropic_usage(self):
+        """The Anthropic backend reports tokens, model and stop reason per round."""
         usage = {'input_tokens': 120, 'output_tokens': 15, 'cache_read_input_tokens': 100,
                  'cache_creation_input_tokens': 4}
         fake = FakeAnthropic([TOOL_ROUND + (usage,), DONE_ROUND])
@@ -602,7 +654,8 @@ class ApiCallReports(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(seen[0]['ms'], int)
 
     async def test_openai_usage(self):
-        import httpx
+        """The OpenAI backend asks for usage and reports it."""
+        import httpx  # pylint: disable=import-outside-toplevel  # only this test needs it
         fake = FakeOpenAI()
         port = await fake.start()
         async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}/v1/') as client:
@@ -621,7 +674,7 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
     """System prompt files (bridge/prompts/*.txt, bridge/prompts.py)."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with  # cleaned up in tearDown
         self.dir = self.tmp.name
         self.write('default', 'Be brief.')
         self.write('tutor', 'You are {name}, a patient tutor.')
@@ -630,11 +683,12 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     def write(self, name, text):
+        """Write NAME.txt in the temporary prompt directory."""
         with open(os.path.join(self.dir, name + '.txt'), 'w', encoding='utf-8') as f:
             f.write(text + '\n')
 
     def test_names_and_load(self):
-        import prompts
+        """Prompt names are listed and loaded; unknown names list the choices."""
         self.assertEqual(prompts.names(self.dir), ['default', 'tutor'])
         self.assertEqual(prompts.load('tutor', self.dir), 'You are {name}, a patient tutor.')
         with self.assertRaises(prompts.PromptError) as cm:
@@ -642,6 +696,7 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
         self.assertIn('default, tutor', str(cm.exception))
 
     def test_composed_prompt(self):
+        """The system prompt is the prompt file plus the tools add-on."""
         system = providers.system_prompt({'name': 'Claude', 'prompt_text': 'Be {name}-like.'})
         self.assertTrue(system.startswith('Be Claude-like.\n\n'))   # the file is the prompt...
         self.assertIn('real IBM PC XT', system)                     # ...then the tools add-on
@@ -652,6 +707,7 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
         self.assertIn('code page 437', default)
 
     def test_backends_reload_each_conversation(self):
+        """Backends re-read the prompt file for each new conversation."""
         table = providers.load_providers()
         b = providers.Backends(table, prompt='tutor', prompt_dir=self.dir)
         chat = b.make('anthropic')
@@ -663,6 +719,7 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
                          'anthropic: claude-opus-5-5')
 
     async def test_start_rejects_unknown_prompt(self):
+        """Starting the bridge with an unknown prompt fails."""
         args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=0, token=None,
                                      config=None, prompt='nope', prompt_dir=self.dir)
         with self.assertRaises(providers.ConfigError):
@@ -676,17 +733,19 @@ class Memories(FakeBackendTest):
     INDEX = 'TRAINS        41  Rich likes model trains'
 
     async def system_sent(self):
-        head, body = self.fake.requests[-1]
+        """Return the system prompt in the last request to the fake server."""
+        _, body = self.fake.requests[-1]
         return body['messages'][0]['content']
 
     async def test_first_message_lists_memories(self):
+        """The first message lists the XT's memories, and so does the first after NEW."""
         await self.c.ask('/model fake')
         seen = []
 
-        def respond(name, args):
+        def respond(name, _args):
             seen.append(name)
             return 'ok', self.INDEX
-        text, calls, verb = await self.c.ask_tools('hello', respond)
+        _, _, verb = await self.c.ask_tools('hello', respond)
         self.assertEqual(verb, 'END')
         self.assertEqual(seen, ['memory_list'])
         system = await self.system_sent()
@@ -703,13 +762,15 @@ class Memories(FakeBackendTest):
         self.assertEqual(seen, ['memory_list', 'memory_list'])
 
     async def test_failed_list_is_harmless(self):
+        """A failing memory_list leaves '(none)' in the prompt."""
         await self.c.ask('/model fake')
-        text, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('error', 'unknown tool memory_list'))
+        text, _, verb = await self.c.ask_tools('hello', lambda n, a: ('error', 'unknown tool memory_list'))
         self.assertEqual((text, verb), ('Fake says: hello\nbye', 'END'))
         self.assertIn('(none)', await self.system_sent())
 
     async def test_mock_does_not_list(self):
-        text, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('ok', 'x'))
+        """The mock backend has no system prompt, so it lists nothing."""
+        _, calls, verb = await self.c.ask_tools('hello', lambda n, a: ('ok', 'x'))
         self.assertEqual((calls, verb), ([], 'END'))
 
 
@@ -717,6 +778,7 @@ class Resume(BridgeTest):
     """A reconnecting XT gets its conversation back (RESUME <session>)."""
 
     async def connect(self):
+        """Open a second connection; return (client, HELLO payload)."""
         port = self.server.sockets[0].getsockname()[1]
         c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
         verb, rest = await c.line()
@@ -724,10 +786,12 @@ class Resume(BridgeTest):
         return c, rest.decode()
 
     def session(self, hello):
+        """Pull the session token out of a HELLO payload."""
         words = hello.split()
         return words[words.index('SESSION') + 1]
 
     async def hang_up(self, c):
+        """Close a client and wait until the bridge has parked its conversation."""
         c.writer.close()
         for _ in range(50):                     # until the bridge has parked it
             await asyncio.sleep(0.02)
@@ -736,10 +800,12 @@ class Resume(BridgeTest):
                     break
 
     async def test_hello_names_a_session(self):
+        """HELLO carries an eight-digit hex session token."""
         token = self.session(self.hello[1].decode())
         self.assertRegex(token, r'^[0-9a-f]{8}$')
 
     async def test_resume_keeps_the_conversation(self):
+        """RESUME on a new connection brings the old conversation back."""
         token = self.session(self.hello[1].decode())
         await self.c.ask('the first message')
         await self.hang_up(self.c)
@@ -747,11 +813,12 @@ class Resume(BridgeTest):
         self.assertNotEqual(self.session(hello2), token)
         await c2.send('RESUME ' + token)
         self.assertEqual(await c2.line(), ('OK', b'resumed'))
-        text, verb, _ = await c2.ask('!history')
+        text, _, _ = await c2.ask('!history')
         self.assertIn('the first message', text)
         c2.writer.close()
 
     async def test_unknown_or_expired_session(self):
+        """RESUME fails for unknown sessions and for expired ones."""
         c2, _ = await self.connect()
         await c2.send('RESUME 0badc0de')
         self.assertEqual(await c2.line(), ('ERR', b'unknown session'))
@@ -768,6 +835,7 @@ class Resume(BridgeTest):
         c2.writer.close()
 
     async def test_takes_over_a_stale_connection(self):
+        """RESUME takes over a connection the bridge still thinks is open."""
         token = self.session(self.hello[1].decode())
         await self.c.ask('before the drop')
         c2, _ = await self.connect()            # the bridge still thinks c is open
@@ -781,7 +849,7 @@ class Resume(BridgeTest):
         c2.writer.close()
 
 
-class FakeAnthropic:
+class FakeAnthropic:  # pylint: disable=too-few-public-methods  # stands in for one SDK method
     """Duck-typed AsyncAnthropic: each stream() call plays the next scripted round,
     (texts, content blocks, stop_reason) or an exception, and records its kwargs."""
 
@@ -792,11 +860,13 @@ class FakeAnthropic:
         self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(stream=self.stream))
 
     def stream(self, **kw):
+        """Start the next scripted round; return a stream context manager."""
         self.requests.append(copy.deepcopy(kw))
         r = self.rounds[0] if self.repeat_last and len(self.rounds) == 1 else self.rounds.pop(0)
         fake = self
 
         class Stream:
+            """One scripted stream, shaped like the SDK's."""
             async def __aenter__(self):
                 if isinstance(r, Exception):
                     raise r
@@ -807,10 +877,12 @@ class FakeAnthropic:
 
             @property
             async def text_stream(self):
+                """Yield the round's text pieces."""
                 for t in r[0]:
                     yield t
 
             async def get_final_message(self):
+                """Return the round's final message."""
                 usage = types.SimpleNamespace(**r[3]) if len(r) > 3 else None
                 return types.SimpleNamespace(content=r[1], stop_reason=r[2], usage=usage,
                                              model='claude-test-served')
@@ -819,11 +891,13 @@ class FakeAnthropic:
 
 
 def text_block(t):
+    """A text content block."""
     return types.SimpleNamespace(type='text', text=t)
 
 
-def tool_block(id, name, **args):
-    return types.SimpleNamespace(type='tool_use', id=id, name=name, input=args)
+def tool_block(tid, name, **args):
+    """A tool_use content block."""
+    return types.SimpleNamespace(type='tool_use', id=tid, name=name, input=args)
 
 
 TOOL_ROUND = (['Looking.'], [text_block('Looking.'), tool_block('toolu_1', 'read', path='C:\\A.BAT')],
@@ -846,16 +920,18 @@ async def drive(chat, text, status='ok', stop_at_tool=False):
 
 
 class OpenAISettle(unittest.IsolatedAsyncioTestCase):
+    """Interrupting an OpenAI turn between two tool calls."""
     async def test_cancel_after_first_of_two_calls(self):
+        """Every call gets a tool result, even those never run."""
         chat = providers.OpenAIChat(None, 'm', {'name': 'X'})
 
-        async def fake_stream(body, parts, calls):
+        async def fake_stream(_body, _parts, calls):
             calls[0] = {'id': 'a', 'name': 'sysinfo', 'arguments': '{}'}
             calls[1] = {'id': 'b', 'name': 'dir', 'arguments': '{"path": "C:\\\\"}'}
-            chat._finish = 'tool_calls'
+            chat._finish = 'tool_calls'  # pylint: disable=protected-access  # stands in for _stream
             return
             yield
-        chat._stream = fake_stream
+        chat._stream = fake_stream  # pylint: disable=protected-access  # swap the network layer
         gen = chat.reply('go')
         first = await gen.__anext__()
         first.result = ToolResult('ok', 'DOS')
@@ -868,11 +944,17 @@ class OpenAISettle(unittest.IsolatedAsyncioTestCase):
 
 
 class AnthropicTools(unittest.IsolatedAsyncioTestCase):
+    """The Anthropic backend's tool loop, against a scripted stream."""
+
+    fake = None
+
     def chat(self, rounds, **kw):
+        """Make a chat on a fake stream playing the given rounds."""
         self.fake = FakeAnthropic(rounds, **kw)
         return providers.AnthropicChat(self.fake, 'claude-test', 'low', {'name': 'Claude'})
 
     async def test_tool_round(self):
+        """A tool call is answered and the next round sees its result."""
         chat = self.chat([TOOL_ROUND, DONE_ROUND])
         items = await drive(chat, 'show me')
         self.assertEqual(items[0], 'Looking.')
@@ -891,6 +973,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(req['cache_control'], {'type': 'ephemeral'})
 
     async def test_parallel_tool_uses(self):
+        """Parallel tool uses are all answered, here with denials."""
         both = ([], [tool_block('a', 'sysinfo'), tool_block('b', 'dir', path='C:\\')], 'tool_use')
         chat = self.chat([both, DONE_ROUND])
         items = await drive(chat, 'go', status='denied')
@@ -901,6 +984,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0]['content'], 'The user denied this tool call.')
 
     async def test_round_cap(self):
+        """Rounds stop at the cap, and the last one forbids tools."""
         chat = self.chat([TOOL_ROUND], repeat_last=True)
         await drive(chat, 'loop forever')
         self.assertEqual(len(self.fake.requests), tools.MAX_ROUNDS + 1)
@@ -911,6 +995,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
                          {'type': 'text', 'text': 'Tool limit reached; answer now without tools.'})
 
     async def test_settle_after_cancel(self):
+        """A tool call cancelled mid-turn is settled before the next message."""
         chat = self.chat([TOOL_ROUND, DONE_ROUND])
         await drive(chat, 'show me', stop_at_tool=True)
         last = chat.messages[-1]
@@ -923,12 +1008,14 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[-1], {'type': 'text', 'text': 'next'})
 
     async def test_error_before_any_reply_pops_user(self):
+        """A failure before any reply removes the user message."""
         chat = self.chat([RuntimeError('boom')])
         with self.assertRaises(RuntimeError):
             await drive(chat, 'hi')
         self.assertEqual(chat.messages, [])
 
     async def test_error_after_merge_removes_only_text(self):
+        """A failure after a merge removes only the new text."""
         chat = self.chat([TOOL_ROUND, RuntimeError('boom')])
         await drive(chat, 'show me', stop_at_tool=True)
         before = copy.deepcopy(chat.messages)
@@ -937,6 +1024,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.messages, before)
 
     async def test_max_tokens_mid_tool_use_keeps_history_valid(self):
+        """A reply cut off mid tool use leaves a valid history."""
         cut = (['Drawing.'], [text_block('Drawing.'), tool_block('toolu_9', 'draw', script='SCR')],
                'max_tokens')
         chat = self.chat([cut, DONE_ROUND])
@@ -950,6 +1038,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
                          {'type': 'text', 'text': 'next'})
 
     async def test_transcript_flattens_tools(self):
+        """The transcript flattens tool calls into text."""
         chat = self.chat([TOOL_ROUND, DONE_ROUND])
         await drive(chat, 'show me')
         self.assertEqual(providers.transcript(chat),

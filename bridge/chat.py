@@ -10,6 +10,7 @@ import sys
 
 
 def lines(sock):
+    """Yield each newline-terminated line received on `sock` (as bytes)."""
     buf = b''
     while True:
         while b'\n' not in buf:
@@ -22,6 +23,7 @@ def lines(sock):
 
 
 def converse(sock, rx, text):
+    """Send one message and print the reply; False if the link closed first."""
     sock.sendall(b'MSG ' + text.encode('cp437', 'replace') + b'\n')
     for line in rx:
         verb, _, rest = line.partition(b' ')
@@ -46,6 +48,7 @@ def converse(sock, rx, text):
 
 
 def main():
+    """Connect, then chat interactively or send the -m messages."""
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser()
     ap.add_argument('host', nargs='?', default='127.0.0.1')

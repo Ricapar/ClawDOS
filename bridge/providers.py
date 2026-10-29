@@ -57,7 +57,7 @@ BUILTIN = {
 
 
 class ConfigError(Exception):
-    pass
+    """The provider configuration (or the prompt file) is unusable."""
 
 
 def load_providers(path=None):
@@ -71,7 +71,7 @@ def load_providers(path=None):
         with open(path, 'rb') as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError) as e:
-        raise ConfigError(f'{path}: {e}')
+        raise ConfigError(f'{path}: {e}') from e
     for key, fields in data.items():
         if not isinstance(fields, dict):
             raise ConfigError(f'{path}: [{key}] should be a table')
@@ -89,6 +89,7 @@ def load_providers(path=None):
 
 
 def has_key(p):
+    """Whether provider p can authenticate: its key variable is set (or none is needed)."""
     env = p.get('api_key_env')
     if p['type'] == 'anthropic':
         return True   # the SDK also finds `ant auth login` profiles
@@ -112,21 +113,22 @@ class Backends:
             self.prompt_text = prompts.load(self.prompt, self.prompt_dir)
         except prompts.PromptError as e:
             if self.prompt_text is None:
-                raise ConfigError(str(e))
+                raise ConfigError(str(e)) from e
             log.warning('%s; keeping the prompt read earlier', e)
         return self.prompt_text
 
     def client(self, key):
+        """The HTTP client for provider `key`, created on first use."""
         if key not in self.clients:
             p = self.providers[key]
             if p['type'] == 'anthropic':
-                import anthropic
+                import anthropic   # pylint: disable=import-outside-toplevel  # optional SDK, loaded only if used
                 kw = {'base_url': p['base_url']} if p.get('base_url') else {}
                 if p.get('api_key_env') and os.environ.get(p['api_key_env']):
                     kw['api_key'] = os.environ[p['api_key_env']]
                 self.clients[key] = anthropic.AsyncAnthropic(**kw)
             else:
-                import httpx
+                import httpx   # pylint: disable=import-outside-toplevel  # loaded only if an OpenAI-style provider is used
                 headers = dict(p.get('headers', {}))
                 if p.get('api_key_env') and os.environ.get(p['api_key_env']):
                     headers['Authorization'] = 'Bearer ' + os.environ[p['api_key_env']]
@@ -135,7 +137,8 @@ class Backends:
                     timeout=httpx.Timeout(30, read=300))
         return self.clients[key]
 
-    def make(self, key, model=None, transcript=()):
+    def make(self, key, model=None, history=()):
+        """A new chat for provider `key`, seeded with `history` (role, text) pairs."""
         p = dict(self.providers[key], prompt_text=self.load_prompt())
         model = model or p['model']
         if p['type'] == 'mock':
@@ -148,20 +151,22 @@ class Backends:
             chat = OpenAIChat(self.client(key), model, p)
         chat.provider, chat.model = key, model
         if isinstance(chat, MockChat):
-            users = [t for r, t in transcript if r == 'user']
-            replies = [t for r, t in transcript if r == 'assistant']
+            users = [t for r, t in history if r == 'user']
+            replies = [t for r, t in history if r == 'assistant']
             chat.history = list(zip(users, replies))
         else:
-            chat.messages = [{'role': r, 'content': t} for r, t in transcript]
+            chat.messages = [{'role': r, 'content': t} for r, t in history]
         return chat
 
     def describe(self, chat):
+        """One line saying which backend, model and prompt a chat uses."""
         if isinstance(chat, MockChat):
             return 'mock Claude (offline, send !help)'
         prompt = '' if self.prompt == prompts.DEFAULT else f', prompt {self.prompt}'
         return f'{chat.provider}: {chat.model}{prompt}'
 
     async def close(self):
+        """Close every HTTP client."""
         for c in self.clients.values():
             await c.close()
         self.clients.clear()
@@ -188,45 +193,58 @@ def _parse_args(arguments):
         return {}
 
 
+def _finish_call(calls, tool_id, content, is_error):
+    """Record a tool result on the ToolCall it answers (if we saw the call)."""
+    if tool_id in calls:
+        calls[tool_id].result = ToolResult(_result_status(content, is_error), '')
+
+
+def _block_parts(block, calls):
+    """The transcript parts of one Anthropic content block."""
+    kind = _get(block, 'type')
+    if kind == 'text':
+        return [_get(block, 'text')]
+    if kind == 'tool_use':
+        calls[_get(block, 'id')] = ToolCall(_get(block, 'name'), stringify(_get(block, 'input')))
+        return [calls[_get(block, 'id')]]
+    if kind == 'tool_result':
+        _finish_call(calls, _get(block, 'tool_use_id'), _get(block, 'content'), _get(block, 'is_error'))
+    return []
+
+
+def _message_parts(m, calls):
+    """The text pieces and ToolCalls of one history message. Tool results it
+    carries are filed on their calls, which are collected in `calls` by id."""
+    content = m.get('content')
+    if m['role'] == 'tool':                    # OpenAI tool result
+        _finish_call(calls, m.get('tool_call_id'), content, None)
+        return []
+    parts = []
+    if isinstance(content, str):
+        parts.append(content)
+    else:
+        for b in content or []:
+            parts.extend(_block_parts(b, calls))
+    for tc in m.get('tool_calls') or []:       # OpenAI tool calls
+        calls[tc['id']] = ToolCall(tc['function']['name'], _parse_args(tc['function']['arguments']))
+        parts.append(calls[tc['id']])
+    return [p for p in parts if p]
+
+
 def transcript(chat):
     """A chat's history as alternating (role, text) pairs, for handing to another
     backend. Tool calls become one-line summaries inside the assistant's turn."""
     if isinstance(chat, MockChat):
         return [x for u, a in chat.history for x in (('user', u), ('assistant', a))]
     entries, calls = [], {}
-
-    def finish(tool_id, content, is_error):
-        if tool_id in calls:
-            calls[tool_id].result = ToolResult(_result_status(content, is_error), '')
-
     for m in chat.messages:
-        role, content = m['role'], m.get('content')
-        if role == 'tool':                     # OpenAI tool result
-            finish(m.get('tool_call_id'), content, None)
-            continue
-        parts = []
-        if isinstance(content, str):
-            parts.append(content)
-        else:
-            for b in content or []:
-                kind = _get(b, 'type')
-                if kind == 'text':
-                    parts.append(_get(b, 'text'))
-                elif kind == 'tool_use':
-                    calls[_get(b, 'id')] = ToolCall(_get(b, 'name'), stringify(_get(b, 'input')))
-                    parts.append(calls[_get(b, 'id')])
-                elif kind == 'tool_result':
-                    finish(_get(b, 'tool_use_id'), _get(b, 'content'), _get(b, 'is_error'))
-        for tc in m.get('tool_calls') or []:   # OpenAI tool calls
-            calls[tc['id']] = ToolCall(tc['function']['name'], _parse_args(tc['function']['arguments']))
-            parts.append(calls[tc['id']])
-        parts = [p for p in parts if p]
+        parts = _message_parts(m, calls)
         if not parts:
             continue                           # tool results: part of the assistant's turn
-        if entries and entries[-1][0] == role:
+        if entries and entries[-1][0] == m['role']:
             entries[-1][1].extend(parts)
         else:
-            entries.append((role, parts))
+            entries.append((m['role'], parts))
     return [(role, '\n'.join(summary(p) if isinstance(p, ToolCall) else p for p in parts))
             for role, parts in entries]
 
@@ -240,6 +258,7 @@ def system_prompt(p):
 
 
 def uses_system_prompt(chat):
+    """Whether the chat builds its own system prompt (the mock backends do not)."""
     return hasattr(chat, 'base_system')
 
 
@@ -250,18 +269,19 @@ def set_memories(chat, index):
         chat.system = chat.base_system + ('' if index is None else '\n\n' + memory_prompt(index))
 
 
-def report(chat, round, started, first, **fields):
+def report(chat, index, started, first, **fields):
     """Tell chat.on_api_call (set by the bridge's session, if any) about one API
     round: model, stop_reason and usage in fields; started/first are monotonic
     times of the request and of its first text (None if it had none)."""
     callback = getattr(chat, 'on_api_call', None)
     if callback:
         now = time.monotonic()
-        callback({'round': round, **fields, 'ms': int((now - started) * 1000),
+        callback({'round': index, **fields, 'ms': int((now - started) * 1000),
                   'ttft_ms': int((first - started) * 1000) if first else None})
 
 
 def anthropic_usage(message):
+    """Token counts from an Anthropic message, in the form report() takes."""
     u = getattr(message, 'usage', None)
     return {'input': getattr(u, 'input_tokens', 0) or 0,
             'output': getattr(u, 'output_tokens', 0) or 0,
@@ -270,6 +290,7 @@ def anthropic_usage(message):
 
 
 def openai_usage(u):
+    """Token counts from an OpenAI-style usage object, in the form report() takes."""
     u = u or {}
     return {'input': u.get('prompt_tokens', 0) or 0,
             'output': u.get('completion_tokens', 0) or 0,
@@ -292,11 +313,12 @@ def echo_blocks(content):
 
 
 def tool_result(tool_use_id, result):
+    """An Anthropic tool_result block for a finished ToolCall."""
     return {'type': 'tool_result', 'tool_use_id': tool_use_id,
             'content': result.model_text(), 'is_error': result.status != 'ok'}
 
 
-class AnthropicChat:
+class AnthropicChat:   # pylint: disable=too-few-public-methods  # duck-typed chat: reply() is the interface
     """One conversation with Claude, including rounds of tool use on the XT.
 
     reply() yields text chunks and ToolCalls; whoever iterates sets each call's
@@ -310,6 +332,7 @@ class AnthropicChat:
         self.effort = effort
         self.system = self.base_system = system_prompt(p)
         self.messages = []
+        self.provider = None   # set by Backends.make
 
     def _add_user(self, text):
         """Append the user's text; after tool results it joins that message,
@@ -338,13 +361,21 @@ class AnthropicChat:
             missing = [tool_result(i, ToolResult('stopped', '')) for i in ids if i not in answered]
             self.messages.append({'role': 'user', 'content': list(results) + missing})
 
+    def _answer_cut_calls(self, kept):
+        """A reply cut off mid-call leaves a tool_use that must be answered."""
+        cut = [tool_result(_get(b, 'id'), ToolResult('error', 'reply cut off before the call was complete'))
+               for b in kept if _get(b, 'type') == 'tool_use']
+        if cut:
+            self.messages.append({'role': 'user', 'content': cut})
+
     async def reply(self, text):
+        """Send the user's text; yields text chunks and ToolCalls (see the class)."""
         start, merged = self._add_user(text)
         results = []
         try:
-            for round in range(MAX_ROUNDS + 1):
+            for rnd in range(MAX_ROUNDS + 1):
                 extra = {}
-                if round == MAX_ROUNDS:
+                if rnd == MAX_ROUNDS:
                     extra['tool_choice'] = {'type': 'none'}
                     self.messages[-1]['content'].append({'type': 'text', 'text': ROUND_CAP_NOTE})
                 started, first = time.monotonic(), None
@@ -367,7 +398,7 @@ class AnthropicChat:
                         first = first or time.monotonic()
                         yield chunk
                     final = await stream.get_final_message()
-                report(self, round, started, first, model=getattr(final, 'model', None) or self.model,
+                report(self, rnd, started, first, model=getattr(final, 'model', None) or self.model,
                        stop_reason=final.stop_reason, usage=anthropic_usage(final))
                 if final.stop_reason == 'refusal':
                     raise Refused('Claude declined to answer that.')
@@ -376,11 +407,7 @@ class AnthropicChat:
                 if final.stop_reason == 'max_tokens':
                     yield '\n[reply cut off: too long]'
                 if final.stop_reason != 'tool_use':
-                    # A reply cut off mid-call leaves a tool_use that must be answered.
-                    cut = [tool_result(_get(b, 'id'), ToolResult('error', 'reply cut off before the call was complete'))
-                           for b in kept if _get(b, 'type') == 'tool_use']
-                    if cut:
-                        self.messages.append({'role': 'user', 'content': cut})
+                    self._answer_cut_calls(kept)
                     return
                 for block in final.content:
                     if block.type == 'tool_use':
@@ -397,10 +424,11 @@ class AnthropicChat:
 # --- OpenAI-compatible chat completions ---------------------------------------
 
 class APIError(Exception):
-    pass
+    """The API answered with an error (or an error event mid-stream)."""
 
 
-class OpenAIChat:
+class OpenAIChat:   # pylint: disable=too-few-public-methods,too-many-instance-attributes
+    # (duck-typed chat: reply() is the interface; _finish, _usage, _served, _first: the last round's state)
     """One conversation over /chat/completions with streaming (SSE)."""
 
     def __init__(self, client, model, p):
@@ -410,9 +438,10 @@ class OpenAIChat:
         self.extra = p.get('extra', {})
         self.stream_usage = p.get('stream_usage', True)   # false for servers that reject stream_options
         self.messages = []
+        self.provider = None   # set by Backends.make
         self._finish = self._usage = self._served = self._first = None   # of the last round
 
-    def _settle(self, start, answered):
+    def _settle(self, start):
         """After a failed or interrupted reply: forget it if nothing came back,
         otherwise answer any tool calls left open."""
         if not any(m['role'] == 'assistant' for m in self.messages[start:]):
@@ -426,57 +455,67 @@ class OpenAIChat:
                 self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
                                       'content': ToolResult('stopped', '').model_text()})
 
+    @staticmethod
+    def _assistant_message(parts, calls):
+        """The assistant message for a round's streamed text and tool calls."""
+        message = {'role': 'assistant', 'content': ''.join(parts) or None}
+        if calls:
+            message['tool_calls'] = [{'id': c['id'], 'type': 'function',
+                                      'function': {'name': c['name'], 'arguments': c['arguments']}}
+                                     for _, c in sorted(calls.items())]
+        else:
+            message['content'] = message['content'] or ''
+        return message
+
+    async def _run_tools(self, message):
+        """Yield each of the message's tool calls for the caller to run, and
+        append the tool messages that answer them."""
+        for tc in message['tool_calls']:
+            try:
+                args = json.loads(tc['function']['arguments'] or '{}')
+                if not isinstance(args, dict):
+                    raise ValueError
+            except ValueError:
+                result = ToolResult('error', 'arguments were not valid JSON')
+            else:
+                call = ToolCall(tc['function']['name'], stringify(args))
+                yield call
+                result = call.result
+            self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
+                                  'content': result.model_text()})
+
     async def reply(self, text):
+        """Send the user's text; yields text chunks and ToolCalls, like AnthropicChat."""
         start = len(self.messages)
         self.messages.append({'role': 'user', 'content': text})
-        answered = set()
         try:
-            for round in range(MAX_ROUNDS + 1):
+            for rnd in range(MAX_ROUNDS + 1):
                 body = {'model': self.model, 'stream': True, 'max_tokens': MAX_TOKENS,
                         'messages': [{'role': 'system', 'content': self.system}] + self.messages,
                         'tools': openai_tools(), **self.extra}
                 if self.stream_usage:
                     body['stream_options'] = {'include_usage': True}
-                if round == MAX_ROUNDS:
+                if rnd == MAX_ROUNDS:
                     body['tool_choice'] = 'none'
                 parts, calls = [], {}
                 started = time.monotonic()
                 async for piece in self._stream(body, parts, calls):
                     yield piece
                 finish = self._finish
-                report(self, round, started, self._first, model=self._served or self.model,
+                report(self, rnd, started, self._first, model=self._served or self.model,
                        stop_reason=finish, usage=openai_usage(self._usage))
                 if finish == 'content_filter' and not parts and not calls:
                     raise Refused('The model declined to answer that.')
-                message = {'role': 'assistant', 'content': ''.join(parts) or None}
-                if calls:
-                    message['tool_calls'] = [{'id': c['id'], 'type': 'function',
-                                              'function': {'name': c['name'], 'arguments': c['arguments']}}
-                                             for _, c in sorted(calls.items())]
-                else:
-                    message['content'] = message['content'] or ''
+                message = self._assistant_message(parts, calls)
                 self.messages.append(message)
                 if finish == 'length':
                     yield '\n[reply cut off: too long]'
                 if not calls:
                     return
-                answered = set()
-                for tc in message['tool_calls']:
-                    try:
-                        args = json.loads(tc['function']['arguments'] or '{}')
-                        if not isinstance(args, dict):
-                            raise ValueError
-                    except ValueError:
-                        result = ToolResult('error', 'arguments were not valid JSON')
-                    else:
-                        call = ToolCall(tc['function']['name'], stringify(args))
-                        yield call
-                        result = call.result
-                    self.messages.append({'role': 'tool', 'tool_call_id': tc['id'],
-                                          'content': result.model_text()})
-                    answered.add(tc['id'])
+                async for call in self._run_tools(message):
+                    yield call
         except BaseException:
-            self._settle(start, answered)
+            self._settle(start)
             raise
 
     async def _stream(self, body, parts, calls):
@@ -515,6 +554,7 @@ class OpenAIChat:
 
 
 def error_message(raw):
+    """A short human-readable message from an API error body (bytes or str)."""
     try:
         err = json.loads(raw).get('error', raw)
         if isinstance(err, dict):

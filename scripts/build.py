@@ -42,8 +42,9 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     'claude.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
-                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c', 'lib/search.c',
-                               'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/basdraw.c', 'lib/gfx.c', 'lib/raster.c', 'lib/shell.c', 'lib/memory.c', 'lib/ems.c'],
+                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
+                               'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/basdraw.c',
+                               'lib/gfx.c', 'lib/raster.c', 'lib/shell.c', 'lib/memory.c', 'lib/ems.c'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
     'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/basdraw.c', 'lib/raster.c',
                                 'lib/memory.c', 'lib/toolapi.c', 'lib/edit.c', 'lib/search.c'],
@@ -54,6 +55,7 @@ TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini', '.bas', '.asm', '.c', '.h'}
 
 
 def find_tool(name, extra_dirs=()):
+    """Path of the tool `name`: in extra_dirs, else on PATH (exits if missing)."""
     for d in extra_dirs:
         p = os.path.join(d, name + ('.exe' if os.name == 'nt' else ''))
         if os.path.exists(p):
@@ -65,6 +67,7 @@ def find_tool(name, extra_dirs=()):
 
 
 def nasm():
+    """Path of the NASM assembler."""
     return find_tool('nasm', [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'bin', 'NASM')])
 
 
@@ -73,6 +76,7 @@ WATCOM_BINS = [os.path.join(WATCOM, d) for d in
 
 
 def watcom_env():
+    """The environment OpenWatcom's tools need."""
     env = dict(os.environ)
     env['WATCOM'] = WATCOM
     env['INCLUDE'] = os.path.join(WATCOM, 'h')
@@ -83,7 +87,7 @@ def watcom_env():
 def run(cmd, show_output=True, **kw):
     """Run a tool. Output is shown if asked for, and always on failure."""
     print(f'  {os.path.basename(cmd[0])} {os.path.basename(cmd[-1])}')
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, **kw)
     out = '\n'.join(l for l in p.stdout.splitlines()
                     if not l.startswith(('Open Watcom', 'Version 2.0', 'Copyright', 'Portions',
                                          'Source code', 'See https')))
@@ -94,6 +98,7 @@ def run(cmd, show_output=True, **kw):
 
 
 def build_boot():
+    """Assemble the MBR and the FAT16 boot sector."""
     os.makedirs(BUILD, exist_ok=True)
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'mbr.bin'),
          os.path.join(ROOT, 'src', 'boot', 'mbr.asm')])
@@ -102,24 +107,27 @@ def build_boot():
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
 
 
-def build_app(name, spec, env):
-    objdir = os.path.join(BUILD, 'obj', os.path.splitext(name)[0])
-    os.makedirs(objdir, exist_ok=True)
-    model = spec.get('model', 's')
-    flags = ['-q', '-0', f'-m{model}', '-bt=dos', '-os', '-s', '-zp2',
+def compile_flags(spec, objdir):
+    """(compiler flags, extra sources) for an app: the mTCP library and config if it uses TCP/IP."""
+    flags = ['-q', '-0', f'-m{spec.get("model", "s")}', '-bt=dos', '-os', '-s', '-zp2',
              '-i=' + os.path.join(ROOT, 'lib')]
-    sources = [os.path.join(ROOT, s) for s in spec['sources']]
+    extra = []
     if spec.get('mtcp'):
         cfg = os.path.join(ROOT, spec['mtcp'])
         # mTCP sources do `#include CFG_H`; Watcom can't take a quoted -D value
         # from the Windows command line, so force-include a header defining it.
         cfg_h = os.path.join(objdir, 'cfg_h.h')
-        with open(cfg_h, 'w') as f:
+        with open(cfg_h, 'w', encoding='utf-8') as f:
             f.write(f'#define CFG_H "{os.path.basename(cfg)}"\n')
         flags += [f'-fi={cfg_h}', '-i=' + os.path.dirname(cfg),
                   '-i=' + os.path.join(MTCP_SRC, 'TCPINC'), '-i=' + os.path.join(MTCP_SRC, 'INCLUDE')]
-        sources += [os.path.join(MTCP_SRC, 'TCPLIB', f.upper()) for f in MTCP_LIB]
+        extra = [os.path.join(MTCP_SRC, 'TCPLIB', f.upper()) for f in MTCP_LIB]
+    return flags, extra
 
+
+def compile_sources(sources, spec, flags, objdir, env):
+    """Compile/assemble each source into objdir; returns the object files."""
+    model = spec.get('model', 's')
     objs = []
     for src in sources:
         obj = os.path.join(objdir, os.path.splitext(os.path.basename(src))[0].lower() + '.obj')
@@ -135,8 +143,13 @@ def build_app(name, spec, env):
             strict = ours and not (spec.get('mtcp') and ext == '.cpp')
             run([compiler] + flags + (['-wx'] if strict else []) + [f'-fo={obj}', src],
                 show_output=ours, env=env)
+    return objs
+
+
+def link_app(name, objs, objdir, env):
+    """Link the object files into build/<name> with a wlink command file."""
     lnk = os.path.join(objdir, 'link.lnk')
-    with open(lnk, 'w') as f:
+    with open(lnk, 'w', encoding='utf-8') as f:
         mapfile = os.path.join(BUILD, os.path.splitext(name)[0] + '.map')
         f.write(f'system dos\noption quiet, map={mapfile}, eliminate, stack=4096\n')
         f.write(f'name {os.path.join(BUILD, name)}\n')
@@ -144,7 +157,17 @@ def build_app(name, spec, env):
     run([find_tool('wlink', WATCOM_BINS), f'@{lnk}'], env=env)
 
 
+def build_app(name, spec, env):
+    """Compile and link one DOS program."""
+    objdir = os.path.join(BUILD, 'obj', os.path.splitext(name)[0])
+    os.makedirs(objdir, exist_ok=True)
+    flags, extra = compile_flags(spec, objdir)
+    sources = [os.path.join(ROOT, s) for s in spec['sources']] + extra
+    link_app(name, compile_sources(sources, spec, flags, objdir, env), objdir, env)
+
+
 def build_apps(only=None):
+    """Build the DOS programs in APPS (just those named in `only`, if given)."""
     env = watcom_env()
     for name, spec in APPS.items():
         if only and name not in only:
@@ -190,10 +213,22 @@ def external_files(spec, source):
             fs = fatimg.open_fs(bytearray(f.read()))
         for path, entry in fs.walk():
             path_l, folder, pat = path.lstrip('/').lower(), *os.path.split(member_pat.lower())
-            if not entry.is_dir and os.path.dirname(path_l) == folder and fnmatch.fnmatch(os.path.basename(path_l), pat):
+            if (not entry.is_dir and os.path.dirname(path_l) == folder
+                    and fnmatch.fnmatch(os.path.basename(path_l), pat)):
                 out.append((path.rsplit('/', 1)[-1], fs.read_file(path.lstrip('/'))))
     if not out:
         sys.exit(f'build: nothing matches {source!r}')
+    return out
+
+
+def tree_files(top):
+    """[(path relative to top with '/', bytes)] of every file under the folder `top`."""
+    out = []
+    for dirpath, _, files in os.walk(top):
+        for n in sorted(files):
+            rel = os.path.relpath(os.path.join(dirpath, n), top).replace(os.sep, '/')
+            with open(os.path.join(dirpath, n), 'rb') as f:
+                out.append((rel, f.read()))
     return out
 
 
@@ -214,13 +249,7 @@ def resolve(source):
     if base is None:
         sys.exit(f'build: unknown source kind in {source!r}')
     if spec.endswith('/**'):                           # a whole tree, keeping its folders
-        top = os.path.join(base, spec[:-3])
-        out = []
-        for dirpath, _, files in os.walk(top):
-            for n in sorted(files):
-                rel = os.path.relpath(os.path.join(dirpath, n), top).replace(os.sep, '/')
-                with open(os.path.join(dirpath, n), 'rb') as f:
-                    out.append((rel, f.read()))
+        out = tree_files(os.path.join(base, spec[:-3]))
         if not out:
             sys.exit(f'build: nothing matches {source!r}')
         return out
@@ -239,16 +268,10 @@ def resolve(source):
     return out
 
 
-def build_image(autotest=None):
-    with open(os.path.join(BUILD, 'mbr.bin'), 'rb') as f:
-        mbr = f.read()
-    with open(os.path.join(BUILD, 'fat16.bin'), 'rb') as f:
-        vbr = f.read()
-    img = fatimg.make_hdd(CYLINDERS, mbr=mbr, vbr=vbr, label='CLAUDEXT')
-    fs = fatimg.open_fs(img)
-
+def manifest_entries(autotest=None):
+    """[(destination, source spec)] from image/manifest.txt, plus AUTOTEST.BAT if given."""
     entries = []
-    with open(os.path.join(ROOT, 'image', 'manifest.txt')) as f:
+    with open(os.path.join(ROOT, 'image', 'manifest.txt'), encoding='utf-8') as f:
         for line in f:
             line = line.split('#', 1)[0].strip()
             if line:
@@ -256,7 +279,11 @@ def build_image(autotest=None):
                 entries.append((dest, source.strip()))
     if autotest:
         entries.append(('AUTOTEST.BAT', 'repo:' + os.path.relpath(autotest, ROOT)))
+    return entries
 
+
+def fill_image(fs, entries):
+    """Write the files named by the manifest entries into the file system."""
     for dest, source in entries:
         for name, data in resolve(source):
             path = dest + name.upper() if dest.endswith('/') else dest
@@ -267,6 +294,17 @@ def build_image(autotest=None):
             if path in ('KERNEL.SYS',):
                 attr |= fatimg.ATTR_SYSTEM | fatimg.ATTR_HIDDEN | fatimg.ATTR_RO
             fs.write_file(path, data, attr=attr)
+
+
+def build_image(autotest=None):
+    """Build the bootable disk image from the manifest (plus C:\\AUTOTEST.BAT if given); returns its path."""
+    with open(os.path.join(BUILD, 'mbr.bin'), 'rb') as f:
+        mbr = f.read()
+    with open(os.path.join(BUILD, 'fat16.bin'), 'rb') as f:
+        vbr = f.read()
+    img = fatimg.make_hdd(CYLINDERS, mbr=mbr, vbr=vbr, label='CLAUDEXT')
+    fs = fatimg.open_fs(img)
+    fill_image(fs, manifest_entries(autotest))
 
     # Point CLAUDE.EXE (and future bridge apps) at the bridge.
     cfg = fs.read_file('NET/MTCP.CFG') + f'CLAUDE_BRIDGE {settings()["bridge"]}\r\n'.encode()
@@ -292,18 +330,19 @@ def settings(**changes):
     """Persistent build settings (build/settings.json), updated by command-line flags."""
     s = dict(DEFAULT_SETTINGS)
     if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE) as f:
+        with open(SETTINGS_FILE, encoding='utf-8') as f:
             s.update(json.load(f))
     changes = {k: v for k, v in changes.items() if v is not None}
     if changes:
         s.update(changes)
         os.makedirs(BUILD, exist_ok=True)
-        with open(SETTINGS_FILE, 'w') as f:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(s, f, indent=2)
     return s
 
 
 def main():
+    """Command line: set the bridge address, then build the boot code, the programs and the image."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
     ap.add_argument('--bridge', help='host:port of the XTBridge (remembered for later builds)')

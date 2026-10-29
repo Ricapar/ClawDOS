@@ -19,10 +19,8 @@ from tools import ToolCall, unescape
 LINE = re.compile(r'(\S+ \S+) \w (\(.*?\)) (>>|>|<) ?(.*)$')
 
 
-def parse_log(path, connection=None):
-    """Turns of one connection (the last one with a message, or the Nth to
-    connect): a list of (user text, [(delay seconds, str | ToolCall), ...])."""
-    lines = open(path, encoding='utf-8', errors='replace').read().splitlines()
+def pick_peer(path, lines, connection):
+    """The peer (as logged, "(host, port)") whose connection to replay."""
     peers = []                                   # in order of connection
     for line in lines:
         m = re.search(r' (\(.*?\)) connected \(connection #(\d+)', line)
@@ -30,55 +28,76 @@ def parse_log(path, connection=None):
             peers.append(m[1])
     if not peers:
         raise ValueError(f'{path}: no connections logged')
-    if connection is None:
-        with_msgs = [p for p in peers if any(f'{p} >> ' in l for l in lines)]
-        if not with_msgs:
-            raise ValueError(f'{path}: no messages logged')
-        peer = with_msgs[-1]
-    else:
-        peer = peers[connection - 1]
+    if connection is not None:
+        return peers[connection - 1]
+    with_msgs = [p for p in peers if any(f'{p} >> ' in line for line in lines)]
+    if not with_msgs:
+        raise ValueError(f'{path}: no messages logged')
+    return with_msgs[-1]
 
-    turns, items, last, call = [], None, None, None
-    for line in lines:
-        m = LINE.match(line)
-        if not m or m[2] != peer:
-            continue
-        when = datetime.strptime(m[1], '%Y-%m-%d %H:%M:%S.%f')
-        direction, rest = m[3], m[4]
+
+class TurnParser:
+    """Builds the turns from one peer's log lines, fed in order."""
+
+    def __init__(self):
+        self.turns = []
+        self.items = None            # the current turn's items; None before the first message
+        self.last = None             # when the previous item (or the user's message) happened
+        self.call = None             # (delay, name, args so far) of a tool call being sent
+
+    def parse(self, lines, peer):
+        """The turns of `peer` (as logged) in the log `lines`."""
+        for line in lines:
+            m = LINE.match(line)
+            if m and m[2] == peer:
+                self.feed(datetime.strptime(m[1], '%Y-%m-%d %H:%M:%S.%f'), m[3], m[4])
+        return self.turns
+
+    def feed(self, when, direction, rest):
+        """Take one log line: the time, '>>' (user), '>' (to the XT) or '<' (from it), and the text."""
         if direction == '>>':
-            items = []
-            turns.append((rest, items))
-            last = when
-            continue
-        if items is None:
-            continue
+            self.items = []
+            self.turns.append((rest, self.items))
+            self.last = when
+            return
+        if self.items is None:
+            return
         verb, _, payload = rest.partition(' ')
         if direction == '<':
             if verb == 'DONE':                   # the pause after a tool counts from here
-                last = when
-            continue
-        delay = max(0.0, (when - last).total_seconds())
+                self.last = when
+            return
+        delay = max(0.0, (when - self.last).total_seconds())
         if verb == 'TXT':
-            items.append((delay, payload))
+            self.items.append((delay, payload))
         elif verb == 'NL':
-            items.append((delay, '\n'))
+            self.items.append((delay, '\n'))
         elif verb == 'TOOL':
-            call = (delay, payload.partition(' ')[2], {})
-            continue
-        elif verb == 'ARG' and call:
+            self.call = (delay, payload.partition(' ')[2], {})
+            return
+        elif verb == 'ARG' and self.call:
             key, _, piece = payload.partition(' ')
-            call[2][key] = call[2].get(key, '') + piece
-            continue
-        elif verb == 'CALL' and call:
-            items.append((call[0], ToolCall(call[1], {k: unescape(v) for k, v in call[2].items()})))
-            call = None
+            args = self.call[2]
+            args[key] = args.get(key, '') + piece
+            return
+        elif verb == 'CALL' and self.call:
+            call_delay, name, args = self.call
+            self.items.append((call_delay, ToolCall(name, {k: unescape(v) for k, v in args.items()})))
+            self.call = None
         else:
-            continue
-        last = when
-    return turns
+            return
+        self.last = when
 
 
-class ReplayChat:
+def parse_log(path, connection=None):
+    """Turns of one connection (the last one with a message, or the Nth to
+    connect): a list of (user text, [(delay seconds, str | ToolCall), ...])."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        lines = f.read().splitlines()
+    return TurnParser().parse(lines, pick_peer(path, lines, connection))
+
+
+class ReplayChat:   # pylint: disable=too-few-public-methods  # a chat backend is just reply() plus state
     """Plays back parsed turns in place of a model."""
 
     def __init__(self, turns, speed=1.0):
@@ -86,8 +105,9 @@ class ReplayChat:
         self.speed = speed
         self.history = []
 
-    async def reply(self, text):
-        round = 0
+    async def reply(self, _text):
+        """Play back every recorded turn, whatever the message was."""
+        rounds = 0
         for n, (user, items) in enumerate(self.turns, 1):
             yield f'[replay {n}/{len(self.turns)}] > {user}\n'
             for delay, item in items:
@@ -95,9 +115,9 @@ class ReplayChat:
                     await asyncio.sleep(delay / self.speed)
                 if isinstance(item, ToolCall):
                     item = ToolCall(item.name, dict(item.args))   # fresh for each replay
-                    report_round(self, round, 'tool_use')
-                    round += 1
+                    report_round(self, rounds, 'tool_use')
+                    rounds += 1
                 yield item
             yield '\n'
         yield '[replay finished]'
-        report_round(self, round, 'end_turn')
+        report_round(self, rounds, 'end_turn')

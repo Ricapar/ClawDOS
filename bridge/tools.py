@@ -181,10 +181,12 @@ or ports may be denied by the user; if so, don't retry, say what you would have 
 
 @dataclass
 class ToolResult:
+    """What the XT reported for a call: a status (see STATUSES) and its output."""
     status: str
     text: str
 
     def model_text(self):
+        """The result as the text handed back to the model."""
         if self.status == 'error':
             return 'Error: ' + self.text
         if self.status == 'denied':
@@ -196,6 +198,7 @@ class ToolResult:
 
 @dataclass
 class ToolCall:
+    """A tool call the model made: name, string arguments, wire id and result."""
     name: str
     args: dict
     id: str = ''
@@ -212,6 +215,7 @@ def summary(call):
 
 
 def anthropic_tools():
+    """The tool schemas in the Anthropic API format."""
     return [{'name': t['name'], 'description': t['description'],
              'input_schema': {'type': 'object',
                               'properties': {k: {'type': 'string', 'description': d}
@@ -221,6 +225,7 @@ def anthropic_tools():
 
 
 def openai_tools():
+    """The tool schemas in the OpenAI function-calling format."""
     return [{'type': 'function',
              'function': {'name': a['name'], 'description': a['description'],
                           'parameters': a['input_schema']}}
@@ -240,10 +245,12 @@ def stringify(args):
 
 
 def escape(s):
+    """Escape backslashes and newlines for a wire line."""
     return s.replace('\\', '\\\\').replace('\n', '\\n')
 
 
 def unescape(s):
+    """Undo escape()."""
     out, i = [], 0
     while i < len(s):
         c = s[i]
@@ -274,9 +281,9 @@ def chunks(escaped, room):
     yield piece
 
 
-def call_lines(id, call):
+def call_lines(call_id, call):
     """The (verb, payload) lines that send `call` to the XT."""
-    lines = [('TOOL', f'{id} {call.name}')]
+    lines = [('TOOL', f'{call_id} {call.name}')]
     for key, value in call.args.items():
         room = MAX_PAYLOAD - len(key) - 1
         for piece in chunks(escape(value), room):

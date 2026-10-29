@@ -20,6 +20,7 @@ import build
 
 
 def main():
+    """Start DOSBox-X on the image (or on a copy running the --test batch file)."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--image', default=os.path.join(build.BUILD, build.IMAGE_NAME))
     ap.add_argument('--test', help='batch file to run instead of the normal startup')
@@ -41,7 +42,8 @@ def main():
            '-set', 'ne2000 backend=slirp', '-set', 'serial serial2=disabled',  # COM2 would share IRQ 3
            '-c', f'imgmount 2 {os.path.basename(image)} -t hdd -size 512,63,16,{build.CYLINDERS}',
            '-c', 'boot -l c']
-    subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL,
+    # DOSBox-X keeps running after this script exits, so it is deliberately not waited for.
+    subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL,  # pylint: disable=consider-using-with
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f'DOSBox-X started ({image})')
 

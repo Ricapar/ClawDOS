@@ -64,6 +64,7 @@ serial1_enabled = 1
 
 
 def find_86box():
+    """Path of the WinGet-installed 86Box.exe (exits if there is none)."""
     hits = glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'WinGet',
                                   'Packages', '86Box.86Box_*', '86Box.exe'))
     if not hits:
@@ -72,6 +73,7 @@ def find_86box():
 
 
 def main():
+    """Write the VM config and start 86Box on the image."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--image', default=os.path.join(build.BUILD, build.IMAGE_NAME))
     ap.add_argument('--speed', type=int, default=4772728, help='CPU clock in Hz')
@@ -79,9 +81,10 @@ def main():
 
     vm = os.path.join(build.BUILD, '86box')
     os.makedirs(vm, exist_ok=True)
-    with open(os.path.join(vm, '86box.cfg'), 'w') as f:
+    with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(CFG.format(speed=a.speed, cyl=build.CYLINDERS, image=os.path.abspath(a.image)))
-    subprocess.Popen([find_86box(), '-P', vm])
+    # 86Box keeps running after this script exits, so it is deliberately not waited for.
+    subprocess.Popen([find_86box(), '-P', vm])  # pylint: disable=consider-using-with
     print(f'86Box started (VM: {vm})')
 
 
