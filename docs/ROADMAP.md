@@ -59,7 +59,7 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       info, DOS commands, memory and ports, CGA drawing (GW-BASIC style), PC
       speaker music (PLAY), text art; safe mode asks before changes (F3).
       Design in [superpowers/specs/2026-10-21-xt-tools-design.md](superpowers/specs/2026-10-21-xt-tools-design.md).
-- [ ] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
+- [x] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
 - [ ] **M6 - Foundation**: grow `lib/` (input line editor, windows/menus, EMS
       via PicoMEM, more bridge services) and a launcher for Claude-XT apps.
