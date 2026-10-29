@@ -114,12 +114,23 @@ def tour_responder(bad_readback=False):
         if name == 'read':
             if 'NOPE' in args['path']:
                 return 'error', 'file not found'
+            if args.get('start') == '3':
+                return 'ok', '    3 Third.'
             body = 'Hello from somewhere else.' if bad_readback else 'Hello from the tool tour.'
             return 'ok', f'    1 {body}\n    2 Second line.'
         if name == 'delete' and '*' in args['path']:
             return 'error', 'no wildcards'
         if name == 'peek' and args['addr'] == '0000:04F0':
             return 'ok', '0000:04F0  43 58 54  CXT'
+        if name == 'edit':
+            if 'Not in' in args['old']:
+                return 'error', 'old text not found'
+            return 'ok', 'edited C:\\CXTTOUR.TXT\n    2 Second line, edited.\n    3 Third.'
+        if name == 'search':
+            return 'ok', 'C:\\CXTTOUR.TXT\n    2: Second line, edited.'
+        if name == 'run' and '\n' in args['command']:
+            return 'ok', ('> VER\nexit code 0\nFreeCom\n\n> DIR C:\\NOPE.XYZ\nexit code 1\n'
+                          'File not found\n\nstopped: command 2 of 3 failed; not run:\n  REM never\n')
         if name == 'run':
             return 'ok', 'exit code 0\nFreeCom version 0.86'
         if name == 'memory_write' and not args['name'].isalnum():
@@ -155,7 +166,8 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
 class MockProtocol(BridgeTest):
     async def test_hello_info_ping(self):
         self.assertEqual(self.hello[0], 'HELLO')
-        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 SESSION [0-9a-f]{8}$')
+        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 SESSION [0-9a-f]{8} '
+                                        rb'TIME \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$')
         await self.c.send('INFO')
         verb, rest = await self.c.line()
         self.assertEqual(verb, 'INFO')
@@ -276,7 +288,7 @@ class Tools(BridgeTest):
     async def test_tooltour_reports(self):
         text, calls, verb = await self.c.ask_tools('!tooltour', tour_responder())
         self.assertEqual(verb, 'END')
-        self.assertEqual(len(calls), 22)
+        self.assertEqual(len(calls), len(mockchat.tour_steps()))
         self.assertIn('tool tour: PASS', text)
         text, _, _ = await self.c.ask_tools('!tooltour', tour_responder(bad_readback=True))
         self.assertIn('tool tour: FAIL', text)
@@ -303,7 +315,7 @@ class Auth(BridgeTest):
 
     async def test_auth(self):
         self.assertEqual(self.hello[0], 'HELLO')
-        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 AUTH SESSION [0-9a-f]{8}$')
+        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 AUTH SESSION [0-9a-f]{8} TIME \S+$')
         await self.c.send('MSG hi')
         self.assertEqual(await self.c.line(), ('ERR', b'AUTH required'))
         await self.c.send('AUTH wrong')
@@ -437,7 +449,7 @@ class Providers(FakeBackendTest):
         self.assertEqual(calls, [('memory_list', {}), ('read', {'path': 'C:\\A.BAT'})])
         body = self.fake.requests[-1][1]
         self.assertEqual([m['role'] for m in body['messages']], ['system', 'user', 'assistant', 'tool'])
-        self.assertEqual(len(body['tools']), 17)
+        self.assertEqual(len(body['tools']), len(tools.TOOLS))
         self.assertEqual(body['messages'][2]['tool_calls'][0]['function']['name'], 'read')
         self.assertEqual(body['messages'][3], {'role': 'tool', 'tool_call_id': 'call_1',
                                                'content': '1 @ECHO OFF'})
@@ -868,7 +880,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((items[1].name, items[1].args), ('read', {'path': 'C:\\A.BAT'}))
         self.assertEqual(items[2:], ['done'])
         req = self.fake.requests[1]
-        self.assertEqual(len(req['tools']), 17)
+        self.assertEqual(len(req['tools']), len(tools.TOOLS))
         msgs = req['messages']
         self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
         self.assertEqual(msgs[2]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',

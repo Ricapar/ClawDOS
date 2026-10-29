@@ -22,6 +22,7 @@ ZAI_API_KEY, OPENAI_API_KEY) or a .env file in the repo root.
 
 import argparse
 import asyncio
+import datetime
 import logging
 import logging.handlers
 import os
@@ -143,7 +144,9 @@ class Session:
         why = 'closed by bridge'
         try:
             auth = ' AUTH' if self.args.token else ''
-            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{auth} SESSION {self.conv.token}'.encode())
+            now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')   # the XT sets its clock
+            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{auth} SESSION {self.conv.token} '
+                                     f'TIME {now}'.encode())
             while True:
                 try:
                     raw = await self.reader.readuntil(b'\n')

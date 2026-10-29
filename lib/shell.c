@@ -77,30 +77,74 @@ static void teletype(const char *s)
     }
 }
 
-/* The 80x25 text screen, right-trimmed, without trailing blank rows. */
-static void snapshot(ToolCtx *t)
+/* The 80x25 text screen, right-trimmed, without trailing blank rows: as many
+   of the last rows as fit in `room` bytes. */
+static void snapshot(ToolCtx *t, unsigned room)
 {
     const unsigned short __far *vram = (const unsigned short __far *)MK_FP(0xB800, 0);
     char line[82];                    /* 80 columns, newline, NUL */
-    int row, last = -1, col, n;
+    unsigned char lens[25];
+    int row, first, last = -1, col, n;
+    unsigned used = 15;               /* "(screen text)\n" */
 
-    for (row = 0; row < 25; row++)
+    for (row = 0; row < 25; row++) {
+        lens[row] = 0;
         for (col = 0; col < 80; col++)
             if ((vram[row * 80 + col] & 0xFF) > ' ')
-                last = row;
+                lens[row] = (unsigned char)(col + 1);
+        if (lens[row])
+            last = row;
+    }
+    for (first = last + 1; first > 0 && used + lens[first - 1] + 1 <= room; first--)
+        used += lens[first - 1] + 1;
     tout_puts(t, "(screen text)\n");
-    for (row = 0; row <= last; row++) {
-        n = 0;
-        for (col = 0; col < 80; col++) {
+    for (row = first; row <= last; row++) {
+        n = lens[row];
+        for (col = 0; col < n; col++) {
             unsigned char c = (unsigned char)vram[row * 80 + col];
             line[col] = c < ' ' ? ' ' : (char)c;
-            if (c > ' ')
-                n = col + 1;
         }
         line[n] = '\n';
         line[n + 1] = 0;
         tout_puts(t, line);
     }
+}
+
+/* Byte i of what was captured: the head, then the tail ring. */
+static char captured(unsigned i)
+{
+    return i < headLen ? head[i] : tail[(tailStart + i - headLen) % TAIL_MAX];
+}
+
+static void putCaptured(ToolCtx *t, unsigned from, unsigned to)
+{
+    char chunk[129];
+    unsigned k = 0;
+
+    for (; from < to; from++) {
+        chunk[k++] = captured(from);
+        if (k == sizeof(chunk) - 1 || from + 1 == to) {
+            chunk[k] = 0;
+            tout_puts(t, chunk);
+            k = 0;
+        }
+    }
+}
+
+/* The captured output in at most `room` bytes: all of it, or its start and
+   (mostly) its end, where errors usually are. */
+static void putOutput(ToolCtx *t, unsigned room)
+{
+    unsigned n = headLen + tailLen, a = headLen, b = tailLen;
+
+    if (n > room) {
+        a = room / 4;
+        b = room - a;
+    }
+    putCaptured(t, 0, a);
+    if (total > (unsigned long)a + b)
+        tout_printf(t, "\n...(%lu bytes omitted)...\n", total - a - b);
+    putCaptured(t, n - b, n);
 }
 
 static unsigned countLines(void)
@@ -212,24 +256,16 @@ static const char *direct(const char *cmd, char *prog)
     return args;
 }
 
-int shell_run(ToolCtx *t, const char *cmd, int holdSecs)
+/* Run one command, capturing its output. The exit code, or -1 if it couldn't
+   start (why is in `why`). */
+static int runOne(const char *cmd, char *why)
 {
     static char prog[80];
-    const char *args;
-    volatile unsigned long __far *ticks = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
-    const char *comspec = getenv("COMSPEC");
-    static char buf[TAIL_MAX + 1];    /* too big for our 4 KB stack */
-    unsigned long start;
-    unsigned i;
+    const char *args, *comspec = getenv("COMSPEC");
     int code;
 
-    if (cmd == NULL || !*cmd)
-        return tool_fail(t, "missing command");
-    if (strlen(cmd) > SHELL_CMD_MAX)
-        return tool_fail(t, "command too long (max 120)");
     if (comspec == NULL || !*comspec)
         comspec = "C:\\COMMAND.COM";
-
     teletype("C:\\> ");
     teletype(cmd);
     teletype("\n");
@@ -251,27 +287,44 @@ int shell_run(ToolCtx *t, const char *cmd, int holdSecs)
     _dos_setvect(0x10, oldInt10);
 
     if (code == -1) {
-        sprintf(buf, "could not start %s: %s", args ? prog : comspec, strerror(errno));
-        teletype(buf);
+        sprintf(why, "could not start %.80s: %s", args ? prog : comspec, strerror(errno));
+        teletype(why);
         teletype("\n");
-        return tool_fail(t, buf);
     }
+    return code;
+}
 
-    tout_printf(t, "exit code %d\n", code);
-    if (total == 0) {
-        snapshot(t);
-    } else {
-        memcpy(buf, head, headLen);
-        buf[headLen] = 0;
-        tout_puts(t, buf);
-        if (total > HEAD_MAX + TAIL_MAX)
-            tout_printf(t, "\n...(%lu bytes omitted)...\n", total - HEAD_MAX - TAIL_MAX);
-        for (i = 0; i < tailLen; i++)
-            buf[i] = tail[(tailStart + i) % TAIL_MAX];
-        buf[tailLen] = 0;
-        tout_puts(t, buf);
-    }
-    sprintf(t->summary, "exit code %d, %u lines of output", code, total ? countLines() : 0);
+/* The next command line of *cmds, trimmed, into `out` (cut to SHELL_CMD_MAX);
+   its full length, or 0 when there are no more. */
+static unsigned nextCmd(const char **cmds, char *out)
+{
+    const char *p = *cmds + strspn(*cmds, " \t\r\n");
+    unsigned n = strcspn(p, "\r\n"), len = n;
+
+    while (len && (p[len - 1] == ' ' || p[len - 1] == '\t'))
+        len--;
+    *cmds = p + n;
+    memcpy(out, p, len < SHELL_CMD_MAX ? len : SHELL_CMD_MAX);
+    out[len < SHELL_CMD_MAX ? len : SHELL_CMD_MAX] = 0;
+    return len;
+}
+
+unsigned shell_count(const char *cmds, char *first)
+{
+    static char cmd[SHELL_CMD_MAX + 1];
+    unsigned n = 0;
+
+    *first = 0;
+    while (cmds && nextCmd(&cmds, n ? cmd : first))
+        n++;
+    return n;
+}
+
+static void hold(int code, int holdSecs)
+{
+    volatile unsigned long __far *ticks = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
+    unsigned long start;
+    char buf[60];
 
     sprintf(buf, "\n-- exit code %d - any key returns to Claude --", code);
     teletype(buf);
@@ -282,5 +335,74 @@ int shell_run(ToolCtx *t, const char *cmd, int holdSecs)
         ;
     if (_bios_keybrd(_KEYBRD_READY))
         _bios_keybrd(_KEYBRD_READ);
+}
+
+#define NOTES_ROOM 300                /* kept free for the list of commands not run */
+#define EARLY_ROOM 700                /* most output kept from a command that worked */
+
+int shell_run(ToolCtx *t, const char *cmds, int holdSecs)
+{
+    static char cmd[SHELL_CMD_MAX + 1], why[120];
+    const char *p = cmds;
+    unsigned count = 0, i, len, left, room;
+    int code = 0;
+
+    while (p && (len = nextCmd(&p, cmd)) != 0) {
+        if (len > SHELL_CMD_MAX) {
+            sprintf(why, "command %u is too long (max %u characters)", count + 1, SHELL_CMD_MAX);
+            return tool_fail(t, why);
+        }
+        count++;
+    }
+    if (count == 0)
+        return tool_fail(t, "missing command");
+    if (count > SHELL_CMDS_MAX) {
+        sprintf(why, "too many commands (max %u)", SHELL_CMDS_MAX);
+        return tool_fail(t, why);
+    }
+
+    for (i = 0, p = cmds; i < count; i++) {
+        nextCmd(&p, cmd);
+        if (i > 0 && tool_esc()) {
+            tout_printf(t, "stopped by the user before: %s\n", cmd);
+            strcpy(t->summary, "stopped by user");
+            return TS_STOPPED;
+        }
+        if (count > 1)
+            tout_printf(t, "> %s\n", cmd);
+        if ((code = runOne(cmd, why)) == -1) {
+            tout_printf(t, "%s\n", why);
+            strncpy(t->summary, why, sizeof(t->summary) - 1);
+            t->summary[sizeof(t->summary) - 1] = 0;
+            hold(code, holdSecs);
+            return TS_ERROR;
+        }
+        tout_printf(t, "exit code %d\n", code);
+        left = TOOL_OUT_MAX - t->len;
+        left = left > NOTES_ROOM ? left - NOTES_ROOM : 0;
+        room = code != 0 || i == count - 1 ? left : (left / 3 < EARLY_ROOM ? left / 3 : EARLY_ROOM);
+        if (total == 0)
+            snapshot(t, room);
+        else
+            putOutput(t, room);
+        if (code != 0)
+            break;
+        if (count > 1)
+            tout_puts(t, "\n");
+    }
+
+    if (count == 1) {
+        sprintf(t->summary, "exit code %d, %u lines of output", code, total ? countLines() : 0);
+    } else if (code != 0 && i + 1 < count) {
+        sprintf(t->summary, "stopped at %u of %u, exit code %d", i + 1, count, code);
+        tout_printf(t, "\nstopped: command %u of %u failed; not run:\n", i + 1, count);
+        while (++i < count) {
+            nextCmd(&p, cmd);
+            tout_printf(t, "  %s\n", cmd);
+        }
+    } else {
+        sprintf(t->summary, "%u commands, exit code %d", count, code);
+    }
+    hold(code, holdSecs);
     return TS_OK;
 }

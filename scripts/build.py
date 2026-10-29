@@ -42,11 +42,12 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     'claude.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
-                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c',
+                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c', 'lib/search.c',
                                'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/basdraw.c', 'lib/gfx.c', 'lib/raster.c', 'lib/shell.c', 'lib/memory.c', 'lib/ems.c'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
     'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/basdraw.c', 'lib/raster.c',
-                                'lib/memory.c', 'lib/toolapi.c'], 'model': 'l'},
+                                'lib/memory.c', 'lib/toolapi.c', 'lib/edit.c', 'lib/search.c'],
+                    'model': 'l'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini', '.bas', '.asm', '.c', '.h'}

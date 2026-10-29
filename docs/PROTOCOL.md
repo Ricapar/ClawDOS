@@ -10,7 +10,7 @@ receive buffer on the XT always holds a whole line.
 
 | Line | Meaning |
 |---|---|
-| `HELLO XTBRIDGE 1 [AUTH] SESSION <id>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`. |
+| `HELLO XTBRIDGE 1 [AUTH] SESSION <id> TIME <time>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`; `<time>` is the bridge's local time as `2026-10-28T14:03:07`, for a client without a clock of its own (CLAUDE.EXE sets DOS's). Clients look for the words they know and skip the rest. |
 | `OK` | Command accepted (`AUTH`, `NEW`, `RESUME` as `OK resumed`). |
 | `INFO <text>` | Backend description (reply to `INFO`). |
 | `TXT <text>` | A piece of the reply. Never contains a newline; append it to the current line. |

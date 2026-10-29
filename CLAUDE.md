@@ -10,7 +10,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1;
   `image/tests/net.bat` checks networking. `--bridge` runs the mock bridge alongside on port 18023, so tests use `10.0.2.2:18023` (log in build/bridge.log) and
   `--expect TEXT` fails unless TEXT is in the serial or bridge log: `image/tests/tools.bat --bridge --expect
-  "tool tour: PASS"` runs every XT tool; `image/tests/drop.bat --bridge --expect "connection #2"` checks a lost link; `image/tests/watch.bat --bridge --expect "VRAM watch #1"` checks CLAUDE `-watch`; `image/tests/memory.bat --bridge --expect "memory_write -> ok"` checks memory tools never ask; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/cxtunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  "tool tour: PASS"` runs every XT tool; `image/tests/drop.bat --bridge --expect "connection #2"` checks a lost link; `image/tests/watch.bat --bridge --expect "VRAM watch #1"` checks CLAUDE `-watch`; `image/tests/memory.bat --bridge --expect "memory_write -> ok"` checks memory tools never ask; `image/tests/clock.bat --bridge --expect "Clock set from the bridge"` checks the clock from the HELLO; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/cxtunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/xttest.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).

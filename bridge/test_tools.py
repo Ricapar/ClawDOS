@@ -56,13 +56,14 @@ class Encoding(unittest.TestCase):
 class Schemas(unittest.TestCase):
     def test_schemas(self):
         names = [t['name'] for t in TOOLS]
-        self.assertEqual(len(names), 17)
-        self.assertEqual(len(set(names)), 17)
+        self.assertEqual(len(names), 19)
+        self.assertEqual(len(set(names)), 19)
         cls = {t['name']: t['cls'] for t in TOOLS}
-        self.assertEqual({n for n, c in cls.items() if c == 'R'}, {'sysinfo', 'dir', 'read', 'peek'})
+        self.assertEqual({n for n, c in cls.items() if c == 'R'},
+                         {'sysinfo', 'dir', 'read', 'search', 'peek'})
         self.assertEqual({n for n, c in cls.items() if c == 'H'}, {'draw', 'play', 'textart'})
         self.assertEqual({n for n, c in cls.items() if c == 'W'},
-                         {'write', 'delete', 'mkdir', 'rename', 'run', 'poke', 'port'})
+                         {'write', 'edit', 'delete', 'mkdir', 'rename', 'run', 'poke', 'port'})
         self.assertEqual({n for n, c in cls.items() if c == 'M'},
                          {'memory_list', 'memory_read', 'memory_write'})
         for t, a in zip(TOOLS, anthropic_tools()):
@@ -72,7 +73,7 @@ class Schemas(unittest.TestCase):
             for prop in schema['properties'].values():
                 self.assertEqual(prop['type'], 'string')
         o = openai_tools()
-        self.assertEqual(len(o), 17)
+        self.assertEqual(len(o), 19)
         self.assertEqual(o[0]['type'], 'function')
         self.assertEqual(o[0]['function']['name'], TOOLS[0]['name'])
 
@@ -85,6 +86,8 @@ class Schemas(unittest.TestCase):
         self.assertEqual(summary(call), '[read C:\\A.BAT -> ok]')
         self.assertEqual(summary(ToolCall('sysinfo', {}, result=ToolResult('ok', ''))), '[sysinfo -> ok]')
         self.assertEqual(summary(ToolCall('run', {'command': 'VER'})), '[run VER]')
+        self.assertEqual(summary(ToolCall('run', {'command': 'TCC -c A.C\nTLINK @A.LNK'})),
+                         '[run TCC -c A.C; TLINK @A.LNK]')
 
     def test_prompt_and_cap(self):
         self.assertEqual(MAX_ROUNDS, 25)

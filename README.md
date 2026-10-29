@@ -122,8 +122,9 @@ transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 | Tool | What it does |
 |---|---|
 | `sysinfo`, `dir`, `read`, `peek` | Look at the system, directories, files (text or hex) and memory |
-| `write`, `delete`, `mkdir`, `rename` | Change files |
-| `run` | Run a DOS command on a plain DOS screen and read back what it printed |
+| `search` | Find text in files, with line numbers (much faster than running FIND) |
+| `write`, `edit`, `delete`, `mkdir`, `rename` | Change files; `edit` replaces an exact piece of a text file instead of rewriting it |
+| `run` | Run DOS commands on a plain DOS screen and read back what they printed: one per line, stopping at the first that fails (FreeCOM has no `&&`) |
 | `poke`, `port` | Write memory, read or write I/O ports |
 | `draw` | Draw a CGA picture from a GW-BASIC-style script (SCREEN, LINE, CIRCLE, PAINT, DRAW, PRINT...) |
 | `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
@@ -135,7 +136,7 @@ that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
 drawing, playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
-or be stopped with Ctrl-C. They get about 300K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
+or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
 
 With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!draw` and `!play` are demos, and

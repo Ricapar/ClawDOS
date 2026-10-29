@@ -3,10 +3,16 @@ All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
 source with the write tool, then build and run it with the run tool. Working
 examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
 
-MEMORY: programs you run get about 300 KB. Give run one program and its
+MEMORY: programs you run get about 290 KB. Give run a program and its
 arguments (TCC -c X.C): that starts it directly. A .BAT file, redirection
-(> <), "&", or a built-in (DIR, TYPE, CD) loads a second COMMAND.COM and
-costs 70 KB, so don't wrap compilers in a .BAT. One step per run call.
+(> <) or a built-in (DIR, TYPE, CD) loads a second COMMAND.COM and costs
+70 KB, so don't wrap compilers in a .BAT. There is no & or &&: put the steps
+on separate lines of one run call instead (compile, compile, link); they
+stop at the first that fails.
+
+EDITING: change a few lines with edit (old text -> new text) instead of
+rewriting the whole file with write; find things with search, not FIND.
+Keep sources split into small files (TCC runs out of memory on big ones).
 
 ASSEMBLERS (they write a .COM directly, no linker needed)
 - TINYASM -f bin X.ASM -o X.COM [-l X.LST]
@@ -22,7 +28,7 @@ ASSEMBLERS (they write a .COM directly, no linker needed)
   out of memory.
 
 C COMPILERS
-- Turbo C 2.0 (ANSI C), in two run calls: compile, then link.
+- Turbo C 2.0 (ANSI C), in two steps (two lines of one run call): compile, link.
     TCC -c X.C                                       makes X.OBJ
     TLINK C:\TC\LIB\C0S X,X,NUL,C:\TC\LIB\CS          makes X.EXE (small)
   For a .COM: TCC -mt -c X.C, then TLINK /t C:\TC\LIB\C0T X,X,NUL,C:\TC\LIB\CS

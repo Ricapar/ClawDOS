@@ -64,7 +64,7 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
 - [ ] **M6 - Building on the XT**: better tools for Claude writing programs on
       the XT itself (Turbo C, assemblers), from what the CGA demo and WarGames
       sessions of 2026-10-25/26 showed (bridge/logs/). Details below.
-  - [ ] **M6.1 - Dev tools pack**: `edit` (replace text in a file instead of
+  - [x] **M6.1 - Dev tools pack**: `edit` (replace text in a file instead of
         rewriting all of it: 49 whole-file writes of up to 5.4 KB happened),
         `search` (grep with line numbers inside CLAUDE: FIND took 10-79 s a
         call), `run` with a list of commands that stops at the first failure

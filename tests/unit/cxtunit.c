@@ -9,6 +9,8 @@
 #include "basdraw.h"
 #include "raster.h"
 #include "memory.h"
+#include "edit.h"
+#include "search.h"
 
 static int passed, failed;
 
@@ -333,6 +335,64 @@ static void testRaster(void)
     CHECK("raster: ellipse terminates", plots < 200);
 }
 
+/* --- edit and search ------------------------------------------------------------ */
+
+static char edited[300];
+
+static int collect(void *ctx, const char *p, unsigned n)
+{
+    (void)ctx;
+    strncat(edited, p, n);
+    return 0;
+}
+
+static const char *replaced(const char *src, const char *old, const char *repl, int all)
+{
+    edited[0] = 0;
+    edit_replace(src, old, repl, all, collect, NULL);
+    return edited;
+}
+
+static void testEdit(void)
+{
+    const char *src = "int a;\nint b;\n    x = 1;\n    x = 1;\nend";
+    unsigned first = 999;
+
+    CHECK("edit count 2", edit_count(src, "x = 1;", &first) == 2);
+    CHECK("edit count first", first == 18);
+    CHECK("edit count none", edit_count(src, "y", &first) == 0 && first == 18);
+    CHECK("edit count empty", edit_count(src, "", &first) == 0);
+    CHECK("edit line of 0", edit_line_of(src, 0) == 1);
+    CHECK("edit line of b", edit_line_of(src, 7) == 2);
+    CHECK("edit line of x", edit_line_of(src, first) == 3);
+    CHECK("edit count no overlap", edit_count("aaaa", "aa", &first) == 2 && first == 0);
+    CHECK("edit lines", edit_lines("a\nb\n") == 2 && edit_lines("a\nb") == 2 && edit_lines("") == 0
+                        && edit_lines("x") == 1 && edit_lines("\n") == 1);
+
+    CHECK_STR("edit replace first", replaced(src, "x = 1;", "x = 2;", 0),
+              "int a;\nint b;\n    x = 2;\n    x = 1;\nend");
+    CHECK_STR("edit replace all", replaced(src, "x = 1;", "y", 1), "int a;\nint b;\n    y\n    y\nend");
+    CHECK_STR("edit replace grows", replaced(src, "int b;\n", "int b;\nint c;\n", 0),
+              "int a;\nint b;\nint c;\n    x = 1;\n    x = 1;\nend");
+    CHECK_STR("edit delete", replaced(src, "int a;\n", "", 0), "int b;\n    x = 1;\n    x = 1;\nend");
+    CHECK_STR("edit at end", replaced(src, "end", "fin\n", 0),
+              "int a;\nint b;\n    x = 1;\n    x = 1;\nfin\n");
+    CHECK_STR("edit whole", replaced("abc", "abc", "z", 0), "z");
+    CHECK("edit replace empty old", edit_replace(src, "", "z", 0, collect, NULL) < 0);
+}
+
+static void testSearch(void)
+{
+    CHECK("search plain", search_match("    outportb(0x42, d);", "outportb", 0));
+    CHECK("search any case", search_match("    OutPortB(0x42, d);", "outportb", 0));
+    CHECK("search case", !search_match("    OutPortB(0x42, d);", "outportb", 1));
+    CHECK("search case hit", search_match("    OutPortB(0x42, d);", "OutPortB", 1));
+    CHECK("search at end", search_match("x & 63", "& 63", 0));
+    CHECK("search too long", !search_match("abc", "abcd", 0));
+    CHECK("search empty", !search_match("abc", "", 0));
+    CHECK("search partial then hit", search_match("aab", "ab", 0));
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -340,6 +400,8 @@ int main(void)
     testDraw();
     testRaster();
     testMemory();
+    testEdit();
+    testSearch();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

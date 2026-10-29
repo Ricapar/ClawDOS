@@ -59,6 +59,14 @@ TOOLS = [
                 'lines': ("Text: how many lines (default 100)", False),
                 'offset': ("Binary: first byte offset (default 0)", False),
                 'bytes': ("Binary: how many bytes, up to 256 (default 256)", False)}},
+    {'name': 'search', 'cls': 'R',
+     'description': "Find the lines that contain a piece of text in files, with line numbers: "
+                    "much faster than running FIND. Plain text, not a pattern; case is ignored "
+                    "unless case=1. Binary files are skipped.",
+     'params': {'text': ("The text to look for, on one line", True),
+                'path': ("Files to search: a file, a directory or a wildcard; several separated "
+                         "by spaces, e.g. C:\\WG\\*.C C:\\WG\\*.H", True),
+                'case': ("1 to match case exactly", False)}},
     {'name': 'peek', 'cls': 'R',
      'description': "Hex and ASCII dump of memory, e.g. 0040:0000 is the BIOS data area, "
                     "F000:FFF5 the BIOS date, B800:0000 the screen.",
@@ -70,6 +78,17 @@ TOOLS = [
      'params': {'path': ("File to write; at most 64 characters, 8.3 names", True),
                 'text': ("The file's contents", True),
                 'append': ("1 to append instead of overwriting", False)}},
+    {'name': 'edit', 'cls': 'W',
+     'description': "Change part of a text file: replace an exact piece of its text with new "
+                    "text, instead of rewriting the whole file with write. old must match the "
+                    "file exactly, spaces, tabs and line breaks included (copy it from a read, "
+                    "without the line numbers), and occur once unless all=1. You get the changed "
+                    "lines back, numbered. The file keeps its line ends. Files up to 60000 "
+                    "bytes. The user may be asked to approve.",
+     'params': {'path': ("The file to change", True),
+                'old': ("The exact text to replace, with enough lines to be unique", True),
+                'new': ("The text to put in its place (empty to delete it)", True),
+                'all': ("1 to replace every occurrence", False)}},
     {'name': 'delete', 'cls': 'W',
      'description': "Delete one file (no wildcards; use run with DEL for those).",
      'params': {'path': ("File to delete", True)}},
@@ -80,14 +99,17 @@ TOOLS = [
      'description': "Rename or move a file within a drive.",
      'params': {'from': ("Existing file", True), 'to': ("New name", True)}},
     {'name': 'run', 'cls': 'W',
-     'description': "Run a DOS command line with COMMAND.COM /C (programs, .BAT files, "
-                    "internal commands like DIR, TYPE, DEL). The screen switches to DOS while "
-                    "it runs; you get the output it printed (or the final screen text) and the "
-                    "exit code, which FreeCOM passes through from the program (e.g. 2 for DIR "
-                    "of a missing file). Programs cannot use the network, there is no way to "
-                    "type into them, and Ctrl-C can't stop them, so avoid interactive or "
-                    "endless programs.",
-     'params': {'command': ("The command line, at most 120 characters", True)}},
+     'description': "Run DOS command lines (programs, .BAT files, internal commands like DIR, "
+                    "TYPE, DEL). The screen switches to DOS while they run; you get the output "
+                    "each printed (or the final screen text) and its exit code, which FreeCOM "
+                    "passes through from the program (e.g. 2 for DIR of a missing file). Put "
+                    "several commands on separate lines (up to 12) to run them in order: they "
+                    "stop at the first whose exit code isn't 0, e.g. compile two files and link "
+                    "in one call. There is no & or && chaining. Programs cannot use the network, "
+                    "there is no way to type into them, and Ctrl-C can't stop them, so avoid "
+                    "interactive or endless programs.",
+     'params': {'command': ("The command line, at most 120 characters; or several, one per line",
+                            True)}},
     {'name': 'poke', 'cls': 'W',
      'description': "Write bytes to memory. Careful: wrong addresses can crash the XT.",
      'params': {'addr': ("Address as hex seg:off, e.g. B800:0000", True),
@@ -127,7 +149,8 @@ TOOLS = [
 BY_NAME = {t['name']: t for t in TOOLS}
 
 # The argument shown next to the tool name in transcripts.
-HEADER_KEY = {'dir': 'path', 'read': 'path', 'write': 'path', 'delete': 'path', 'mkdir': 'path',
+HEADER_KEY = {'dir': 'path', 'read': 'path', 'write': 'path', 'edit': 'path', 'search': 'text',
+              'delete': 'path', 'mkdir': 'path',
               'rename': 'from', 'run': 'command', 'peek': 'addr', 'poke': 'addr', 'port': 'port',
               'memory_read': 'name', 'memory_write': 'name'}
 
@@ -148,7 +171,7 @@ def memory_prompt(index):
 
 TOOLS_PROMPT = """\
 You also have tools that run on this real IBM PC XT itself (FreeDOS, 8088, CGA): \
-read and write files, look at the system, run DOS commands, peek and poke memory \
+read, search, write and edit files, look at the system, run DOS commands, peek and poke memory \
 and ports, draw CGA graphics with a GW-BASIC style script, play music on the PC \
 speaker, and print coloured text art. Use them when they help or when asked to do \
 something on the machine; each call takes a few seconds on this hardware, so \
@@ -181,7 +204,7 @@ class ToolCall:
 
 def summary(call):
     """A tool call as one line of text, for transcripts handed to other backends."""
-    arg = call.args.get(HEADER_KEY.get(call.name, ''), '')
+    arg = '; '.join(call.args.get(HEADER_KEY.get(call.name, ''), '').split('\n'))
     out = call.name + (' ' + arg if arg else '')
     if call.result:
         out += ' -> ' + call.result.status

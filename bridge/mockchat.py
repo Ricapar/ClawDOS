@@ -109,6 +109,12 @@ def tour_steps():
         ('dir', {'path': 'A:\\'}, 'error', None),
         ('write', {'path': 'C:\\CXTTOUR.TXT', 'text': TOUR_TEXT}, 'ok', None),
         ('read', {'path': 'c:\\cxttour.txt'}, 'ok', 'Hello from the tool tour.'),
+        ('edit', {'path': 'C:\\CXTTOUR.TXT', 'old': 'Second line.', 'new': 'Second line, edited.\nThird.'},
+         'ok', '    3 Third.'),
+        ('read', {'path': 'C:\\CXTTOUR.TXT', 'start': '3'}, 'ok', '    3 Third.'),
+        ('edit', {'path': 'C:\\CXTTOUR.TXT', 'old': 'Not in the file', 'new': 'x'}, 'error', 'not found'),
+        ('search', {'text': 'EDITED', 'path': 'C:\\CXTTOUR.TXT C:\\NOPE\\*.C'}, 'ok',
+         '    2: Second line, edited.'),
         ('rename', {'from': 'C:\\CXTTOUR.TXT', 'to': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
         ('mkdir', {'path': 'C:\\CXTTDIR'}, 'ok', None),
         ('delete', {'path': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
@@ -127,6 +133,9 @@ def tour_steps():
         ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
         # captured output, not the screen-text fallback
         ('run', {'command': 'VER'}, 'ok', lambda r: 'FreeCom' in r and '(screen text)' not in r),
+        # a list of commands stops at the first that fails
+        ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never'}, 'ok',
+         lambda r: '> DIR C:\\NOPE.XYZ' in r and 'not run:\n  REM never' in r),
     ]
     out = []
     for name, args, status, want in steps:

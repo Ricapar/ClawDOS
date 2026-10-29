@@ -113,6 +113,7 @@ static char session[16];              /* the bridge's name for our conversation,
 static int resumed;                   /* the last connect carried the conversation on */
 static int cutOff;                    /* the link died in the middle of a reply */
 static char lostReport[200];          /* why the last link died, for the bridge's log */
+static char clockReport[80];          /* what the clock said before the bridge set it */
 
 static char input[INPUT_MAX + 1];
 static int inputLen, inputPos;
@@ -819,6 +820,57 @@ static int waitLine(int secs)
     return 0;
 }
 
+/* `n` decimal digits at *p, or -1. */
+static int digits(const char **p, int n)
+{
+    int v = 0;
+    for (; n; n--, ++*p) {
+        if (**p < '0' || **p > '9')
+            return -1;
+        v = v * 10 + (**p - '0');
+    }
+    return v;
+}
+
+/* Set the DOS clock from the bridge's ("TIME 2026-10-28T14:03:07" in its
+   HELLO): the XT has no battery clock, and SNTP at boot doesn't always take,
+   which left every file dated 1980. A clock that was well off is reported to
+   the bridge's log. */
+static void setClock(const char *hello)
+{
+    const char *p = strstr(hello, "TIME ");
+    struct dosdate_t dd;
+    struct dostime_t dt;
+    int y, mo, d, h, mi, s;
+    long now, was;
+
+    if (p == NULL)
+        return;
+    p += 5;
+    if ((y = digits(&p, 4)) < 0 || *p++ != '-' || (mo = digits(&p, 2)) < 0 || *p++ != '-'
+        || (d = digits(&p, 2)) < 0 || *p++ != 'T' || (h = digits(&p, 2)) < 0 || *p++ != ':'
+        || (mi = digits(&p, 2)) < 0 || *p++ != ':' || (s = digits(&p, 2)) < 0)
+        return;
+    _dos_getdate(&dd);
+    _dos_gettime(&dt);
+    now = h * 3600L + mi * 60 + s;
+    was = dt.hour * 3600L + dt.minute * 60 + dt.second;
+    if (dd.year == y && dd.month == mo && dd.day == d && labs(now - was) <= 2)
+        return;
+    if (dd.year != y || dd.month != mo || dd.day != d || labs(now - was) > 60)
+        sprintf(clockReport, "Clock set from the bridge; it said %04u-%02u-%02u %02u:%02u:%02u",
+                dd.year, dd.month, dd.day, dt.hour, dt.minute, dt.second);
+    dd.year = (unsigned short)y;
+    dd.month = (unsigned char)mo;
+    dd.day = (unsigned char)d;
+    dt.hour = (unsigned char)h;
+    dt.minute = (unsigned char)mi;
+    dt.second = (unsigned char)s;
+    dt.hsecond = 0;
+    _dos_setdate(&dd);
+    _dos_settime(&dt);
+}
+
 /* Connect and say hello. Returns NULL, or what went wrong (link closed). */
 static const char *connectBridge(void)
 {
@@ -835,6 +887,7 @@ static const char *connectBridge(void)
         strncpy(fresh, s + 8, sizeof(fresh) - 1);
         fresh[strcspn(fresh, " ")] = 0;
     }
+    setClock(bridge.payload());
     if (strstr(bridge.payload(), "AUTH")) {
         bridge.send("AUTH", token);
         if (waitLine(10) <= 0 || strcmp(bridge.verb(), "OK")) {
@@ -861,6 +914,10 @@ static const char *connectBridge(void)
     if (lostReport[0]) {              /* tell the bridge's log what happened */
         bridge.send("LOG", lostReport);
         lostReport[0] = 0;
+    }
+    if (clockReport[0]) {
+        bridge.send("LOG", clockReport);
+        clockReport[0] = 0;
     }
     return NULL;
 }

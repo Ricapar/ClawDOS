@@ -16,6 +16,8 @@
 
 #include "toolapi.h"
 #include "dosfs.h"
+#include "edit.h"
+#include "search.h"
 #include "memory.h"
 #include "ems.h"
 #include "sysinfo.h"
@@ -217,15 +219,13 @@ static int toolDraw(ToolCtx *t)
     return TS_OK;
 }
 
-/* A DOS command on a plain DOS screen; the chat comes back afterwards. */
+/* DOS commands on a plain DOS screen; the chat comes back afterwards. */
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
     unsigned short __far *save;
     int status;
 
-    if (cmd && strlen(cmd) > SHELL_CMD_MAX)
-        return tool_fail(t, "command too long (max 120)");
     if ((save = saveScreen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
     status = shell_run(t, cmd, unattended ? 1 : 5);
@@ -238,7 +238,9 @@ static const ToolDef tools[] = {
     { "dir",     "Dir",     "path",    'R', "Listing",    tool_dir },
     { "read",    "Read",    "path",    'R', "Reading",    tool_read },
     { "peek",    "Peek",    "addr",    'R', "Peeking",    toolPeek },
+    { "search",  "Search",  "text",    'R', "Searching",  tool_search },
     { "write",   "Write",   "path",    'W', "Writing",    tool_write },
+    { "edit",    "Edit",    "path",    'W', "Editing",    tool_edit },
     { "delete",  "Delete",  "path",    'W', "Deleting",   tool_delete },
     { "mkdir",   "MkDir",   "path",    'W', "Creating",   tool_mkdir },
     { "rename",  "Rename",  "from",    'W', "Renaming",   tool_rename },
@@ -317,6 +319,32 @@ static void writePreview(char *buf)
                                   : (size >= 0 ? "overwrites existing file" : "new file"));
 }
 
+/* "replaces 3 lines with 5" */
+static void editPreview(char *buf)
+{
+    const char *old = targ("old"), *repl = targ("new");
+    unsigned o = old ? edit_lines(old) : 0, n = repl ? edit_lines(repl) : 0;
+
+    sprintf(buf, "replaces %u line%s with %u%s", o, o == 1 ? "" : "s", n,
+            targ_num("all", 0) ? ", everywhere it occurs" : "");
+}
+
+/* The later commands of a run call, one per line under its header. */
+static void runDetails(const char *cmds)
+{
+    char cmd[SHELL_CMD_MAX + 1];
+    const char *p = cmds + strspn(cmds, " \t\r\n");
+
+    p += strcspn(p, "\r\n");          /* the first is in the header */
+    while (*(p += strspn(p, " \t\r\n"))) {
+        unsigned n = strcspn(p, "\r\n");
+        memcpy(cmd, p, n < SHELL_CMD_MAX ? n : SHELL_CMD_MAX);
+        cmd[n < SHELL_CMD_MAX ? n : SHELL_CMD_MAX] = 0;
+        ui_tool_detail(cmd);
+        p += n;
+    }
+}
+
 static void sendResult(const char *status, ToolCtx *t)
 {
     static char line[OUT_CHUNK * 2 + 8];
@@ -372,14 +400,27 @@ static void runCall(void)
         sprintf(text, "unknown tool %.20s", callName);
         status = tool_fail(&t, text);
     } else {
+        static char first[SHELL_CMD_MAX + 16];
+        unsigned cmds = 0;
         arg = d->headerKey ? targ(d->headerKey) : NULL;
+        if (!strcmp(d->name, "run") && arg) {   /* a list of commands: the first, and how many */
+            cmds = shell_count(arg, first);
+            if (cmds > 1)
+                sprintf(first + strlen(first), " +%u more", cmds - 1);
+            arg = first;
+        }
         ui_tool_header(d->title, arg ? arg : "");
+        if (cmds > 1)
+            runDetails(targ("command"));
         if (argsOverflow) {
             status = tool_fail(&t, "arguments too long");
         } else if (d->cls == 'W' && safe) {
             int key;
             if (!strcmp(d->name, "write")) {
                 writePreview(text);
+                ui_tool_detail(text);
+            } else if (!strcmp(d->name, "edit")) {
+                editPreview(text);
                 ui_tool_detail(text);
             }
             sprintf(text, "Allow %s(%.40s)? (y/n)", d->title, arg ? arg : "");
