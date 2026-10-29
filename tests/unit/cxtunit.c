@@ -11,6 +11,7 @@
 #include "search.h"
 #include "screen.h"
 #include "console.h"
+#include "ticks.h"
 
 static int passed, failed;
 
@@ -168,6 +169,17 @@ static void testMemoryList(void)
     remove(MEM_DIR "\\ABCDEFGH.TXT");
 }
 
+/* --- bios ------------------------------------------------------------------- */
+
+static void testTicks(void)
+{
+    CHECK("ticks: elapsed", ticks_elapsed(100, 40) == 60);
+    CHECK("ticks: none", ticks_elapsed(40, 40) == 0);
+    CHECK("ticks: across midnight", ticks_elapsed(5, TICKS_PER_DAY - 10) == 15);
+    CHECK("ticks: a minute round-trips", TICKS_TO_SECS(SECS_TO_TICKS(60)) == 60);
+    CHECK("ticks: 10 s is 182 ticks", SECS_TO_TICKS(10) == 182);
+}
+
 /* --- console ---------------------------------------------------------------- */
 
 /* A stand-in for screen.c: a character grid with no footer, so console.c's
@@ -309,6 +321,7 @@ int main(void)
     testPlay();
     testMemory();
     testMemoryList();
+    testTicks();
     testConsole();
     testEdit();
     testSearch();

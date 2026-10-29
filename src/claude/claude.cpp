@@ -29,6 +29,7 @@
 #include "console.h"
 #include "tools.h"
 #include "toolapi.h"
+#include "ticks.h"
 #include "ui.h"
 
 #define VERSION   "0.2"
@@ -99,15 +100,15 @@ static char backend[80];
 static char token[64];
 
 /* Link liveness: the bridge answers PING at any time, even mid-reply. */
-#define PING_IDLE   (60 * 18)         /* ticks of silence before a PING when idle */
-#define PING_BUSY   (20 * 18)         /* ...and while waiting for Claude */
-#define PONG_WAIT   (15 * 18)         /* no answer by then: the link is dead */
-#define RETRY_WAIT  (10 * 18)         /* between reconnect attempts */
+#define PING_IDLE   SECS_TO_TICKS(60)   /* silence before a PING when idle */
+#define PING_BUSY   SECS_TO_TICKS(20)   /* ...and while waiting for Claude */
+#define PONG_WAIT   SECS_TO_TICKS(15)   /* no answer by then: the link is dead */
+#define RETRY_WAIT  SECS_TO_TICKS(10)   /* between reconnect attempts */
 static int linkUp;
 static unsigned long lastRx;          /* ticks when the bridge last sent a line */
 static int pinged;
 static unsigned long pingedAt;
-static unsigned long retryAt;
+static unsigned long retryStart, retryWait;  /* next reconnect attempt */
 static char offlineNote[100];
 static XTBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
 static char session[16];              /* the bridge's name for our conversation, for RESUME */
@@ -130,7 +131,6 @@ static const char *statusNote;        /* shown in the status row when idle */
 static unsigned long busySince;
 static int verbIndex;
 
-static volatile unsigned long __far *biosTicks = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
 
 
 /* --- building rows ------------------------------------------------------- */
@@ -196,8 +196,8 @@ static void drawStatus(void)
 
     rowBlank(r);
     if (state != IDLE) {
-        unsigned long now = *biosTicks;
-        unsigned secs = (unsigned)((now - busySince) * 10 / 182);
+        unsigned long now = TICKS_NOW;
+        unsigned secs = TICKS_TO_SECS(ticks_elapsed(now, busySince));
         int col;
 
         r.c[1] = spinGlyphs[(unsigned)(now >> 1) & 7] | (A_CLAWD << 8);
@@ -491,7 +491,7 @@ static void startReply(void)
 static void setState(State s)
 {
     if (s != IDLE && state == IDLE) {
-        busySince = *biosTicks;
+        busySince = TICKS_NOW;
         verbIndex = (int)(busySince % (sizeof(verbs) / sizeof(verbs[0])));
     }
     state = s;
@@ -815,8 +815,8 @@ static void fatal(const char *text)
 /* Wait up to `secs` for the next protocol line. */
 static int waitLine(int secs)
 {
-    unsigned long start = *biosTicks;
-    while (*biosTicks - start < (unsigned long)secs * 18) {
+    unsigned long start = TICKS_NOW;
+    while (ticks_elapsed(TICKS_NOW, start) < SECS_TO_TICKS(secs)) {
         int rc = bridge.poll();
         if (rc != 0)
             return rc;
@@ -914,7 +914,7 @@ static const char *connectBridge(void)
     if (waitLine(10) > 0 && !strcmp(bridge.verb(), "INFO"))
         strncpy(backend, bridge.payload(), sizeof(backend) - 1);
     linkUp = 1;
-    lastRx = *biosTicks;
+    lastRx = TICKS_NOW;
     pinged = 0;
     XTBridge::counters(&rxNet);
     if (lostReport[0]) {              /* tell the bridge's log what happened */
@@ -937,7 +937,7 @@ static void noteLinkLoss(const char *why)
     XTBridge::counters(&now);
     sprintf(lostReport, "Link lost (%.50s) %lus after the bridge's last line; since then: "
                         "sent %lu, retransmitted %lu, received %lu, send errors %lu, dropped %lu",
-            why, (*biosTicks - lastRx) * 10 / 182, now.sent - rxNet.sent,
+            why, (unsigned long)TICKS_TO_SECS(ticks_elapsed(TICKS_NOW, lastRx)), now.sent - rxNet.sent,
             now.retransmitted - rxNet.retransmitted, now.received - rxNet.received,
             now.sendErrors - rxNet.sendErrors, now.dropped - rxNet.dropped);
 }
@@ -961,7 +961,8 @@ static void linkLost(const char *why)
         const char *err = connectBridge();
         fatal(err ? err : "Lost the bridge mid-reply (reconnected, then gave up).");
     }
-    retryAt = *biosTicks + 5 * 18;
+    retryStart = TICKS_NOW;
+    retryWait = SECS_TO_TICKS(5);
     snprintf(offlineNote, sizeof(offlineNote), "Bridge offline; reconnecting to %s ...", host);
     statusNote = offlineNote;
     drawStatus();
@@ -979,7 +980,8 @@ static void reconnect(void)
     if (err) {
         snprintf(offlineNote, sizeof(offlineNote), "Bridge offline (%.40s) - retrying in 10s. F10 quits.", err);
         drawStatus();
-        retryAt = *biosTicks + RETRY_WAIT;
+        retryStart = TICKS_NOW;
+        retryWait = RETRY_WAIT;
         return;
     }
     statusNote = NULL;
@@ -1054,7 +1056,7 @@ static void watchCheck(unsigned cells)
     ScrDiff d;
     char buf[WATCH_LINE];
     int n, len, head;
-    unsigned long now = *biosTicks;
+    unsigned long now = TICKS_NOW;
 
     n = scr_check(cells, &d);
     if (n == 0)
@@ -1062,7 +1064,8 @@ static void watchCheck(unsigned cells)
     watchReports++;
     watchAppend(buf, 0, "VRAM watch #%lu: %d cells changed by someone else; first run %04X-%04X (cell 0 = B800:0000)."
                         " Live row 0 is cell %04X; state %d; %lus since the last bridge line.",
-                watchReports, n, d.first, d.last, scr_top(), (int)state, (now - lastRx) * 10 / 182);
+                watchReports, n, d.first, d.last, scr_top(), (int)state,
+                (unsigned long)TICKS_TO_SECS(ticks_elapsed(now, lastRx)));
     watchLog(buf);
     len = watchAppend(buf, 0, "VRAM found   ");
     for (int i = 0; i < 8; i++)
@@ -1100,12 +1103,12 @@ static void watchCheck(unsigned cells)
 /* Ping a quiet bridge; give up on one that doesn't answer. */
 static void checkLink(void)
 {
-    unsigned long now = *biosTicks;
+    unsigned long now = TICKS_NOW;
 
     if (pinged) {
-        if (now - pingedAt > PONG_WAIT)
+        if (ticks_elapsed(now, pingedAt) > PONG_WAIT)
             linkLost("The bridge stopped answering.");
-    } else if (now - lastRx > (state == IDLE ? PING_IDLE : PING_BUSY)) {
+    } else if (ticks_elapsed(now, lastRx) > (state == IDLE ? PING_IDLE : PING_BUSY)) {
         if (bridge.send("PING"))
             linkLost(bridge.errorText());
         else
@@ -1194,7 +1197,7 @@ int main(int argc, char *argv[])
     if (prefill)
         setInput(prefill);
 
-    unsigned long lastSpin = *biosTicks;
+    unsigned long lastSpin = TICKS_NOW;
 
     while (!quitting) {
         if (linkUp) {
@@ -1203,26 +1206,26 @@ int main(int argc, char *argv[])
                 pinged = 0;
                 XTBridge::counters(&rxNet);
                 handleLine(bridge.verb(), bridge.payload());
-                lastRx = *biosTicks;      /* after it: a tool may have run a while */
+                lastRx = TICKS_NOW;      /* after it: a tool may have run a while */
                 continue;
             }
             if (rc < 0)
                 linkLost(bridge.errorText());
             else
                 checkLink();
-        } else if ((long)(*biosTicks - retryAt) >= 0) {
+        } else if (ticks_elapsed(TICKS_NOW, retryStart) >= retryWait) {
             reconnect();
         }
-        if (watching && *biosTicks - watchAt >= 9) {
-            watchAt = *biosTicks;
+        if (watching && ticks_elapsed(TICKS_NOW, watchAt) >= 9) {
+            watchAt = TICKS_NOW;
             watchCheck(WATCH_CELLS);
         }
         if (XTBridge::breakPressed)
             break;
         if (biosIsKeyReady())
             handleKey(biosKeyRead());
-        if (state != IDLE && *biosTicks - lastSpin >= 2) {
-            lastSpin = *biosTicks;
+        if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
+            lastSpin = TICKS_NOW;
             drawStatus();
         }
     }

@@ -16,6 +16,7 @@
 #include <i86.h>
 #include <bios.h>
 #include "shell.h"
+#include "ticks.h"
 
 #define HEAD_MAX 900
 #define TAIL_MAX 2800
@@ -324,7 +325,6 @@ unsigned shell_count(const char *cmds, char *first)
 
 static void hold(int code, int holdSecs)
 {
-    volatile unsigned long __far *ticks = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
     unsigned long start;
     char buf[60];
 
@@ -332,8 +332,8 @@ static void hold(int code, int holdSecs)
     teletype(buf);
     while (_bios_keybrd(_KEYBRD_READY))
         _bios_keybrd(_KEYBRD_READ);
-    start = *ticks;
-    while (!_bios_keybrd(_KEYBRD_READY) && *ticks - start < (unsigned long)holdSecs * 182 / 10)
+    start = TICKS_NOW;
+    while (!_bios_keybrd(_KEYBRD_READY) && ticks_elapsed(TICKS_NOW, start) < SECS_TO_TICKS(holdSecs))
         ;
     if (_bios_keybrd(_KEYBRD_READY))
         _bios_keybrd(_KEYBRD_READ);
