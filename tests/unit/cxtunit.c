@@ -9,6 +9,8 @@
 #include "memory.h"
 #include "edit.h"
 #include "search.h"
+#include "screen.h"
+#include "console.h"
 
 static int passed, failed;
 
@@ -166,6 +168,83 @@ static void testMemoryList(void)
     remove(MEM_DIR "\\ABCDEFGH.TXT");
 }
 
+/* --- console ---------------------------------------------------------------- */
+
+/* A stand-in for screen.c: a character grid with no footer, so console.c's
+   wrapping can be checked without a CGA. */
+static unsigned short grid[SCR_ROWS][SCR_COLS];
+
+void scr_putc(int row, int col, unsigned char ch, unsigned char attr) { grid[row][col] = ch | (attr << 8); }
+void scr_puts(int row, int col, const char *s, unsigned char attr)
+{
+    for (; *s; s++, col++)
+        scr_putc(row, col, (unsigned char)*s, attr);
+}
+void scr_putn(int row, int col, const unsigned short *cells, int n) { memcpy(grid[row] + col, cells, n * 2); }
+void scr_fill(int row, int col, int n, unsigned char ch, unsigned char attr)
+{
+    while (n-- > 0)
+        scr_putc(row, col++, ch, attr);
+}
+void scr_clear(unsigned char attr)
+{
+    int r;
+    for (r = 0; r < SCR_ROWS; r++)
+        scr_fill(r, 0, SCR_COLS, ' ', attr);
+}
+void scr_scroll(unsigned char attr)
+{
+    memmove(grid[0], grid[1], sizeof(grid) - sizeof(grid[0]));
+    scr_fill(SCR_ROWS - 1, 0, SCR_COLS, ' ', attr);
+}
+int  scr_footer_rows(void) { return 0; }
+void scr_cursor(int row, int col) { (void)row; (void)col; }
+
+/* The text on grid row r, trailing blanks removed. */
+static const char *gridRow(int r)
+{
+    static char text[SCR_COLS + 1];
+    int n = SCR_COLS;
+
+    while (n > 0 && (grid[r][n - 1] & 0xFF) == ' ')
+        n--;
+    for (text[n] = 0; n--;)
+        text[n] = (char)grid[r][n];
+    return text;
+}
+
+static void testConsole(void)
+{
+    /* 77 columns of text (reply margins 2..78), the last of them a letter */
+    static const char full[] = "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd xy";
+
+    CHECK("console: fixture is 77 wide", strlen(full) == 77);
+
+    con_margins(2, SCR_COLS - 1);         /* set first: con_init starts at the left margin */
+    con_init();
+    con_write(full);
+    con_write("\nnext");
+    CHECK_STR("console: full line stays whole", gridRow(0) + 2, full);
+    CHECK_STR("console: newline after a full line adds no blank row", gridRow(1), "  next");
+
+    con_init();
+    con_write(full);
+    con_write(" more");
+    CHECK_STR("console: space at the margin breaks there", gridRow(0) + 2, full);
+    CHECK_STR("console: the word after it starts the next row", gridRow(1), "  more");
+
+    con_init();
+    con_write("abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcdefg");
+    CHECK_STR("console: overflowing word wraps whole", gridRow(1), "  abcdefg");
+
+    con_margins(2, SCR_COLS);             /* textart: 78 columns between margins 2 and 80 */
+    con_init();
+    con_write("12345678901234567890123456789012345678901234567890123456789012345678901234567\xDB\n"
+              "second row");
+    CHECK_STR("console: 78-column art row is not torn", gridRow(1), "  second row");
+    con_margins(2, SCR_COLS - 1);
+}
+
 /* --- edit and search ------------------------------------------------------------ */
 
 static char edited[300];
@@ -230,6 +309,7 @@ int main(void)
     testPlay();
     testMemory();
     testMemoryList();
+    testConsole();
     testEdit();
     testSearch();
 

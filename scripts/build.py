@@ -46,7 +46,7 @@ APPS = {
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c'],
                    'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
-    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c',
+    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c'],
                     'model': 'l'},
 }

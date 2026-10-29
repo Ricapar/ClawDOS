@@ -136,15 +136,22 @@ void con_putc(unsigned char c)
     }
     if (c == '\r')
         return;
+    if (col >= rm) {                        /* the row is full: break before this char, not
+                                               when the last column filled (a NL may follow) */
+        if (c == ' ') {                     /* a space at the margin is the break itself */
+            next_row();
+            soft_wrapped = 1;
+            place_cursor();
+            return;
+        }
+        wrap();
+    }
     if (c == ' ' && col == lm && soft_wrapped)
         return;                             /* don't start a wrapped line with a space */
-    if (col >= rm)
-        wrap();
     used = 1;
     line[col] = c | (attr << 8);
     scr_putc(row, col, c, attr);
-    if (++col == rm)
-        wrap();
+    col++;
     place_cursor();
 }
 
