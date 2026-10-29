@@ -53,51 +53,14 @@ SCENARIOS = {
     '!run': 'run the rest of the message as a DOS command on the XT: !run TCC PRIMES.C',
     '!tool': 'call one XT tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
     '!tooltour': 'call every XT tool in turn and check the results',
-    '!draw': 'draw a sunset with the draw tool',
     '!play': 'play a tune on the PC speaker',
 }
-
-DRAW_DEMO = """\
-SCREEN 1
-COLOR 1,0
-' sky is the blue background; palette 0 is green, red, brown
-' the sun first, then the ground covers its lower half
-CIRCLE (160,150),45,2
-PAINT (160,140),2,2
-LINE (0,151)-(319,199),1,BF
-LINE (0,150)-(319,150),3
-' sun rays
-LINE (160,95)-(160,80),2
-LINE (125,110)-(112,98),2
-LINE (195,110)-(208,98),2
-LINE (110,135)-(92,130),2
-LINE (210,135)-(228,130),2
-' a house
-LINE (30,120)-(80,150),3,BF
-DRAW "C3 BM30,120 E25 F25"
-PAINT (55,110),3,3
-LINE (48,132)-(60,150),0,BF
-' trees
-CIRCLE (260,125),14,1
-PAINT (260,125),1,1
-LINE (260,139)-(260,150),3
-CIRCLE (290,130),10,1
-PAINT (290,130),1,1
-LINE (290,140)-(290,150),3
-' birds
-DRAW "C3 BM100,60 E4 F4 E4 F4"
-DRAW "C3 BM200,45 E3 F3 E3 F3"
-LOCATE 2,12
-PRINT "SUNSET ON THE XT"
-"""
 
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
 # The tool tour: (tool, args, expected status, text the result must contain).
 # Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
 TOUR_EXPECT = {}
-TOUR_DRAW = 'SCREEN 1\n' + '\n'.join(f'LINE ({i * 2},0)-({319 - i * 2},199),{1 + i % 3}'
-                                     for i in range(120)) + '\nLOCATE 12,15\nPRINT "TOUR"\n'
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
 
 
@@ -126,7 +89,6 @@ def tour_steps():
         ('port', {'port': '61'}, 'ok', None),
         ('textart', {'text': '~EClaude~C-XT'}, 'ok', None),
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
-        ('draw', {'script': TOUR_DRAW}, 'ok', None),
         ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
         ('memory_write', {'name': 'CXTTOUR', 'text': 'Tour memory\nSecond line.'}, 'ok', None),
         ('memory_list', {}, 'ok', 'CXTTOUR'),
@@ -345,10 +307,6 @@ class MockChat:
             key, _, value = w.strip('"').partition('=')
             args[key] = value.strip('"')
         async for c in self.call(words[0], args):
-            yield c
-
-    async def _cmd_draw(self, _text):
-        async for c in self.call('draw', {'script': DRAW_DEMO}):
             yield c
 
     async def _cmd_play(self, _text):

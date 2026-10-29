@@ -22,7 +22,6 @@
 #include "ems.h"
 #include "sysinfo.h"
 #include "sound.h"
-#include "gfx.h"
 #include "shell.h"
 #include "screen.h"
 #include "console.h"
@@ -188,37 +187,6 @@ static void restoreScreen(unsigned short __far *save)
     ui_redraw();
 }
 
-/* A picture in CGA graphics; the chat comes back afterwards. */
-static int toolDraw(ToolCtx *t)
-{
-    const char *script = targ("script");
-    unsigned short __far *save;
-    unsigned viewed;
-    char err[90];
-    int rc;
-
-    if (script == NULL)
-        return tool_fail(t, "missing script");
-    if ((save = saveScreen()) == NULL)
-        return tool_fail(t, "not enough memory to save the screen");
-    rc = gfx_draw(script, unattended ? 3 : 0, err, sizeof(err), &viewed);
-    restoreScreen(save);
-    if (rc < 0) {
-        tout_printf(t, "%s\n(everything before that line was drawn and shown for %us)\n", err, viewed);
-        strncpy(t->summary, err, sizeof(t->summary) - 1);
-        t->summary[sizeof(t->summary) - 1] = 0;
-        return TS_ERROR;
-    }
-    if (rc > 0) {
-        strcpy(t->summary, "stopped by user");
-        tout_puts(t, "stopped by user before the picture was finished\n");
-        return TS_STOPPED;
-    }
-    sprintf(t->summary, "drawn, viewed %us", viewed);
-    tout_printf(t, "drawn; the user looked at it for %u seconds\n", viewed);
-    return TS_OK;
-}
-
 /* DOS commands on a plain DOS screen; the chat comes back afterwards. */
 static int toolRun(ToolCtx *t)
 {
@@ -248,7 +216,6 @@ static const ToolDef tools[] = {
     { "port",    "Port",    "port",    'W', "Probing",    toolPort },
     { "textart", "TextArt", NULL,      'H', "Painting",   toolTextart },
     { "play",    "Play",    NULL,      'H', "Playing",    tool_play },
-    { "draw",    "Draw",    NULL,      'H', "Drawing",    toolDraw },
     { "run",     "Run",     "command", 'W', "Running",    toolRun },
     /* 'M': memories are the model's own notes, so it never has to ask */
     { "memory_list",  "Memories", NULL,   'M', "Remembering", tool_memory_list },

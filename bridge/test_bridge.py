@@ -295,12 +295,12 @@ class Tools(BridgeTest):
     async def test_long_arg_chunks(self):
         """A long argument arrives in several ARG lines."""
         raw = []
-        _, calls, verb = await self.c.ask_tools('!draw', lambda n, a: ('ok', 'drawn'), raw)
+        text = ' '.join(f'word{i}' for i in range(200))         # about 1,500 bytes
+        _, calls, verb = await self.c.ask_tools(f'!tool write path=C:\\L.TXT "text={text}"',
+                                                lambda n, a: ('ok', 'wrote'), raw)
         self.assertEqual(verb, 'END')
-        self.assertGreaterEqual(raw.count('ARG'), 2)
-        script = calls[0][1]['script']
-        self.assertEqual(script, mockchat.DRAW_DEMO)
-        self.assertIn('CIRCLE', script)
+        self.assertGreaterEqual(raw.count('ARG'), 3)
+        self.assertEqual(calls[0][1]['text'], text)
 
     async def test_denied_and_error_statuses(self):
         """Denied and error results reach the model."""
@@ -1025,10 +1025,10 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_max_tokens_mid_tool_use_keeps_history_valid(self):
         """A reply cut off mid tool use leaves a valid history."""
-        cut = (['Drawing.'], [text_block('Drawing.'), tool_block('toolu_9', 'draw', script='SCR')],
-               'max_tokens')
+        cut = (['Painting.'],
+               [text_block('Painting.'), tool_block('toolu_9', 'textart', text='~E')], 'max_tokens')
         chat = self.chat([cut, DONE_ROUND])
-        items = await drive(chat, 'draw a lot')
+        items = await drive(chat, 'paint a lot')
         self.assertFalse(any(isinstance(i, ToolCall) for i in items))
         self.assertEqual(chat.messages[-1]['role'], 'user')
         self.assertEqual(chat.messages[-1]['content'][0]['tool_use_id'], 'toolu_9')

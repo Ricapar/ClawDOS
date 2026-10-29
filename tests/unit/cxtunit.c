@@ -6,8 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "play.h"
-#include "basdraw.h"
-#include "raster.h"
 #include "memory.h"
 #include "edit.h"
 #include "search.h"
@@ -112,160 +110,7 @@ static void testPlay(void)
     CHECK("play: total ms", total == 1500);
 }
 
-/* --- basdraw ---------------------------------------------------------------- */
-
-static int stmts;
-
-#define REC (rec + strlen(rec))
-static void dScreen(void *c, int m) { (void)c; sprintf(REC, "scr%d ", m); }
-static void dColor(void *c, int bg, int pal) { (void)c; sprintf(REC, "col%d,%d ", bg, pal); }
-static void dCls(void *c) { (void)c; strcat(rec, "cls "); }
-static void dPset(void *c, int x, int y, int k) { (void)c; sprintf(REC, "pset%d,%d,%d ", x, y, k); }
-static void dLine(void *c, int x1, int y1, int x2, int y2, int k)
-{ (void)c; sprintf(REC, "line%d,%d,%d,%d,%d ", x1, y1, x2, y2, k); }
-static void dBox(void *c, int x1, int y1, int x2, int y2, int k, int f)
-{ (void)c; sprintf(REC, "box%d,%d,%d,%d,%d,%d ", x1, y1, x2, y2, k, f); }
-static void dEll(void *c, int x, int y, int rx, int ry, int k)
-{ (void)c; sprintf(REC, "ell%d,%d,%d,%d,%d ", x, y, rx, ry, k); }
-static int dPaint(void *c, int x, int y, int k, int b)
-{ (void)c; sprintf(REC, "paint%d,%d,%d,%d ", x, y, k, b); return 0; }
-static void dText(void *c, int r, int col, const char *s, int k)
-{ (void)c; sprintf(REC, "text%d,%d,%s,%d ", r, col, s, k); }
-static void dSleep(void *c, int s) { (void)c; sprintf(REC, "sleep%d ", s); }
-static int dStop(void *c) { (void)c; return stopAfter && ++stmts >= stopAfter; }
-static int lines;
-static void dCountLine(void *c, int x1, int y1, int x2, int y2, int k)
-{ (void)c; (void)x1; (void)y1; (void)x2; (void)y2; (void)k; lines++; }
-
-static const DrawOps recDraw = { 0, dScreen, dColor, dCls, dPset, dLine, dBox, dEll,
-                                 dPaint, dText, dSleep, dStop };
-
-static int draw(const char *script, char *err)
-{
-    rec[0] = 0;
-    stmts = 0;
-    err[0] = 0;
-    return bas_draw(script, &recDraw, err, 80);
-}
-
-static void drawIs(const char *name, const char *script, const char *want)
-{
-    char err[80];
-    int rc = draw(script, err);
-    if (rc != 0) {
-        CHECK_STR(name, err, "(no error)");
-        return;
-    }
-    CHECK_STR(name, rec, want);
-}
-
-static void drawFails(const char *name, const char *script, const char *want)
-{
-    char err[80];
-    int rc = draw(script, err);
-    CHECK(name, rc == -1);
-    CHECK_STR(name, err, want);
-}
-
-static void testDraw(void)
-{
-    char err[80];
-    int rc;
-
-    drawIs("draw: screen and pset", "SCREEN 1:PSET (10,20),2", "scr1 pset10,20,2 ");
-    drawIs("draw: default colour 3", "PSET (1,1)", "pset1,1,3 ");
-    drawIs("draw: screen 2 colour 1", "SCREEN 2\nPSET (1,1)", "scr2 pset1,1,1 ");
-    drawIs("draw: preset", "PRESET (4,5)", "pset4,5,0 ");
-    drawIs("draw: line and continuation", "LINE (0,0)-(10,10),1:LINE -(20,5)",
-           "line0,0,10,10,1 line10,10,20,5,3 ");
-    drawIs("draw: box fill", "LINE (0,0)-(5,5),2,BF", "box0,0,5,5,2,1 ");
-    drawIs("draw: box default colour", "LINE (0,0)-(5,5),,B", "box0,0,5,5,3,0 ");
-    drawIs("draw: step", "PSET (10,10):PSET STEP(5,-2)", "pset10,10,3 pset15,8,3 ");
-    drawIs("draw: circle aspect", "CIRCLE (160,100),50,1", "ell160,100,50,42,1 ");
-    drawIs("draw: circle given aspect", "CIRCLE (160,100),50,1,,,.5", "ell160,100,50,25,1 ");
-    drawIs("draw: circle tall", "CIRCLE (160,100),50,1,,,2", "ell160,100,25,50,1 ");
-    drawIs("draw: paint", "PAINT (5,5),1,3", "paint5,5,1,3 ");
-    drawIs("draw: paint border default", "PAINT (5,5),2", "paint5,5,2,2 ");
-    drawIs("draw: turtle", "DRAW \"BM10,10 R5 D5\"", "line10,10,15,10,3 line15,10,15,15,3 ");
-    drawIs("draw: turtle scale", "DRAW \"S8 BM0,0 R5\"", "line0,0,10,0,3 ");
-    drawIs("draw: turtle no-update", "DRAW \"BM0,0 NR5 D2\"", "line0,0,5,0,3 line0,0,0,2,3 ");
-    drawIs("draw: turtle diagonal colour", "DRAW \"BM0,10 C2 E3 M+2,1 M20,20\"",
-           "line0,10,3,7,2 line3,7,5,8,2 line5,8,20,20,2 ");
-    drawIs("draw: turtle angle", "DRAW \"BM10,10 A1 R5\"", "line10,10,10,5,3 ");
-    drawIs("draw: turtle any angle", "DRAW \"BM10,10 TA45 R10\"", "line10,10,17,3,3 ");
-    drawIs("draw: expressions", "PSET (100+20, 50*2)", "pset120,100,3 ");
-    drawIs("draw: parens and division", "PSET ((10+2)/4, -3+5)", "pset3,2,3 ");
-    drawIs("draw: line numbers and comments", "10 REM hi\n20 PSET (1,1) ' x", "pset1,1,3 ");
-    drawIs("draw: locate print", "LOCATE 2,3:PRINT \"HI\"", "text2,3,HI,3 ");
-    drawIs("draw: print advances", "PRINT \"A\"\nPRINT \"B\";\nPRINT \"C\"",
-           "text1,1,A,3 text2,1,B,3 text2,2,C,3 ");
-    drawIs("draw: color cls sleep", "COLOR 1,0:CLS:SLEEP 2", "col1,0 cls sleep2 ");
-    drawIs("draw: lowercase", "pset (1,2),1", "pset1,2,1 ");
-
-    drawFails("draw: missing paren", "PSET 10,10", "line 1: PSET: expected (");
-    drawFails("draw: unknown statement", "PSET (1,1)\nFOO", "line 2: FOO: unknown statement");
-    CHECK_STR("draw: statements before an error run", rec, "pset1,1,3 ");
-    drawFails("draw: bad screen", "SCREEN 7", "line 1: SCREEN: only SCREEN 1 or 2");
-    drawFails("draw: bad turtle", "DRAW \"Q5\"", "line 1: DRAW: unknown command Q");
-    drawFails("draw: unexpected char", "PSET (1,1) 5", "line 1: PSET: unexpected '5'");
-
-    {   /* the mock tool tour's script: 120 LINEs, then LOCATE/PRINT */
-        static char script[4000];
-        static const DrawOps countOps = { 0, dScreen, dColor, dCls, dPset, dCountLine, dBox,
-                                          dEll, dPaint, dText, dSleep, dStop };
-        int i, n = sprintf(script, "SCREEN 1\n");
-        for (i = 0; i < 120; i++)
-            n += sprintf(script + n, "LINE (%d,0)-(%d,199),%d\n", i * 2, 319 - i * 2, 1 + i % 3);
-        strcat(script, "LOCATE 12,15\nPRINT \"TOUR\"\n");
-        rec[0] = 0;
-        lines = 0;
-        rc = bas_draw(script, &countOps, err, 80);
-        CHECK("draw: long script runs", rc == 0);
-        CHECK("draw: long script lines", lines == 120);
-        CHECK_STR("draw: long script ends", rec, "scr1 text12,15,TOUR,3 ");
-    }
-
-    stopAfter = 1;
-    rc = draw("PSET (1,1)\nPSET (2,2)", err);
-    stopAfter = 0;
-    CHECK("draw: stop returns 1", rc == 1);
-    CHECK_STR("draw: stop after one statement", rec, "pset1,1,3 ");
-}
-
-/* --- raster ------------------------------------------------------------------ */
-
-#define BW 40
-#define BH 30
-static unsigned char bitmap[BH][BW];
-static unsigned plots;
-static int lastX, lastY;
-
-static void bPlot(void *c, int x, int y, int k)
-{
-    (void)c;
-    if (++plots > 2000)               /* a runaway line: stop counting, don't hang */
-        return;
-    if (x < BW && y < BH)
-        bitmap[y][x] = (unsigned char)k;
-    lastX = x;
-    lastY = y;
-}
-
-static int bPoint(void *c, int x, int y)
-{
-    (void)c;
-    return x < BW && y < BH ? bitmap[y][x] : 0;
-}
-
-static unsigned count(int k)
-{
-    unsigned n = 0;
-    int x, y;
-    for (y = 0; y < BH; y++)
-        for (x = 0; x < BW; x++)
-            n += bitmap[y][x] == k;
-    return n;
-}
+/* --- memory ----------------------------------------------------------------- */
 
 static void testMemory(void)
 {
@@ -319,50 +164,6 @@ static void testMemoryList(void)
         CHECK("mem list long name size", strstr(line, "   29  ") != NULL);
     }
     remove(MEM_DIR "\\ABCDEFGH.TXT");
-}
-
-static void testRaster(void)
-{
-    Raster big = { 0, bPlot, bPoint, NULL, 319, 199 };
-    Raster small = { 0, bPlot, bPoint, NULL, BW - 1, BH - 1 };
-    int rc;
-
-    plots = 0;
-    ras_line(&big, 0, 0, 319, 199, 1);
-    CHECK("raster: long line terminates", plots == 320);
-    CHECK("raster: long line ends at its endpoint", lastX == 319 && lastY == 199);
-    plots = 0;
-    ras_line(&big, 10, 50, 10, 40, 1);
-    CHECK("raster: vertical line", plots == 11 && lastY == 40);
-    plots = 0;
-    ras_line(&big, -5, -5, 3, 3, 1);
-    CHECK("raster: clipped line", plots == 4);
-
-    plots = 0;                        /* far off-screen coordinates (16-bit overflow) */
-    ras_line(&big, 0, 0, 20000, 5, 1);
-    CHECK("raster: very long line terminates", plots == 320);
-    plots = 0;
-    ras_line(&big, -10000, 0, 10000, 50, 1);
-    CHECK("raster: line across the screen from far away", plots > 0 && plots < 400);
-    memset(bitmap, 0, sizeof(bitmap));
-    plots = 0;
-    ras_box(&small, -30000, 2, 32767, 3, 1, 1);
-    CHECK("raster: huge filled box is clipped", plots == 2 * BW && count(1) == 2 * BW);
-
-    memset(bitmap, 0, sizeof(bitmap));
-    ras_box(&small, 5, 5, 20, 15, 2, 0);
-    CHECK("raster: box outline", count(2) == 2 * 16 + 2 * 9);
-    rc = ras_paint(&small, 10, 10, 3, 2);
-    CHECK("raster: paint inside box", rc == 0 && count(3) == 14 * 9);
-    rc = ras_paint(&small, 0, 0, 1, 2);
-    CHECK("raster: paint outside box", rc == 0 && count(1) == BW * BH - 16 * 11);
-
-    memset(bitmap, 0, sizeof(bitmap));
-    plots = 0;
-    ras_ellipse(&small, 20, 15, 10, 6, 1);
-    CHECK("raster: ellipse extremes", bitmap[15][30] == 1 && bitmap[15][10] == 1
-                                      && bitmap[9][20] == 1 && bitmap[21][20] == 1);
-    CHECK("raster: ellipse terminates", plots < 200);
 }
 
 /* --- edit and search ------------------------------------------------------------ */
@@ -427,8 +228,6 @@ int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
     testPlay();
-    testDraw();
-    testRaster();
     testMemory();
     testMemoryList();
     testEdit();

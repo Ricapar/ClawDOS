@@ -126,20 +126,19 @@ transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 | `write`, `edit`, `delete`, `mkdir`, `rename` | Change files; `edit` replaces an exact piece of a text file instead of rewriting it |
 | `run` | Run DOS commands on a plain DOS screen and read back what they printed: one per line, stopping at the first that fails (FreeCOM has no `&&`) |
 | `poke`, `port` | Write memory, read or write I/O ports |
-| `draw` | Draw a CGA picture from a GW-BASIC-style script (SCREEN, LINE, CIRCLE, PAINT, DRAW, PRINT...) |
 | `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
 | `textart` | Print coloured CP437 text art into the chat |
 | `memory_list`, `memory_read`, `memory_write` | Claude's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
 
 **Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
 that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
-drawing, playing music and memories never ask. `-unsafe` starts with it off, and `-q`
+playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
 or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
 
 With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
-`!tool read path=C:\AUTOEXEC.BAT`), `!draw` and `!play` are demos, and
+`!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and
 `!tooltour` exercises every tool.
 
 ## Layout
@@ -147,7 +146,7 @@ With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 | Path | What |
 |---|---|
 | `src/claude/` | CLAUDE.EXE |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `basdraw` + `raster` + `gfx` (drawing), `play` + `sound` (music) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `play` + `sound` (music) |
 | `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |

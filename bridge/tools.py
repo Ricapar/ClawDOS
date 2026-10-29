@@ -19,20 +19,6 @@ MAX_ROUNDS = 25          # tool rounds per user message
 MAX_PAYLOAD = 500        # longest line payload sent to the XT
 STATUSES = ('ok', 'error', 'denied', 'stopped')
 
-DRAW_HELP = (
-    "Draw a picture in CGA graphics with a GW-BASIC style script, shown full screen "
-    "until the user presses a key, then the chat comes back. One rich call is better "
-    "than many small ones. Statements, separated by newlines or ':': SCREEN 1 "
-    "(320x200, 4 colours, the default) or SCREEN 2 (640x200, 2 colours); COLOR bg,palette "
-    "(SCREEN 1: background 0-15, palette 0 = green/red/brown, 1 = cyan/magenta/white); "
-    "CLS; PSET (x,y)[,c]; PRESET (x,y)[,c]; LINE [(x1,y1)]-(x2,y2)[,c][,B|BF]; "
-    "CIRCLE (x,y),r[,c[,,,aspect]] (full circles/ellipses only); PAINT (x,y)[,c[,border]]; "
-    "DRAW \"turtle string\" (U D L R E F G H n, M x,y, B and N prefixes, Cn, Sn, An, TAn); "
-    "LOCATE row,col then PRINT \"text\" (25 rows; 40 or 80 columns); SLEEP seconds; REM or ' "
-    "comments. STEP(dx,dy) gives relative coordinates. Arguments are numbers with + - * / "
-    "and parentheses; there are no variables or loops, so write out repetition. Leading "
-    "line numbers are ignored.")
-
 PLAY_HELP = (
     "Play music on the PC speaker using a GW-BASIC PLAY string, e.g. \"T120 O3 L8 CDEFG4\". "
     "Notes A-G with # or + (sharp) and - (flat), optionally followed by a length; "
@@ -119,8 +105,6 @@ TOOLS = [
                     "3D9 (CGA colour select), 3DA (CGA status).",
      'params': {'port': ("Port number in hex, e.g. 3D9", True),
                 'value': ("Byte to write (decimal or 0x hex); omit to read", False)}},
-    {'name': 'draw', 'cls': 'H', 'description': DRAW_HELP,
-     'params': {'script': ("The drawing script", True)}},
     {'name': 'play', 'cls': 'H', 'description': PLAY_HELP,
      'params': {'music': ("The PLAY string", True)}},
     {'name': 'textart', 'cls': 'H',
@@ -172,9 +156,9 @@ def memory_prompt(index):
 TOOLS_PROMPT = """\
 You also have tools that run on this real IBM PC XT itself (FreeDOS, 8088, CGA): \
 read, search, write and edit files, look at the system, run DOS commands, peek and poke memory \
-and ports, draw CGA graphics with a GW-BASIC style script, play music on the PC \
-speaker, and print coloured text art. Use them when they help or when asked to do \
-something on the machine; each call takes a few seconds on this hardware, so \
+and ports, play music on the PC speaker, and print coloured text art. Use them \
+when they help or when asked to do something on the machine; each call takes a \
+few seconds on this hardware, so \
 prefer one well-filled call to many small ones. Tools that change files, memory \
 or ports may be denied by the user; if so, don't retry, say what you would have done."""
 

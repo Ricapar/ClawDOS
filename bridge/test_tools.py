@@ -27,10 +27,10 @@ class Encoding(unittest.TestCase):
 
     def test_call_lines_chunks(self):
         """Long arguments are split into ARG lines of bounded size."""
-        script = '\n'.join(f'LINE ({i},0)-({i},199),{i % 4}' for i in range(150))
-        self.assertGreater(len(script), 3000)
-        lines = call_lines('t1', ToolCall('draw', {'script': script}))
-        self.assertEqual(lines[0], ('TOOL', 't1 draw'))
+        text = '\n'.join(f'line {i} of a long file written in one call' for i in range(80))
+        self.assertGreater(len(text), 3000)
+        lines = call_lines('t1', ToolCall('write', {'text': text}))
+        self.assertEqual(lines[0], ('TOOL', 't1 write'))
         self.assertEqual(lines[-1], ('CALL', ''))
         args = lines[1:-1]
         self.assertGreater(len(args), 1)
@@ -39,9 +39,9 @@ class Encoding(unittest.TestCase):
             self.assertEqual(verb, 'ARG')
             self.assertLessEqual(len(to_cp437(payload)), 500)
             key, _, chunk = payload.partition(' ')
-            self.assertEqual(key, 'script')
+            self.assertEqual(key, 'text')
             joined += chunk
-        self.assertEqual(unescape(joined), script)
+        self.assertEqual(unescape(joined), text)
 
     def test_chunks_never_split_an_escape(self):
         """A chunk never ends in half an escape sequence."""
@@ -65,12 +65,12 @@ class Schemas(unittest.TestCase):
     def test_schemas(self):
         """Names, classes and required parameters are consistent."""
         names = [t['name'] for t in TOOLS]
-        self.assertEqual(len(names), 19)
-        self.assertEqual(len(set(names)), 19)
+        self.assertEqual(len(names), 18)
+        self.assertEqual(len(set(names)), 18)
         cls = {t['name']: t['cls'] for t in TOOLS}
         self.assertEqual({n for n, c in cls.items() if c == 'R'},
                          {'sysinfo', 'dir', 'read', 'search', 'peek'})
-        self.assertEqual({n for n, c in cls.items() if c == 'H'}, {'draw', 'play', 'textart'})
+        self.assertEqual({n for n, c in cls.items() if c == 'H'}, {'play', 'textart'})
         self.assertEqual({n for n, c in cls.items() if c == 'W'},
                          {'write', 'edit', 'delete', 'mkdir', 'rename', 'run', 'poke', 'port'})
         self.assertEqual({n for n, c in cls.items() if c == 'M'},
@@ -82,7 +82,7 @@ class Schemas(unittest.TestCase):
             for prop in schema['properties'].values():
                 self.assertEqual(prop['type'], 'string')
         o = openai_tools()
-        self.assertEqual(len(o), 19)
+        self.assertEqual(len(o), 18)
         self.assertEqual(o[0]['type'], 'function')
         self.assertEqual(o[0]['function']['name'], TOOLS[0]['name'])
 
@@ -102,7 +102,7 @@ class Schemas(unittest.TestCase):
     def test_prompt_and_cap(self):
         """The tools prompt mentions the key facts; the round cap."""
         self.assertEqual(MAX_ROUNDS, 25)
-        for phrase in ('real IBM PC XT', 'GW-BASIC', 'may be denied'):
+        for phrase in ('real IBM PC XT', 'PC speaker', 'may be denied'):
             self.assertIn(phrase, TOOLS_PROMPT)
 
 
