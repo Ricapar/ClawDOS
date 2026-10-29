@@ -61,8 +61,96 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       Design in [superpowers/specs/2026-10-21-xt-tools-design.md](superpowers/specs/2026-10-21-xt-tools-design.md).
 - [x] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
-- [ ] **M6 - Foundation**: grow `lib/` (input line editor, windows/menus, EMS
-      via PicoMEM, more bridge services) and a launcher for Claude-XT apps.
+- [ ] **M6 - Building on the XT**: better tools for Claude writing programs on
+      the XT itself (Turbo C, assemblers), from what the CGA demo and WarGames
+      sessions of 2026-10-25/26 showed (bridge/logs/). Details below.
+  - [ ] **M6.1 - Dev tools pack**: `edit` (replace text in a file instead of
+        rewriting all of it: 49 whole-file writes of up to 5.4 KB happened),
+        `search` (grep with line numbers inside CLAUDE: FIND took 10-79 s a
+        call), `run` with a list of commands that stops at the first failure
+        (FreeCOM has no `&`/`&&`; each TCC call was its own tool call), and the
+        clock set from the bridge on connect (every file on the XT is dated
+        1980-01-01: SNTP at boot doesn't take on the real XT).
+  - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
+        640 KB instead of ~285 KB. See [M6.2](#m62-full-memory-run) below.
+  - [ ] **M6.3 - Screenshots**: Claude sees what its programs draw. Capture
+        the CGA's 16 KB at exit (and optionally every few seconds into EMS
+        pages during the run); the bridge renders PNGs and hands them to Claude
+        as images. The CGA's mode and palette registers are write-only, so the
+        bridge guesses from the BIOS data area unless the tool call says
+        (e.g. the mode 5 / 3D9h tricks WarGames uses). 13 demo runs came back
+        as "(screen text)"; fixes were "best guess, untested visually".
+  - [ ] **M6.4 - Project history**: the bridge commits every file Claude
+        writes to a git repo per XT directory; `snapshot`/`restore` tools
+        replace hand-made copies (XCOPY C:\WG C:\WG3 took 43 s), and the code
+        can be browsed on the PC.
+- [ ] **M7 - Foundation**: grow `lib/` (input line editor, windows/menus, more
+      bridge services) and a launcher for Claude-XT apps.
+
+## M6.2: full-memory run
+
+**Problem.** CLAUDE.EXE stays resident while the `run` tool's program runs:
+about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
+(Stage 1 memory, `dc21363`, already won ~90 KB). On the XT this cost:
+
+- TCC "Out of memory" on `time.h`/`stdlib.h` and on big functions; Claude wrote
+  its own tiny DOS.H and an empty STDLIB.H (C:\TESTS\DEV) to get by, and once
+  compiled with "Available memory 0".
+- TCC can't spawn TLINK ("Unable to execute command 'tlink.exe'"), so every
+  build is TCC -c on one or two files per call (~30 s each) plus a hand TLINK.
+- Batch files and MAKE are out: a second COMMAND.COM costs ~71 KB.
+- Claude's memories (TCCMEM, DEMOGUID, WARGAMES) are full of these workarounds.
+
+**Goal.** A program `run` starts has at least ~560 KB free, so stock Turbo C
+compiles with its own headers, spawns TLINK itself, and Turbo C's MAKE.EXE
+(already on the image in C:\TC) can drive builds. CLAUDE comes back afterwards
+on the same conversation with the program's output as the tool result, the chat
+screen as it was, and the link restored.
+
+**Approaches** (pick one in the design session):
+
+1. **Exit and relaunch through a stub.** A tiny resident launcher (NASM,
+   8086, a few KB; e.g. CXT.COM, which the user starts instead of CLAUDE)
+   runs CLAUDE.EXE. For a big run CLAUDE saves its state (session token,
+   pending tool id, flags like `-unsafe`, the scrollback/screen, the input
+   line), shuts mTCP down cleanly (releasing the packet driver) and exits
+   with a code that tells the stub to run the command. The stub runs it with
+   output capture (the INT 10h hook moves into the stub), writes the output,
+   then runs CLAUDE again in resume mode. No vectors point into freed memory,
+   because CLAUDE really exits. Costs a reload of the ~120 KB EXE and a
+   reconnect (a few seconds) per big run.
+2. **Swap CLAUDE out to EMS.** Like Ralf Brown's SPAWNO: copy CLAUDE's memory
+   into EMS pages (PicoMEM offers up to 4 MB), shrink to a small stub, exec,
+   copy back. No reload, but every hooked vector (INT 10h capture, 1Bh/23h
+   Ctrl-Break, the packet driver's receive upcall into mTCP) must be unhooked
+   first and the packet driver released and re-acquired; the TCP connection
+   still dies while the receiver is gone. Needs EMS (none in 86Box's XT
+   unless an EMS board is emulated); a disk swap file would be the fallback.
+
+Leaning toward 1: simpler, no EMS dependency, and CLAUDE's exit/start paths
+are already tested. The open questions either way:
+
+- **Bridge: a tool call that outlives its connection.** Today a disconnect
+  cancels the turn (bridge/xtbridge.py, `finally:` in the session loop) and
+  RESUME only restores history, so the pending tool call is lost. The XT
+  needs to say it's going away for a tool (e.g. `AWAY <tool id>`), the bridge
+  keeps the turn waiting (for longer than a normal lost link; builds and demo
+  runs took up to 9 minutes), and after `RESUME` the XT sends the tool result
+  and the turn carries on. PROTOCOL.md and the mock bridge get the same.
+- **When to go big.** Every run (simple, but DIR then costs a reconnect), a
+  tool argument the model sets, or automatically for known heavy programs
+  (TCC, TLINK, MAKE, batch files). DEVTOOLS.TXT must say which.
+- **Where state goes.** A file in C:\CXT (survives a crash or reboot, so
+  CLAUDE could even recover after the program hangs the XT) or an EMS page.
+- **Safe mode:** the y/n prompt stays before the exit; Esc and the
+  exit-code hold screen move into the stub.
+
+**Testing.** DOSBox-X with `--bridge`: a boottest that has Claude run stock
+PRIMES.C with `time.h` through plain `TCC` (auto-linked) and checks the
+resumed tool result in the bridge log; a mock `!tool` for a big run; a check
+that a program's free memory (e.g. `MEM`) is above the goal. Then the 86Box
+8088 (`scripts/xttest.py`) and the real XT, building WarGames with
+stock headers and MAKE.
 
 ## Repo layout
 
