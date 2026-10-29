@@ -17,6 +17,25 @@ This is a well-engineered, well-measured codebase for an unusual target. The lay
 | Build and Python tooling | B | Readable build; `-wx` silently off for the app's own C++, no size report, no test runner |
 | Tests and docs | B- | Three-level test story and accurate protocol docs; the display and tool-wire layers are untested, and six expectations live in prose |
 
+## Status (updated 2026-10-29)
+
+Three commits since the review. The tables below describe the code as reviewed on 2026-10-28; this section records what changed, and the memory picture after it.
+
+| Commit | What | Findings closed |
+|---|---|---|
+| `d7d09a4` | Stack-buffer fixes with unit tests; `#define NOTRACE` | F5, F21, F37, F46, F47 fixed; F12 done |
+| `1bcfd23` | The `draw` tool removed outright (basdraw, raster, gfx, `toolDraw`, bridge schema, mock demo, 54 unit tests): with real compilers on the image it saw no use | F4, F20, F27, F29, F31, C5, F65, F69, F70 gone with the code; the raster share of C10/F23 (2,048 B) gone |
+| (docs) | README layout table lists edit, search and ems | F54 |
+
+| Measure | Reviewed | Now | Change |
+|---|---|---|---|
+| Linker memory size | 165,216 | 141,600 | -23,616 |
+| CLAUDE.EXE on disk | 129,618 | 106,572 | -23,046 |
+| DGROUP | 50,896 | 48,240 | -2,656 |
+| `_BSS` | 38,340 | 36,286 | -2,054 |
+
+Action plan items 1 and 2 are done; items 4 and 8 are moot (their code no longer exists); item 13 loses its F27 part. Links into `lib/basdraw.c`, `lib/raster.c` and `lib/gfx.c` below are now dead: the files were deleted in `1bcfd23`.
+
 ## 2. The architecture as it is
 
 CLAUDE.EXE is a single DOS program (OpenWatcom, large model, `-0 -os -zp2`, `wlink eliminate, stack=4096`) made of three layers plus the vendored mTCP stack:
@@ -271,19 +290,19 @@ About 27 KB resident (7-8% of 355 KB) and about 19.5 KB of DGROUP (50.9 to ~31 K
 
 Ordered by payoff over effort. S = under an hour, M = an afternoon, L = a day or more.
 
-1. **Fix the three stack-memory bugs** (S): `name[13]` in memory.c (F5); `kw[12]` into `Bas` (F21); `_snprintf`/length guard in `watchCheck` (F47); `snprintf` for `why` (F37); clamp `host` (F46). Add the memory_list and `PSET (1,1) 5` cases to cxtunit.
-2. **`#define NOTRACE`** in claude.cfg (S): ~10 KB resident, one line; re-run net.bat and tools.bat (F12).
+1. **Done (`d7d09a4`).** Fix the three stack-memory bugs (S): `name[13]` in memory.c (F5); `kw[12]` into `Bas` (F21); `_snprintf`/length guard in `watchCheck` (F47); `snprintf` for `why` (F37); clamp `host` (F46). Add the memory_list and `PSET (1,1) 5` cases to cxtunit.
+2. **Done (`d7d09a4`).** `#define NOTRACE` in claude.cfg (S): ~10 KB resident, one line; re-run net.bat and tools.bat (F12).
 3. **Defer the console wrap and fix textart's 78** (S): C1 + F99, a showcase bug on every full-width line.
-4. **Depth-limit `factor()` and fix the ellipse seed** (S): F20, C5; both are model-input paths into the resident client; both get a unit test.
+4. **Moot (`1bcfd23` removed the draw tool).** Depth-limit `factor()` and fix the ellipse seed (S): F20, C5; both are model-input paths into the resident client; both get a unit test.
 5. **Bound the tool-call wait on the bridge and check the 6 KB argument budget** (S-M): F2 `wait_for`, F1 size check with the limit in the descriptions; no keepalive during tools.
 6. **Make `-q` deny W tools and service mTCP in `ui_ask`** (S): F52; return a nonzero exit on ERR (F96).
 7. **Build-size report with a DGROUP budget** (S): parse the map after wlink, print per app, fail past 56 KB (F40); add `-zc` while there (C9, ~4-5 KB DGROUP).
-8. **Span fill and single-probe PAINT in the draw path** (M): F4 `hspan` + row table, F31 `fillable()`, F29 trivial reject/16-bit fast path; 5-10x on filled drawings.
+8. **Moot (`1bcfd23` removed the draw tool).** Span fill and single-probe PAINT in the draw path (M): F4 `hspan` + row table, F31 `fillable()`, F29 trivial reject/16-bit fast path; 5-10x on filled drawings.
 9. **Batch console painting into `scr_putn` runs** (M): F22, ~3x on reply painting and catch-up after tools; needs the flush points listed.
 10. **Safe writes and device-name guard in dosfs** (M): C3 temp-and-rename for write/memory_write, C4 IOCTL 4400h check, F24 truncation marker; hoist the shared text loops into toolapi/textio while there (F25, F26).
 11. **Rollover-safe ticks and `bios.h`** (S): C6 `ticksSince()`, F28 constants; fixes the overnight reconnect stall.
 12. **`scripts/test.py` and honest expectations** (M): F14 runner from `REM EXPECT:` headers, F39 `--expect "exit code 0"`/`--reject`, F19 help text, delete `TOUR_EXPECT` and the dead `hasattr` (F16, F56).
-13. **Test hooks for screen.c, console.c and toolapi** (L): F6 `les di, vram` + forced hwscroll with the corrected invariants, F3 stub screen, F50 `targ_*`/`tout_*` round trips, F27 pixel packing bytes that M6.3's decoder will reuse.
+13. **Test hooks for screen.c, console.c and toolapi** (L): F6 `les di, vram` + forced hwscroll with the corrected invariants, F3 stub screen, F50 `targ_*`/`tout_*` round trips, F27 pixel packing bytes that M6.3's decoder will reuse (moot: gfx.c is gone, M6.3 starts fresh).
 14. **Per-file `-wx` exemption** (S): only xtbridge.cpp (F11); `closeNonblocking()` for C2 while in that file.
 15. **Honest tool status on link loss** (M): F15 `lost` status plumbed through `STATUSES`/`_settle`, and `sendResult` checking `ui_send`.
 
@@ -297,8 +316,8 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 
 | id | file:line | severity | title |
 |---|---|---|---|
-| F4 | [lib/gfx.c:33](../../lib/gfx.c#L33) | high | Every pixel of draw goes through 3 calls, duplicate clipping and a multiply by 80 |
-| F5 | [lib/memory.c:74](../../lib/memory.c#L74) | high | tool_memory_list: strcpy of a 12-char 8.3 name into name[9] overflows the stack |
+| F4 | [lib/gfx.c:33](../../lib/gfx.c#L33) | high | Every pixel of draw goes through 3 calls, duplicate clipping and a multiply by 80 — **gone with the draw tool, `1bcfd23`** |
+| F5 | [lib/memory.c:74](../../lib/memory.c#L74) | high | tool_memory_list: strcpy of a 12-char 8.3 name into name[9] overflows the stack — **fixed in `d7d09a4`** |
 | F6 | [lib/screen.c:337](../../lib/screen.c#L337) | high | screen.c (hardware scroll, rebase, footer mirror, scrollback) has zero automated coverage |
 | F1 | [bridge/tools.py:284](../../bridge/tools.py#L284) | medium | Bridge never checks tool arguments against the XT's 6 KB budget |
 | F2 | [bridge/xtbridge.py:383](../../bridge/xtbridge.py#L383) | medium | A tool call's lifetime is bound to the TCP connection; hung XT leaks the session |
@@ -307,26 +326,26 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F8 | [lib/shell.c:282](../../lib/shell.c#L282) | medium | Nothing is handed back to DOS before spawnl; the whole image stays resident |
 | F9 | [lib/shell.c:287](../../lib/shell.c#L287) | medium | INT 10h hook restored blindly after spawn: a TSR's hook is silently removed (crash claim corrected) |
 | F11 | [scripts/build.py:143](../../scripts/build.py#L143) | medium | -wx silently dropped for all of the app's own C++ |
-| F12 | [src/claude/claude.cfg:4](../../src/claude/claude.cfg#L4) | medium | mTCP tracing compiled in: ~6 KB of trace strings plus ~150 call sites |
+| F12 | [src/claude/claude.cfg:4](../../src/claude/claude.cfg#L4) | medium | mTCP tracing compiled in: ~6 KB of trace strings plus ~150 call sites — **done in `d7d09a4`** |
 | F13 | [src/claude/claude.cpp:875](../../src/claude/claude.cpp#L875) | medium | Bridge session logic (HELLO/AUTH/RESUME/PING/reconnect) lives in the app, not lib |
 | F14 | [CLAUDE.md:13](../../CLAUDE.md#L13) | medium | No test runner; the matrix exists only as prose and drop.bat's expectation differs |
 | F15 | [bridge/providers.py:361](../../bridge/providers.py#L361) | medium | A link drop mid-tool is reported to the model as 'Interrupted by the user' |
 | F19 | [bridge/xtbridge.py:550](../../bridge/xtbridge.py#L550) | medium | --prompt help says "on top of the built-in one"; it is the whole prompt |
-| F20 | [lib/basdraw.c:102](../../lib/basdraw.c#L102) | medium | Unbounded recursion in the expression parser on a 4 KB stack with stack checking off |
-| F21 | [lib/basdraw.c:480](../../lib/basdraw.c#L480) | medium | bas_draw's 'unexpected char' error reads a keyword pointer into a dead stack frame |
+| F20 | [lib/basdraw.c:102](../../lib/basdraw.c#L102) | medium | Unbounded recursion in the expression parser on a 4 KB stack with stack checking off — **gone with the draw tool, `1bcfd23`** |
+| F21 | [lib/basdraw.c:480](../../lib/basdraw.c#L480) | medium | bas_draw's 'unexpected char' error reads a keyword pointer into a dead stack frame — **fixed in `d7d09a4`, then gone, `1bcfd23`** |
 | F22 | [lib/console.c:145](../../lib/console.c#L145) | medium | Streamed text is painted one character per call chain |
 | F24 | [lib/dosfs.c:190](../../lib/dosfs.c#L190) | medium | read cuts lines over 160 characters silently; edit then misbehaves |
 | F25 | [lib/dosfs.c:244](../../lib/dosfs.c#L244) | medium | The same read/write byte loops are copied into dosfs.c, memory.c, search.c and edit.c |
-| F27 | [lib/gfx.c:33](../../lib/gfx.c#L33) | medium | CGA pixel packing is untested pure arithmetic that M6.3 screenshots will depend on |
-| F29 | [lib/raster.c:18](../../lib/raster.c#L18) | medium | Lines are stepped pixel by pixel through off-screen space in 32-bit arithmetic |
-| F31 | [lib/raster.c:132](../../lib/raster.c#L132) | medium | PAINT tests every pixel twice: FILLABLE calls point() two times per probe |
+| F27 | [lib/gfx.c:33](../../lib/gfx.c#L33) | medium | CGA pixel packing is untested pure arithmetic that M6.3 screenshots will depend on — **gone with the draw tool, `1bcfd23`** |
+| F29 | [lib/raster.c:18](../../lib/raster.c#L18) | medium | Lines are stepped pixel by pixel through off-screen space in 32-bit arithmetic — **gone with the draw tool, `1bcfd23`** |
+| F31 | [lib/raster.c:132](../../lib/raster.c#L132) | medium | PAINT tests every pixel twice: FILLABLE calls point() two times per probe — **gone with the draw tool, `1bcfd23`** |
 | F33 | [lib/search.c:28](../../lib/search.c#L28) | medium | Case-insensitive search calls toupper() twice per compared character |
-| F37 | [lib/shell.c:290](../../lib/shell.c#L290) | medium | runOne's 'could not start' message can overrun why[120] |
+| F37 | [lib/shell.c:290](../../lib/shell.c#L290) | medium | runOne's 'could not start' message can overrun why[120] — **fixed in `d7d09a4`** |
 | F39 | [scripts/boottest.py:142](../../scripts/boottest.py#L142) | medium | boottest --expect lacks negative assertions and never checks CLAUDE.EXE's exit code |
 | F40 | [scripts/build.py:112](../../scripts/build.py#L112) | medium | Large model is the only viable choice; DGROUP has ~14.6 KB headroom and no size report |
 | F43 | [src/claude/claude.cpp:125](../../src/claude/claude.cpp#L125) | medium | history[8][901] = 7.2 KB of DGROUP for input recall |
-| F46 | [src/claude/claude.cpp:959](../../src/claude/claude.cpp#L959) | medium | Several sprintf targets are sized to the typical case (offlineNote, drawHint col, lostReport) |
-| F47 | [src/claude/claude.cpp:1030](../../src/claude/claude.cpp#L1030) | medium | watchCheck's 160-byte buf overflows on realistic values and on the BIOS-area list |
+| F46 | [src/claude/claude.cpp:959](../../src/claude/claude.cpp#L959) | medium | Several sprintf targets are sized to the typical case (offlineNote, drawHint col, lostReport) — **fixed in `d7d09a4`** |
+| F47 | [src/claude/claude.cpp:1030](../../src/claude/claude.cpp#L1030) | medium | watchCheck's 160-byte buf overflows on realistic values and on the BIOS-area list — **fixed in `d7d09a4`** |
 | F49 | [src/claude/tools.cpp:187](../../src/claude/tools.cpp#L187) | medium | restoreScreen frees an EMS frame pointer when the remap fails |
 | F50 | [src/claude/tools.cpp:348](../../src/claude/tools.cpp#L348) | medium | XT side of the tool wire contract is untested although linked into cxtunit |
 | F52 | [src/claude/tools.cpp:427](../../src/claude/tools.cpp#L427) | medium | Unattended (-q) runs block forever on the y/n prompt; ui_ask ignores the network |
@@ -335,7 +354,7 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | C2 | [lib/xtbridge.cpp:114](../../lib/xtbridge.cpp#L114) | medium | close() uses mTCP's blocking TcpSocket::close(): up to 15 s frozen UI when the link is dead |
 | C3 | [lib/dosfs.c:241](../../lib/dosfs.c#L241) | medium | write and memory_write truncate the target in place; a full disk destroys the previous content |
 | C4 | [lib/dosfs.c:18](../../lib/dosfs.c#L18) | medium | No guard against DOS device names: read of CON/AUX blocks with no Esc |
-| C5 | [lib/raster.c:111](../../lib/raster.c#L111) | medium | ras_ellipse overflows 32-bit arithmetic (from radius ~181, b2*(2x+1)^2 term) |
+| C5 | [lib/raster.c:111](../../lib/raster.c#L111) | medium | ras_ellipse overflows 32-bit arithmetic (from radius ~181, b2*(2x+1)^2 term) — **gone with the draw tool, `1bcfd23`** |
 | C6 | [src/claude/claude.cpp:1188](../../src/claude/claude.cpp#L1188) | medium | BIOS tick count used as monotonic; retryAt across midnight stalls reconnect |
 | C9 | [scripts/build.py:112](../../scripts/build.py#L112) | medium | ~4-5.3 KB of literal strings sit in DGROUP; -zc moves them to code |
 | F10 | [scripts/build.py:112](../../scripts/build.py#L112) | low | 67 unreferenced symbols linked; -zm does not help (grows code), delete six dead functions |
@@ -356,7 +375,7 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F48 | [src/claude/claude.cpp:1115](../../src/claude/claude.cpp#L1115) | low | C runtime is 34.8 KB of code; realistic saving 1-2 KB, not most of it |
 | F51 | [src/claude/tools.cpp:406](../../src/claude/tools.cpp#L406) | low | runCall special-cases tools by string-comparing names |
 | F53 | [src/claude/ui.h:12](../../src/claude/ui.h#L12) | low | ui.h mixes screen, network and dispatch; claude.cpp/tools.cpp header cycle |
-| F54 | [README.md:150](../../README.md#L150) | low | README layout table omits edit, search and ems |
+| F54 | [README.md:150](../../README.md#L150) | low | README layout table omits edit, search and ems — **fixed, 2026-10-29** |
 | F55 | [bridge/convlog.py:5](../../bridge/convlog.py#L5) | low | convlog docstring missing session_resume and system_prompt |
 | F56 | [bridge/mockchat.py:96](../../bridge/mockchat.py#L96) | low | TOUR_EXPECT is dead scaffolding with a stale comment |
 | F57 | [bridge/providers.py:94](../../bridge/providers.py#L94) | low | has_key() always says yes for anthropic |
@@ -367,11 +386,11 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F62 | [docs/ROADMAP.md:20](../../docs/ROADMAP.md#L20) | low | ROADMAP names wcl -0; the build uses wcc/wpp + wlink |
 | F63 | [docs/ROADMAP.md:93](../../docs/ROADMAP.md#L93) | low | Free-memory figure differs: 290 KB vs 285 KB |
 | F64 | [image/tests/units.bat:3](../../image/tests/units.bat#L3) | low | Unit tests only run under DOSBox-X's 80186, never on the 86Box 8088 |
-| F65 | [lib/basdraw.c:368](../../lib/basdraw.c#L368) | low | turtle() and statement() are the hardest functions to follow; literal pooling dependence |
+| F65 | [lib/basdraw.c:368](../../lib/basdraw.c#L368) | low | turtle() and statement() are the hardest functions to follow; literal pooling dependence — **gone with the draw tool, `1bcfd23`** |
 | F66 | [lib/edit.c:196](../../lib/edit.c#L196) | low | Edit makes 3 full + 2 partial passes over a 60 KB file |
 | F68 | [lib/edit.h:27](../../lib/edit.h#L27) | low | edit_replace's return values are undocumented |
-| F69 | [lib/gfx.c:22](../../lib/gfx.c#L22) | low | gfx.c declares ras twice and shadows its maxX |
-| F70 | [lib/gfx.c:199](../../lib/gfx.c#L199) | low | Busy-wait loops recompute a long mul/div per iteration and do not service the network |
+| F69 | [lib/gfx.c:22](../../lib/gfx.c#L22) | low | gfx.c declares ras twice and shadows its maxX — **gone with the draw tool, `1bcfd23`** |
+| F70 | [lib/gfx.c:199](../../lib/gfx.c#L199) | low | Busy-wait loops recompute a long mul/div per iteration and do not service the network — **gone with the draw tool, `1bcfd23`** |
 | F71 | [lib/memory.h:1](../../lib/memory.h#L1) | low | lib/ mixes platform modules with tool executors; 'memory' is ambiguous |
 | F72 | [lib/screen.c:50](../../lib/screen.c#L50) | low | One cell per horizontal retrace is conservative; two fit |
 | F74 | [lib/shell.c:136](../../lib/shell.c#L136) | low | shell.c's capture arithmetic and command-list parsing untested beyond two tooltour steps |
@@ -402,7 +421,7 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F100 | [src/claude/tools.cpp:172](../../src/claude/tools.cpp#L172) | low | EMS-or-heap screen save/restore sits in the app |
 | C7 | [lib/screen.c:242](../../lib/screen.c#L242) | low | Adapter detection is 'not EGA/VGA = CGA'; MDA/Hercules spins forever |
 | C8 | [lib/screen.c:458](../../lib/screen.c#L458) | low | scr_suspend and the -noscroll scroll path read video memory unsynchronized |
-| C10 | [lib/raster.c:129](../../lib/raster.c#L129) | low | Per-module static data measured; tool-scratch total ~9 KB |
+| C10 | [lib/raster.c:129](../../lib/raster.c#L129) | low | Per-module static data measured; tool-scratch total ~9 KB — **raster share gone, `1bcfd23`** |
 | C11 | [bridge/cp437.py:17](../../bridge/cp437.py#L17) | low | Tabs reach the screen as CP437 glyphs; the '\t' fallback is dead code |
 | C12 | [tests/unit/cxtunit.c:44](../../tests/unit/cxtunit.c#L44) | low | Harness records with unbounded sprintf into rec[600] |
 | C13 | [lib/shell.c:269](../../lib/shell.c#L269) | low | A run of CD silently moves CLAUDE's own current directory |
