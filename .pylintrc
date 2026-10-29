@@ -1,0 +1,6 @@
+[MAIN]
+# Project style: 120 columns (the pylint default of 100 splits too many
+# long wire-protocol / path lines).
+
+[FORMAT]
+max-line-length=120
