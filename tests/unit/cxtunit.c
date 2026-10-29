@@ -207,6 +207,7 @@ static void testDraw(void)
     CHECK_STR("draw: statements before an error run", rec, "pset1,1,3 ");
     drawFails("draw: bad screen", "SCREEN 7", "line 1: SCREEN: only SCREEN 1 or 2");
     drawFails("draw: bad turtle", "DRAW \"Q5\"", "line 1: DRAW: unknown command Q");
+    drawFails("draw: unexpected char", "PSET (1,1) 5", "line 1: PSET: unexpected '5'");
 
     {   /* the mock tool tour's script: 120 LINEs, then LOCATE/PRINT */
         static char script[4000];
@@ -289,6 +290,35 @@ static void testMemory(void)
     CHECK_STR("mem summary eof", out, "x");
     mem_summary("0123456789012345678901234567890123456789012345678901234567890123456789", 70, out);
     CHECK_STR("mem summary cut", out, "012345678901234567890123456789012345678901234567890123456...");
+}
+
+/* memory_list through the real executors: a full 8-character name (12 with
+   .TXT, the longest find_t gives) is listed with its summary. */
+static void testMemoryList(void)
+{
+    ToolCtx t;
+    char *line;
+
+    tout_reset(&t);
+    t.unattended = 1;
+    targ_reset();
+    targ_append("name", "ABCDEFGH");
+    targ_append("text", "Unit test memory\nsecond line");
+    CHECK("mem write long name", tool_memory_write(&t) == TS_OK);
+
+    tout_reset(&t);
+    targ_reset();
+    CHECK("mem list ok", tool_memory_list(&t) == TS_OK);
+    line = strstr(t.out, "ABCDEFGH");
+    CHECK("mem list has long name", line != NULL);
+    if (line) {
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = 0;
+        CHECK("mem list long name summary", strstr(line, "Unit test memory") != NULL);
+        CHECK("mem list long name size", strstr(line, "   29  ") != NULL);
+    }
+    remove(MEM_DIR "\\ABCDEFGH.TXT");
 }
 
 static void testRaster(void)
@@ -400,6 +430,7 @@ int main(void)
     testDraw();
     testRaster();
     testMemory();
+    testMemoryList();
     testEdit();
     testSearch();
 

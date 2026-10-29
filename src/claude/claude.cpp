@@ -16,6 +16,7 @@
  */
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dos.h>
@@ -278,10 +279,15 @@ static void drawHint(void)
     rowBlank(r);
     col = rowText(r, 2, "F1 help \xFA F2 new chat \xFA F3 ", A_DIM);
     col = rowText(r, col, tools_safe() ? "safe:on" : "safe:off", tools_safe() ? A_GOOD : A_ERR);
-    rowText(r, col, " \xFA PgUp/PgDn \xFA F10 quit", A_DIM);
-    col = SCR_COLS - 2 - strlen(host) - 2;
-    r.c[col] = G_BULLET | ((bridge.isConnected() ? A_GOOD : A_ERR) << 8);
-    rowText(r, col + 2, host, A_DIM);
+    col = rowText(r, col, " \xFA PgUp/PgDn \xFA F10 quit", A_DIM);
+    {   /* the bridge's address, right-aligned; a long one is cut to the room left */
+        int len = strlen(host), room = SCR_COLS - 5 - col;
+        if (len > room)
+            len = room;
+        col = SCR_COLS - 2 - len - 2;
+        r.c[col] = G_BULLET | ((bridge.isConnected() ? A_GOOD : A_ERR) << 8);
+        rowText(r, col + 2, host, A_DIM, len);
+    }
     scr_putn(SCR_ROWS - 1, 0, r.c, SCR_COLS);
 }
 
@@ -956,7 +962,7 @@ static void linkLost(const char *why)
         fatal(err ? err : "Lost the bridge mid-reply (reconnected, then gave up).");
     }
     retryAt = *biosTicks + 5 * 18;
-    sprintf(offlineNote, "Bridge offline; reconnecting to %s ...", host);
+    snprintf(offlineNote, sizeof(offlineNote), "Bridge offline; reconnecting to %s ...", host);
     statusNote = offlineNote;
     drawStatus();
     drawHint();
@@ -966,12 +972,12 @@ static void reconnect(void)
 {
     const char *err;
 
-    sprintf(offlineNote, "Reconnecting to %s ...", host);
+    snprintf(offlineNote, sizeof(offlineNote), "Reconnecting to %s ...", host);
     statusNote = offlineNote;
     drawStatus();
     err = connectBridge();
     if (err) {
-        sprintf(offlineNote, "Bridge offline (%.40s) - retrying in 10s. F10 quits.", err);
+        snprintf(offlineNote, sizeof(offlineNote), "Bridge offline (%.40s) - retrying in 10s. F10 quits.", err);
         drawStatus();
         retryAt = *biosTicks + RETRY_WAIT;
         return;
@@ -1024,50 +1030,69 @@ static void watchLog(const char *text)
         bridge.send("LOG", text);
 }
 
+#define WATCH_LINE 200                /* one log line: the first report is ~160 */
+
+/* Append formatted text to buf[WATCH_LINE] at len, cutting what doesn't fit;
+   returns the new length. */
+static int watchAppend(char *buf, int len, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (len >= WATCH_LINE - 1)
+        return len;
+    va_start(ap, fmt);
+    n = vsnprintf(buf + len, WATCH_LINE - len, fmt, ap);
+    va_end(ap);
+    if (n < 0 || n > WATCH_LINE - 1 - len)
+        return WATCH_LINE - 1;
+    return len + n;
+}
+
 static void watchCheck(unsigned cells)
 {
     ScrDiff d;
-    char buf[160];
-    int n, len;
+    char buf[WATCH_LINE];
+    int n, len, head;
     unsigned long now = *biosTicks;
 
     n = scr_check(cells, &d);
     if (n == 0)
         return;
     watchReports++;
-    sprintf(buf, "VRAM watch #%lu: %d cells changed by someone else; first run %04X-%04X (cell 0 = B800:0000)."
-                 " Live row 0 is cell %04X; state %d; %lus since the last bridge line.",
-            watchReports, n, d.first, d.last, scr_top(), (int)state, (now - lastRx) * 10 / 182);
+    watchAppend(buf, 0, "VRAM watch #%lu: %d cells changed by someone else; first run %04X-%04X (cell 0 = B800:0000)."
+                        " Live row 0 is cell %04X; state %d; %lus since the last bridge line.",
+                watchReports, n, d.first, d.last, scr_top(), (int)state, (now - lastRx) * 10 / 182);
     watchLog(buf);
-    len = sprintf(buf, "VRAM found   ");
+    len = watchAppend(buf, 0, "VRAM found   ");
     for (int i = 0; i < 8; i++)
-        len += sprintf(buf + len, " %04X", d.found[i]);
+        len = watchAppend(buf, len, " %04X", d.found[i]);
     watchLog(buf);
-    len = sprintf(buf, "VRAM expected");
+    len = watchAppend(buf, 0, "VRAM expected");
     for (int i = 0; i < 8; i++)
-        len += sprintf(buf + len, " %04X", d.expected[i]);
+        len = watchAppend(buf, len, " %04X", d.expected[i]);
     watchLog(buf);
-    len = sprintf(buf, "BIOS video 0040:0049..0066 changed at:");
+    head = len = watchAppend(buf, 0, "BIOS video 0040:0049..0066 changed at:");
     for (unsigned i = 0; i < sizeof(startBios); i++)
         if (biosVideo[i] != startBios[i])
-            len += sprintf(buf + len, " %02X:%02X->%02X", 0x49 + i, startBios[i], biosVideo[i]);
-    if (len == 38)
-        strcpy(buf + len, " nothing");
+            len = watchAppend(buf, len, " %02X:%02X->%02X", 0x49 + i, startBios[i], biosVideo[i]);
+    if (len == head)
+        watchAppend(buf, len, " nothing");
     watchLog(buf);
-    len = sprintf(buf, "Vectors changed since start:");
+    head = len = watchAppend(buf, 0, "Vectors changed since start:");
     for (unsigned i = 0; i < sizeof(watchVecs); i++) {
         unsigned long v = vector(watchVecs[i]);
-        if (v != startVecs[i] && len < 120)
-            len += sprintf(buf + len, " %02X %04X:%04X->%04X:%04X", watchVecs[i],
-                           (unsigned)(startVecs[i] >> 16), (unsigned)startVecs[i],
-                           (unsigned)(v >> 16), (unsigned)v);
+        if (v != startVecs[i])
+            len = watchAppend(buf, len, " %02X %04X:%04X->%04X:%04X", watchVecs[i],
+                              (unsigned)(startVecs[i] >> 16), (unsigned)startVecs[i],
+                              (unsigned)(v >> 16), (unsigned)v);
     }
-    if (len == 28)
-        strcpy(buf + len, " none");
+    if (len == head)
+        watchAppend(buf, len, " none");
     watchLog(buf);
     scr_repair();
-    sprintf(buf, "Something else wrote to screen memory (cells %04X-%04X); repaired. Details are in the bridge log.",
-            d.first, d.last);
+    watchAppend(buf, 0, "Something else wrote to screen memory (cells %04X-%04X); repaired. Details are in the bridge log.",
+                d.first, d.last);
     note(buf, A_ERR);
     drawFooter();
 }

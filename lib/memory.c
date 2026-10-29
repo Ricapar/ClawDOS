@@ -59,7 +59,7 @@ static const char *mem_path(ToolCtx *t, int *status)
 int tool_memory_list(ToolCtx *t)
 {
     struct find_t f;
-    char summary[MEM_SUMMARY + 1], name[9], path[32];
+    char summary[MEM_SUMMARY + 1], name[sizeof(f.name)], path[32];  /* 8.3 + NUL */
     unsigned count = 0, got;
     int h;
 

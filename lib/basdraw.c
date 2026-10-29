@@ -12,7 +12,7 @@ typedef struct {
     const DrawOps *ops;
     const char *p;
     int line;                         /* source line of the current statement */
-    const char *kw;                   /* its keyword, for error messages */
+    char kw[12];                      /* its keyword, for error messages */
     char *err;
     int errlen;
     int failed;
@@ -467,17 +467,16 @@ static int stDraw(Bas *b)
 
 static int statement(Bas *b)
 {
-    char kw[12];
+    char *kw = b->kw;                 /* lives in *b: fail() reads it after we return */
     unsigned n = 0;
     long v;
 
     spaces(b);
-    while (isalpha((unsigned char)*b->p) && n < sizeof(kw) - 1)
+    while (isalpha((unsigned char)*b->p) && n < sizeof(b->kw) - 1)
         kw[n++] = (char)toupper((unsigned char)*b->p++);
     kw[n] = 0;
     while (isalpha((unsigned char)*b->p))
         b->p++;
-    b->kw = kw;
 
     if (!strcmp(kw, "REM")) {
         while (*b->p && *b->p != '\n')
@@ -532,13 +531,11 @@ static int statement(Bas *b)
 int bas_draw(const char *script, const DrawOps *ops, char *err, int errlen)
 {
     Bas b;
-    char emptyKw[1] = "";
 
-    memset(&b, 0, sizeof(b));
+    memset(&b, 0, sizeof(b));         /* kw starts as "" */
     b.ops = ops;
     b.p = script;
     b.line = 1;
-    b.kw = emptyKw;
     b.err = err;
     b.errlen = errlen;
     b.mode = 1;

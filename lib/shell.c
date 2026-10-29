@@ -256,8 +256,10 @@ static const char *direct(const char *cmd, char *prog)
     return args;
 }
 
+#define WHY_MAX 120                   /* "could not start ...: ..." */
+
 /* Run one command, capturing its output. The exit code, or -1 if it couldn't
-   start (why is in `why`). */
+   start (why is in `why`, WHY_MAX bytes). */
 static int runOne(const char *cmd, char *why)
 {
     static char prog[80];
@@ -287,7 +289,7 @@ static int runOne(const char *cmd, char *why)
     _dos_setvect(0x10, oldInt10);
 
     if (code == -1) {
-        sprintf(why, "could not start %.80s: %s", args ? prog : comspec, strerror(errno));
+        snprintf(why, WHY_MAX, "could not start %s: %s", args ? prog : comspec, strerror(errno));
         teletype(why);
         teletype("\n");
     }
@@ -342,7 +344,7 @@ static void hold(int code, int holdSecs)
 
 int shell_run(ToolCtx *t, const char *cmds, int holdSecs)
 {
-    static char cmd[SHELL_CMD_MAX + 1], why[120];
+    static char cmd[SHELL_CMD_MAX + 1], why[WHY_MAX];
     const char *p = cmds;
     unsigned count = 0, i, len, left, room;
     int code = 0;
