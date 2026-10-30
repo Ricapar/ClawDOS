@@ -14,12 +14,8 @@ while Claude thinks. Claude can also look around the XT, read and write its
 files, compile programs on it and play music on its PC speaker.
 
 The XT only speaks plain TCP. A small Python **bridge** on a modern machine
-handles TLS, the API key and the model, so the XT side stays tiny and fast.
-
-```
- IBM XT                                  PC / Raspberry Pi                     Internet
- CLAWDOS.EXE ──TCP (PicoMEM WiFi)──>  bridge/xtbridge.py  ──HTTPS──>  Claude API (or OpenAI-compatible)
-```
+handles TLS, the API key and the model, so the XT side stays tiny and fast
+(see [How it works](#how-it-works)).
 
 ## Features
 
@@ -63,6 +59,70 @@ handles TLS, the API key and the model, so the XT side stays tiny and fast.
 - Reusable DOS libraries in `lib/` (CGA screen, text console, bridge client on
   mTCP). 8086 instructions only, so it runs on a real 8088.
 - Tested headless in DOSBox-X and on an accurate XT in 86Box.
+
+## How it works
+
+An 8088 can't do TLS in any reasonable time, so the XT never talks to the
+Internet itself. CLAWDOS.EXE speaks a simple line-based protocol over plain
+TCP to the **bridge**, which holds the API key, keeps the conversation and
+talks HTTPS to the model.
+
+```mermaid
+flowchart LR
+    subgraph XT["IBM PC XT (8088, 640K, CGA)"]
+        direction TB
+        APP["CLAWDOS.EXE<br/>chat UI + tool executors"]
+        MTCP["mTCP<br/>TCP/IP stack"]
+        PKT["NE2000.COM<br/>packet driver"]
+        APP --> MTCP --> PKT
+    end
+
+    PICO["PicoMEM card<br/>NE2000 emulation + WiFi"]
+    PKT --> PICO
+
+    subgraph HOST["PC or Raspberry Pi"]
+        BRIDGE["bridge/xtbridge.py<br/>conversation, tool loop,<br/>memories, logs"]
+    end
+
+    subgraph CLOUD["Internet"]
+        API["Claude API<br/>(or an OpenAI-compatible provider)"]
+    end
+
+    PICO <-->|"WiFi / LAN<br/>plain TCP, port 8023<br/>XTBridge protocol (CP437 lines)"| BRIDGE
+    BRIDGE <-->|"HTTPS + API key<br/>streaming"| API
+```
+
+A message travels from the XT to the model and back like this:
+
+```mermaid
+sequenceDiagram
+    participant XT as CLAWDOS.EXE (XT)
+    participant B as Bridge
+    participant M as Model API
+
+    XT->>B: connect (TCP)
+    B-->>XT: HELLO (session id, time)
+    XT->>B: MSG your question
+    B->>M: request (history + tools)
+    M-->>B: streamed reply
+    B-->>XT: TXT / NL lines
+    opt Claude uses a tool on the XT
+        M-->>B: tool call
+        B-->>XT: TOOL / ARG / CALL
+        Note over XT: asks y/n in safe mode,<br/>then runs it
+        XT->>B: OUT result / DONE
+        B->>M: tool result
+        M-->>B: rest of the reply
+        B-->>XT: TXT / NL lines
+    end
+    B-->>XT: END
+```
+
+The bridge runs the tool loop with the model; the XT only executes the calls.
+If the link drops, CLAWDOS.EXE reconnects and sends `RESUME` to pick the
+conversation back up. In an emulator the PicoMEM is replaced by an emulated
+NE1000/NE2000 card with NAT networking. The wire format is in
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## What you need
 
