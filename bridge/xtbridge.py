@@ -272,7 +272,7 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
             return False
         if verb == 'PING':
             await self.send('PONG')
-        elif verb == 'LOG':          # diagnostics from the XT (CLAUDE -watch); no reply
+        elif verb == 'LOG':          # diagnostics from the XT (link loss, clock); no reply
             log.info('%s XT: %s', self.peer, from_cp437(rest))
         elif verb == 'AUTH':
             self.authed = not self.args.token or from_cp437(rest) == self.args.token

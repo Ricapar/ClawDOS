@@ -70,20 +70,6 @@ void scr_cursor_visible(int on);
 void scr_suspend(unsigned short __far *save);
 void scr_resume(const unsigned short __far *save);
 
-/* Watching for other writers: keep a copy of all of video memory (`shadow`,
-   SCR_SAVE_BYTES, filled from VRAM now) that every write here also updates.
-   scr_check compares the next `cells` of VRAM with it (reading VRAM snows on
-   a CGA, so this is a debugging aid) and returns the number of differing cells
-   found, describing the first run of them in `d`. scr_repair puts the copy back. */
-typedef struct {
-    unsigned first, last;            /* VRAM cells (0..8191) of the first differing run */
-    unsigned found[8], expected[8];  /* from `first` on */
-} ScrDiff;
-void scr_watch(unsigned short __far *shadow);
-int  scr_check(unsigned cells, ScrDiff *d);
-void scr_repair(void);
-unsigned scr_top(void);              /* VRAM cell of live row 0 */
-
 #ifdef __cplusplus
 }
 #endif

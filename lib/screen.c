@@ -22,29 +22,11 @@ static int hwscroll;        /* hardware scrolling available (real CGA) */
 static int snowcheck;       /* wait for retrace before each VRAM write */
 static unsigned cur_pos;    /* cursor, as a cell offset from `top` */
 static int foot;            /* rows pinned at the bottom */
-static unsigned short __far *shadow;    /* scr_watch: what VRAM should hold */
-static unsigned check_pos;              /* where scr_check carries on */
 
 /* Copy of the bottom SCR_FOOT_MAX rows, so the footer can be redrawn without
    reading VRAM (slow, and snowy on CGA). */
 #define MIRROR_TOP   (SCR_ROWS - SCR_FOOT_MAX)
 static unsigned short mirror[SCR_FOOT_MAX][SCR_COLS];
-
-static void shadow_fill(unsigned off, unsigned cell, unsigned n)
-{
-    while (n--) {
-        shadow[off] = cell;
-        off = WRAP(off + 1);
-    }
-}
-
-static void shadow_copy(unsigned off, const unsigned short __far *src, unsigned n)
-{
-    while (n--) {
-        shadow[off] = *src++;
-        off = WRAP(off + 1);
-    }
-}
 
 /* Fill n cells starting at cell offset `off` (wrapping) with `cell`. */
 static void vfill(unsigned off, unsigned cell, unsigned n)
@@ -53,8 +35,6 @@ static void vfill(unsigned off, unsigned cell, unsigned n)
 
     if (n == 0)
         return;
-    if (shadow)
-        shadow_fill(off, cell, n);
     _asm {
         push    es
         push    di
@@ -99,8 +79,6 @@ static void vcopy(unsigned off, const unsigned short __far *src, unsigned n)
 
     if (n == 0)
         return;
-    if (shadow)
-        shadow_copy(off, src, n);
     _asm {
         push    ds
         push    es
@@ -348,8 +326,6 @@ static void rebase(void)
         _fmemcpy(vram + done, vram + from + done, k * 2);
         _enable();
     }
-    if (shadow)
-        _fmemcpy(shadow, shadow + from, n * 2);
     top = keep * SCR_COLS;
     history = keep;
     if (view > history)
@@ -397,8 +373,6 @@ void scr_scroll(unsigned char attr)
         set_start_now();
         vblast(off, rows, n);
         _enable();
-        if (shadow)                 /* outside the blanking interval: it's slow */
-            shadow_copy(off, rows, n);
     } else {
         static unsigned short row[SCR_COLS];
         unsigned short __far *vram = (unsigned short __far *)MK_FP(VRAM_SEG, 0);
@@ -469,59 +443,10 @@ void scr_resume(const unsigned short __far *save)
     if (hwscroll)                   /* blank the display: no snow while copying */
         outp(CGA_MODE_REG, CGA_TEXT80 & ~8);
     _fmemcpy(MK_FP(VRAM_SEG, 0), save, SCR_SAVE_BYTES);
-    if (shadow)
-        _fmemcpy(shadow, save, SCR_SAVE_BYTES);
     if (hwscroll) {
         set_start_now();
         outp(CGA_MODE_REG, CGA_TEXT80);
     } else {
         scr_cursor(cur_pos / SCR_COLS, cur_pos % SCR_COLS);
     }
-}
-
-unsigned scr_top(void) { return top; }
-
-void scr_watch(unsigned short __far *buf)
-{
-    _fmemcpy(buf, MK_FP(VRAM_SEG, 0), SCR_SAVE_BYTES);
-    check_pos = 0;
-    shadow = buf;
-}
-
-int scr_check(unsigned cells, ScrDiff *d)
-{
-    const unsigned short __far *vram = (const unsigned short __far *)MK_FP(VRAM_SEG, 0);
-    unsigned i, off = check_pos;
-    int diffs = 0;
-
-    if (!shadow)
-        return 0;
-    for (i = 0; i < cells; i++, off = WRAP(off + 1)) {
-        if (vram[off] == shadow[off])
-            continue;
-        if (diffs++ == 0) {
-            unsigned k, end = off;
-            d->first = off;
-            while (vram[WRAP(end + 1)] != shadow[WRAP(end + 1)] && WRAP(end + 1) != off)
-                end = WRAP(end + 1);
-            d->last = end;
-            for (k = 0; k < 8; k++) {
-                d->found[k] = vram[WRAP(off + k)];
-                d->expected[k] = shadow[WRAP(off + k)];
-            }
-        }
-    }
-    check_pos = off;
-    return diffs;
-}
-
-void scr_repair(void)
-{
-    if (!shadow)
-        return;
-    if (hwscroll)                   /* blank the display: no snow while copying */
-        outp(CGA_MODE_REG, CGA_TEXT80 & ~8);
-    _fmemcpy(MK_FP(VRAM_SEG, 0), shadow, SCR_SAVE_BYTES);
-    if (hwscroll)
-        outp(CGA_MODE_REG, CGA_TEXT80);
 }

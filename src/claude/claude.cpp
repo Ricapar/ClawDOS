@@ -6,7 +6,7 @@
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAUDE [host[:port]] [-nosnow] [-noscroll] [-watch] [-unsafe] [-q] [-m message] [-i text]
+ *   CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
@@ -16,7 +16,6 @@
  */
 
 #include <stdio.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dos.h>
@@ -995,111 +994,6 @@ static void reconnect(void)
     drawFooter();
 }
 
-/* -watch: catch other programs writing to video memory. Every half second
-   part of VRAM is compared with what we wrote; a difference is reported to
-   the bridge log (with the BIOS video state and interrupt vectors, which show
-   whether someone went through INT 10h or hooked something) and repaired. */
-#define WATCH_CELLS 2048              /* compared per check: all 16 KB in 2 s */
-static const unsigned char watchVecs[] = { 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                                           0x10, 0x13, 0x16, 0x1C, 0x21, 0x28, 0x2F, 0x60 };
-static int watching;
-static unsigned long watchAt, watchReports;
-static unsigned long startVecs[sizeof(watchVecs)];
-static unsigned char startBios[0x1E];        /* 0040:0049-0066, the BIOS video area */
-static unsigned char __far *biosVideo = (unsigned char __far *)MK_FP(0x40, 0x49);
-
-static unsigned long vector(unsigned char n)
-{
-    return *(unsigned long __far *)MK_FP(0, n * 4);
-}
-
-static void watchStart(void)
-{
-    unsigned short __far *buf = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
-
-    if (buf == NULL)
-        return;
-    for (unsigned i = 0; i < sizeof(watchVecs); i++)
-        startVecs[i] = vector(watchVecs[i]);
-    _fmemcpy(startBios, biosVideo, sizeof(startBios));
-    scr_watch(buf);
-    watching = 1;
-}
-
-static void watchLog(const char *text)
-{
-    if (linkUp)
-        bridge.send("LOG", text);
-}
-
-#define WATCH_LINE 200                /* one log line: the first report is ~160 */
-
-/* Append formatted text to buf[WATCH_LINE] at len, cutting what doesn't fit;
-   returns the new length. */
-static int watchAppend(char *buf, int len, const char *fmt, ...)
-{
-    va_list ap;
-    int n;
-
-    if (len >= WATCH_LINE - 1)
-        return len;
-    va_start(ap, fmt);
-    n = vsnprintf(buf + len, WATCH_LINE - len, fmt, ap);
-    va_end(ap);
-    if (n < 0 || n > WATCH_LINE - 1 - len)
-        return WATCH_LINE - 1;
-    return len + n;
-}
-
-static void watchCheck(unsigned cells)
-{
-    ScrDiff d;
-    char buf[WATCH_LINE];
-    int n, len, head;
-    unsigned long now = TICKS_NOW;
-
-    n = scr_check(cells, &d);
-    if (n == 0)
-        return;
-    watchReports++;
-    watchAppend(buf, 0, "VRAM watch #%lu: %d cells changed by someone else; first run %04X-%04X (cell 0 = B800:0000)."
-                        " Live row 0 is cell %04X; state %d; %lus since the last bridge line.",
-                watchReports, n, d.first, d.last, scr_top(), (int)state,
-                (unsigned long)TICKS_TO_SECS(ticks_elapsed(now, lastRx)));
-    watchLog(buf);
-    len = watchAppend(buf, 0, "VRAM found   ");
-    for (int i = 0; i < 8; i++)
-        len = watchAppend(buf, len, " %04X", d.found[i]);
-    watchLog(buf);
-    len = watchAppend(buf, 0, "VRAM expected");
-    for (int i = 0; i < 8; i++)
-        len = watchAppend(buf, len, " %04X", d.expected[i]);
-    watchLog(buf);
-    head = len = watchAppend(buf, 0, "BIOS video 0040:0049..0066 changed at:");
-    for (unsigned i = 0; i < sizeof(startBios); i++)
-        if (biosVideo[i] != startBios[i])
-            len = watchAppend(buf, len, " %02X:%02X->%02X", 0x49 + i, startBios[i], biosVideo[i]);
-    if (len == head)
-        watchAppend(buf, len, " nothing");
-    watchLog(buf);
-    head = len = watchAppend(buf, 0, "Vectors changed since start:");
-    for (unsigned i = 0; i < sizeof(watchVecs); i++) {
-        unsigned long v = vector(watchVecs[i]);
-        if (v != startVecs[i])
-            len = watchAppend(buf, len, " %02X %04X:%04X->%04X:%04X", watchVecs[i],
-                              (unsigned)(startVecs[i] >> 16), (unsigned)startVecs[i],
-                              (unsigned)(v >> 16), (unsigned)v);
-    }
-    if (len == head)
-        watchAppend(buf, len, " none");
-    watchLog(buf);
-    scr_repair();
-    watchAppend(buf, 0, "Something else wrote to screen memory (cells %04X-%04X); repaired. Details are in the bridge log.",
-                d.first, d.last);
-    note(buf, A_ERR);
-    drawFooter();
-}
-
 /* Ping a quiet bridge; give up on one that doesn't answer. */
 static void checkLink(void)
 {
@@ -1119,7 +1013,7 @@ static void checkLink(void)
 int main(int argc, char *argv[])
 {
     char note_[120];
-    int nosnow = 0, noscroll = 0, watch = 0, unsafe = 0, quick = 0;
+    int nosnow = 0, noscroll = 0, unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     int i;
@@ -1129,8 +1023,6 @@ int main(int argc, char *argv[])
             nosnow = 1;
         } else if (!stricmp(argv[i], "-noscroll") || !stricmp(argv[i], "/noscroll")) {
             noscroll = 1;
-        } else if (!stricmp(argv[i], "-watch") || !stricmp(argv[i], "/watch")) {
-            watch = 1;
         } else if (!stricmp(argv[i], "-unsafe") || !stricmp(argv[i], "/unsafe")) {
             unsafe = 1;
         } else if (!stricmp(argv[i], "-q") || !stricmp(argv[i], "/q")) {
@@ -1141,12 +1033,11 @@ int main(int argc, char *argv[])
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
             printf("CLAUDE " VERSION " - chat with Claude via an XTBridge\n\n"
-                   "Usage: CLAUDE [host[:port]] [-nosnow] [-noscroll] [-watch] [-unsafe] [-q]\n"
+                   "Usage: CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q]\n"
                    "              [-m message] [-i text]\n\n"
                    "Without a host, CLAUDE_BRIDGE from the mTCP config file is used.\n"
                    "-nosnow  skip CGA retrace waits (faster on clones and EGA/VGA)\n"
                    "-noscroll  scroll by copying text, not by moving the CGA start address\n"
-                   "-watch   report other programs' writes to video memory to the bridge log\n"
                    "-unsafe  start with safe mode off: tools run without asking\n"
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
@@ -1176,8 +1067,6 @@ int main(int argc, char *argv[])
         scr_set_snowcheck(0);
     if (noscroll)
         scr_set_hwscroll(0);
-    if (watch)
-        watchStart();
     con_track_cursor(0);            /* the cursor lives in the input box */
     con_init();
     scr_footer(footerRows(), A_TEXT);
@@ -1216,10 +1105,6 @@ int main(int argc, char *argv[])
         } else if (ticks_elapsed(TICKS_NOW, retryStart) >= retryWait) {
             reconnect();
         }
-        if (watching && ticks_elapsed(TICKS_NOW, watchAt) >= 9) {
-            watchAt = TICKS_NOW;
-            watchCheck(WATCH_CELLS);
-        }
         if (XTBridge::breakPressed)
             break;
         if (biosIsKeyReady())
@@ -1230,8 +1115,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (watching)                     /* a last full look, for -q runs */
-        watchCheck(8192);
     if (linkUp)
         bridge.send("QUIT");
     bridge.close();
