@@ -62,67 +62,53 @@ handles TLS, the API key and the model, so the XT side stays tiny and fast
 
 ## How it works
 
-An 8088 can't do TLS in any reasonable time, so the XT never talks to the
-Internet itself. CLAWDOS.EXE speaks a simple line-based protocol over plain
-TCP to the **bridge**, which holds the API key, keeps the conversation and
-talks HTTPS to the model.
+ClawDOS is a DOS program, not an XT program: it targets the 8086 instruction
+set and talks to the network through a standard packet driver, so in principle
+it runs on any PC-compatible running DOS with a network card and a CGA-compatible
+text display. The 4.77 MHz IBM PC XT is simply the slowest machine it has to
+be good on.
+
+The real work happens on the DOS machine. **CLAWDOS.EXE** is the whole client
+experience: the Claude Code-style interface, snow-free drawing and hardware
+scrolling, input editing, safe mode, reconnecting after a lost link, and every
+tool Claude uses. When Claude reads a file, edits a batch file, runs a
+compiler, pokes a port or plays a tune, CLAWDOS.EXE does it on the DOS machine
+itself, and Claude's memories live on its disk.
+
+The **bridge** is the shim between the old world and the new. A 1980s CPU
+can't do modern TLS, so the bridge holds the API key, speaks HTTPS to the
+model, keeps the conversation history and relays tool calls to DOS and the
+results back. It knows the tools' descriptions so it can offer them to the
+model, but it never runs them.
 
 ```mermaid
 flowchart LR
-    subgraph XT["IBM PC XT (8088, 640K, CGA)"]
+    subgraph DOS["DOS PC (8088 or later)"]
         direction TB
-        APP["CLAWDOS.EXE<br/>chat UI + tool executors"]
-        MTCP["mTCP<br/>TCP/IP stack"]
-        PKT["NE2000.COM<br/>packet driver"]
-        APP --> MTCP --> PKT
+        subgraph APP["CLAWDOS.EXE"]
+            direction TB
+            UI["Chat interface<br/>streaming text, scrollback,<br/>input box, safe mode"]
+            TOOLS["Tool executors<br/>files, search, DOS commands,<br/>memory &amp; ports, speaker, text art"]
+        end
+        SYS[("Disk, memory, I/O ports,<br/>PC speaker, DOS programs,<br/>Claude's memories")]
+        NET["mTCP + packet driver"]
+        TOOLS <--> SYS
+        APP <--> NET
     end
 
-    PICO["PicoMEM card<br/>NE2000 emulation + WiFi"]
-    PKT --> PICO
-
-    subgraph HOST["PC or Raspberry Pi"]
-        BRIDGE["bridge/xtbridge.py<br/>conversation, tool loop,<br/>memories, logs"]
+    subgraph SHIM["Bridge (PC or Raspberry Pi)"]
+        BRIDGE["xtbridge.py<br/>TLS, API key, history,<br/>relays tool calls"]
     end
 
-    subgraph CLOUD["Internet"]
-        API["Claude API<br/>(or an OpenAI-compatible provider)"]
-    end
+    API["Claude API<br/>(or an OpenAI-compatible provider)"]
 
-    PICO <-->|"WiFi / LAN<br/>plain TCP, port 8023<br/>XTBridge protocol (CP437 lines)"| BRIDGE
-    BRIDGE <-->|"HTTPS + API key<br/>streaming"| API
+    NET <-->|"plain TCP<br/>simple text protocol"| BRIDGE
+    BRIDGE <-->|"HTTPS"| API
 ```
 
-A message travels from the XT to the model and back like this:
-
-```mermaid
-sequenceDiagram
-    participant XT as CLAWDOS.EXE (XT)
-    participant B as Bridge
-    participant M as Model API
-
-    XT->>B: connect (TCP)
-    B-->>XT: HELLO (session id, time)
-    XT->>B: MSG your question
-    B->>M: request (history + tools)
-    M-->>B: streamed reply
-    B-->>XT: TXT / NL lines
-    opt Claude uses a tool on the XT
-        M-->>B: tool call
-        B-->>XT: TOOL / ARG / CALL
-        Note over XT: asks y/n in safe mode,<br/>then runs it
-        XT->>B: OUT result / DONE
-        B->>M: tool result
-        M-->>B: rest of the reply
-        B-->>XT: TXT / NL lines
-    end
-    B-->>XT: END
-```
-
-The bridge runs the tool loop with the model; the XT only executes the calls.
-If the link drops, CLAWDOS.EXE reconnects and sends `RESUME` to pick the
-conversation back up. In an emulator the PicoMEM is replaced by an emulated
-NE1000/NE2000 card with NAT networking. The wire format is in
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+On the XT the network card is a PicoMEM (an emulated NE2000 that talks WiFi);
+in an emulator it's an emulated NE1000/NE2000 with NAT networking. The wire
+format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## What you need
 
