@@ -4,7 +4,10 @@ DOS software for a real IBM PC XT (8088 @ 4.77 MHz, 640K, CGA, PicoMEM: disk ima
 README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the bridge protocol.
 
 ## Workflow
-- Setup once: `.\scripts\setup-tools.ps1`. Toolchains live in `tools/` (gitignored), outputs in `build/`.
+- Setup once: `python3 scripts/setup-tools.py` (Homebrew on macOS, winget on Windows). Toolchains live in `tools/`
+  (gitignored), outputs in `build/`. Bridge Python deps go in `.venv` (`.venv/bin/pip install -r bridge/requirements.txt`;
+  Homebrew's Python refuses global installs); run the bridge and its tests with `.venv/bin/python`.
+- macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
 - Build everything: `python scripts/build.py` (apps -> build/*.EXE, disk -> build/CLAWDOS.IMG).
   Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
 - Code navigation: the clangd-lsp and pyright-lsp plugins are enabled for this project (.claude/settings.json;
@@ -17,8 +20,10 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/xttest.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
-- Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
-  `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
+- Accurate XT: `python scripts/run86box.py`, then `python scripts/shot.py [--delay N]` and read build/shot.png
+  (macOS: the terminal needs Screen Recording permission; 86Box ignores SIGTERM, quit it with
+  `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
+  `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
   makes bridge/prompts/NAME.txt the system prompt, with the tools add-on appended); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
@@ -40,4 +45,4 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   The real IBM CGA does NOT wrap its display at the end of its 16 KB (86Box's does): the window must stay inside it.
   A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
 - Code linking mTCP (lib/xtbridge, CLAWDOS.EXE) is GPLv3.
-- Watcom on Windows: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).
+- Watcom: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).

@@ -13,6 +13,7 @@ gets 10.0.2.x via DHCP and reaches the host at 10.0.2.2.
 import argparse
 import glob
 import os
+import shutil
 import subprocess
 import sys
 
@@ -64,12 +65,27 @@ serial1_enabled = 1
 
 
 def find_86box():
-    """Path of the WinGet-installed 86Box.exe (exits if there is none)."""
-    hits = glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'WinGet',
-                                  'Packages', '86Box.86Box_*', '86Box.exe'))
+    """Path of the 86Box executable (exits if there is none)."""
+    if os.name == 'nt':     # winget's install
+        hits = glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'WinGet',
+                                      'Packages', '86Box.86Box_*', '86Box.exe'))
+    else:                   # the Homebrew cask's app bundle on macOS, else PATH
+        hits = [p for p in (os.path.join(d, '86Box.app', 'Contents', 'MacOS', '86Box')
+                            for d in ('/Applications', os.path.expanduser('~/Applications')))
+                if os.path.exists(p)]
+        hits += [p for p in (shutil.which('86Box'), shutil.which('86box')) if p]
     if not hits:
-        sys.exit('run86box: 86Box not found; run scripts/setup-tools.ps1')
+        sys.exit('run86box: 86Box not found; run scripts/setup-tools.py')
     return hits[0]
+
+
+def running():
+    """True if an 86Box is already running."""
+    if os.name == 'nt':
+        out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq 86Box.exe', '/NH'],
+                             capture_output=True, text=True, check=False).stdout
+        return '86Box.exe' in out
+    return subprocess.run(['pgrep', '-x', '86Box'], capture_output=True, check=False).returncode == 0
 
 
 def main():
@@ -84,7 +100,7 @@ def main():
     with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(CFG.format(speed=a.speed, cyl=build.CYLINDERS, image=os.path.abspath(a.image)))
     # 86Box keeps running after this script exits, so it is deliberately not waited for.
-    subprocess.Popen([find_86box(), '-P', vm])  # pylint: disable=consider-using-with
+    subprocess.Popen([find_86box(), '-P', vm], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # pylint: disable=consider-using-with
     print(f'86Box started (VM: {vm})')
 
 

@@ -13,6 +13,7 @@ import argparse
 import fnmatch
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -67,7 +68,7 @@ def find_tool(name, extra_dirs=()):
             return p
     p = shutil.which(name)
     if not p:
-        sys.exit(f'build: cannot find {name}; run scripts/setup-tools.ps1')
+        sys.exit(f'build: cannot find {name}; run scripts/setup-tools.py')
     return p
 
 
@@ -76,8 +77,16 @@ def nasm():
     return find_tool('nasm', [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'bin', 'NASM')])
 
 
-WATCOM_BINS = [os.path.join(WATCOM, d) for d in
-               (['binnt64', 'binnt'] if os.name == 'nt' else ['binl64', 'binl'])]
+def watcom_bin_dirs():
+    """The snapshot's host binary folders for this machine, best first."""
+    if os.name == 'nt':
+        return ['binnt64', 'binnt']
+    if sys.platform == 'darwin':
+        return ['armo64', 'bino64'] if platform.machine() == 'arm64' else ['bino64']
+    return ['arml64'] if platform.machine() in ('aarch64', 'arm64') else ['binl64', 'binl']
+
+
+WATCOM_BINS = [os.path.join(WATCOM, d) for d in watcom_bin_dirs()]
 
 
 def watcom_env():
@@ -122,7 +131,7 @@ def compile_flags(spec, objdir):
     if spec.get('mtcp'):
         cfg = os.path.join(ROOT, spec['mtcp'])
         # mTCP sources do `#include CFG_H`; Watcom can't take a quoted -D value
-        # from the Windows command line, so force-include a header defining it.
+        # from a command line, so force-include a header defining it.
         cfg_h = os.path.join(objdir, 'cfg_h.h')
         with open(cfg_h, 'w', encoding='utf-8') as f:
             f.write(f'#define CFG_H "{os.path.basename(cfg)}"\n')

@@ -22,6 +22,7 @@ import time
 
 import fatimg
 import run86box
+import shot
 import build
 
 IMAGE = os.path.join(build.BUILD, 'xttest.img')
@@ -40,7 +41,13 @@ def read_log(name):
 
 def close_86box(proc):
     """Ask 86Box to quit, killing it if it won't."""
-    subprocess.run(['taskkill', '/PID', str(proc.pid)], check=False, capture_output=True)
+    if os.name == 'nt':     # taskkill without /F asks the window to close
+        subprocess.run(['taskkill', '/PID', str(proc.pid)], check=False, capture_output=True)
+    elif sys.platform == 'darwin':    # 86Box ignores SIGTERM there, but takes a Quit Apple Event
+        subprocess.run(['osascript', '-e', 'tell application id "net.86Box.86Box" to quit'],
+                       check=False, capture_output=True)
+    else:
+        proc.terminate()
     try:
         proc.wait(20)
     except subprocess.TimeoutExpired:
@@ -63,17 +70,14 @@ def main():
     shutil.copyfile(build.build_image(os.path.abspath(a.test)), IMAGE)
     build.build_image()  # leave a clean CLAWDOS.IMG behind
 
-    running = subprocess.run(['powershell', '-NoProfile', '-Command',
-                              'Get-Process 86Box -ErrorAction SilentlyContinue'],
-                             capture_output=True, text=True, check=False).stdout.strip()
-    if running:
+    if run86box.running():
         sys.exit('xttest: 86Box is already running; close it first')
     vm = os.path.join(build.BUILD, '86box')
     os.makedirs(vm, exist_ok=True)
     with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(run86box.CFG.format(speed=4772728, cyl=build.CYLINDERS, image=IMAGE))
     # Not a context manager: 86Box is closed by close_86box() once the log has the marker.
-    proc = subprocess.Popen([run86box.find_86box(), '-P', vm])  # pylint: disable=consider-using-with
+    proc = subprocess.Popen([run86box.find_86box(), '-P', vm], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # pylint: disable=consider-using-with
 
     started = time.time()
     log = None
@@ -83,8 +87,7 @@ def main():
         if log and a.done in log:
             break
     elapsed = int(time.time() - started)
-    subprocess.run(['powershell', '-NoProfile', '-File', os.path.join(build.ROOT, 'scripts', 'winshot.ps1')],
-                   check=False, capture_output=True)
+    shot.screenshot()
     close_86box(proc)
     log = read_log(a.log) or log
     print(log if log is not None else f'(no {a.log} on the image)')

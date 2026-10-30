@@ -1,4 +1,4 @@
-# Downloaded/extracted toolchains (recreate with scripts/setup-tools.ps1)
+# Downloaded/extracted toolchains (recreate with scripts/setup-tools.py)
 /tools/
 # Build outputs
 /build/
@@ -19,3 +19,5 @@ __pycache__/
 /bridge/*.log*
 # Conversation logs (JSONL, bridge/convlog.py)
 /bridge/logs/
+# Python virtualenv for the bridge (pip install -r bridge/requirements.txt)
+/.venv/

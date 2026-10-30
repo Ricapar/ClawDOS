@@ -1,5 +1,7 @@
 {
   "include": ["scripts", "bridge", "tests"],
-  "exclude": ["tools", "build", "external", "**/__pycache__"],
+  "exclude": ["tools", "build", "external", ".venv", "**/__pycache__"],
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": ["scripts", "bridge"]
 }

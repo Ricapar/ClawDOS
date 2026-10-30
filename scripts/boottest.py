@@ -37,12 +37,12 @@ TEST_BRIDGE_PORT = 18023
 
 def dosbox():
     """Path of the DOSBox-X executable (exits if there is none)."""
-    # Prefer the portable MinGW build from setup-tools.ps1: it has SLiRP networking.
+    # Prefer the portable MinGW build from setup-tools.py: it has SLiRP networking.
     for p in (os.path.join(build.ROOT, 'tools', 'dosbox-x', 'mingw-build', 'mingw', 'dosbox-x.exe'),
               shutil.which('dosbox-x'), r'C:\DOSBox-X\dosbox-x.exe'):
         if p and os.path.exists(p):
             return p
-    sys.exit('dosbox-x not found; run scripts/setup-tools.ps1')
+    sys.exit('dosbox-x not found; run scripts/setup-tools.py')
 
 
 def read_log(path):
