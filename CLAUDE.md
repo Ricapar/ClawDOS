@@ -23,7 +23,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
   makes bridge/prompts/NAME.txt the system prompt, with the tools add-on appended); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
-  Tools: schemas in bridge/tools.py, executors dispatched by src/claude/tools.cpp; mock `!tool NAME k=v` calls one,
+  Tools: schemas in bridge/tools.py, executors dispatched by src/clawdos/tools.cpp; mock `!tool NAME k=v` calls one,
   `!tooltour` all. CLAUDE `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.
   `--replay LOG` plays a logged session back to the XT (bridge/replay.py); CLAUDE `-noscroll` turns off
   hardware scrolling.

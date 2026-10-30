@@ -34,7 +34,7 @@ class XTBridge {
     static void localAddress(char *buf);
 
     /* mTCP's running totals, for working out what the network did when a
-       link dies (see claude.cpp's linkLost). */
+       link dies (see clawdos.cpp's linkLost). */
     struct Counters {
         uint32_t sent, received, retransmitted, sendErrors, dropped;
     };

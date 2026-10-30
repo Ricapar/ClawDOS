@@ -46,11 +46,11 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
-    'clawdos.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
+    'clawdos.exe': {'sources': ['src/clawdos/clawdos.cpp', 'src/clawdos/tools.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c'],
-                   'model': 'l', 'mtcp': 'src/claude/claude.cfg'},
+                   'model': 'l', 'mtcp': 'src/clawdos/clawdos.cfg'},
     'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c'],
                     'model': 'l'},

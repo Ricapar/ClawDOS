@@ -144,7 +144,7 @@ words ("file not found", "access denied", "disk full").
   - Executors fill a 4 KB result buffer and return a status plus a short
     summary string.
 - Code layout:
-  - `src/claude/tools.cpp` holds the dispatch, display and permission logic.
+  - `src/clawdos/tools.cpp` holds the dispatch, display and permission logic.
   - Executors live in `lib/`:
     - `dosfs` for the file tools
     - `sysinfo`
