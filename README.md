@@ -1,43 +1,157 @@
-# ClawDOS: Claude on the IBM PC XT
+<h1 align="center">ClawDOS</h1>
 
-DOS software that connects a real IBM 5160 (8088 @ 4.77 MHz, 640K, CGA,
-PicoMEM WiFi) to the modern world. First app: **CLAWDOS.EXE** (typing the old name, `CLAUDE`, still starts it), a Claude chat
-client that runs on the XT.
+<p align="center"><b>Claude, running on a 1983 IBM PC XT.</b><br>
+An 8088 at 4.77 MHz, 640 KB of RAM and a CGA display, chatting with a modern AI over WiFi.</p>
+
+<p align="center"><img src="docs/images/clawdos-chat.png" alt="ClawDOS chat screen on an emulated IBM PC XT: a welcome panel with the Clawd mascot, a question and Claude's streamed reply" width="646"></p>
+
+<p align="center"><sub>ClawDOS on an emulated IBM 5160 (86Box: 8088, CGA), talking to the bridge's offline mock backend.</sub></p>
+
+ClawDOS is a chat client and a small DOS software foundation for a real IBM
+PC XT. It looks and feels like [Claude Code](https://claude.com/claude-code):
+a welcome panel, the conversation scrolling above an input box, a spinner
+while Claude thinks. Claude can also look around the XT, read and write its
+files, compile programs on it and play music on its PC speaker.
+
+The XT only speaks plain TCP. A small Python **bridge** on a modern machine
+handles TLS, the API key and the model, so the XT side stays tiny and fast.
 
 ```
- IBM XT  CLAWDOS.EXE ──TCP (PicoMEM WiFi)──> bridge/xtbridge.py ──HTTPS──> Claude API
+ IBM XT                                  PC / Raspberry Pi                     Internet
+ CLAWDOS.EXE ──TCP (PicoMEM WiFi)──>  bridge/xtbridge.py  ──HTTPS──>  Claude API (or OpenAI-compatible)
 ```
 
-## Quick start
+## Features
 
-1. **Tools** (once): `.\scripts\setup-tools.ps1`
-2. **Build** the disk image, telling it where the bridge will run:
-   `python scripts/build.py --bridge 172.16.0.100:8023` → `build\CLAWDOS.IMG`
-   (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAWDOS_BRIDGE`)
-3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
-   `ANTHROPIC_API_KEY` (in the environment or a `.env` file in the repo root, or
-   `ant auth login`), then `python bridge/xtbridge.py`.
-   Other providers: `--provider openrouter`, `zai`, `openai` or `ollama` (keys in
-   `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`); see "Other models" below.
-   No API key yet? `--mock` runs an offline stand-in for Claude (see below). The XT connects in on TCP port 8023,
-   so allow it through the firewall (admin PowerShell):
-   `New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow`
-4. **Real XT**: copy `CLAWDOS.IMG` into the `HDD` folder on the PicoMEM's microSD,
-   pick it as HDD0 in the PicoMEM BIOS menu (Disk), make sure NE2000 is enabled
-   (Other menu), and boot. Networking comes up automatically; type `CLAUDE`.
-5. **Emulator**: `python scripts/run86box.py` boots the same image on an
-   emulated XT (8088, CGA, XTIDE, NE1000 with NAT networking).
+**Chat**
 
-### System prompts
+- Streaming replies with word wrap and up to 80 columns of CP437 text, drawn on
+  the CGA without snow.
+- Hardware scrolling by moving the CGA's start address: scrollback (PgUp/PgDn)
+  stays smooth on an 8088.
+- Claude Code-style interface: welcome panel, pinned input box, spinner, status
+  footer. Type ahead while Claude replies and your message is queued.
+- Input editing with history recall, Esc to stop a reply, F2 for a new chat.
+- Survives a lost link: it reconnects and resumes the conversation.
+- Sets the XT's clock from the bridge on connect.
 
-The system prompt comes from a file: `bridge/prompts/NAME.txt`, chosen with
-`--prompt NAME` (default: `default.txt`). The bridge appends its add-ons after
-it: how the XT's tools work, and the index of the XT's memories. Since
-the file is the whole prompt, it must tell the model about the screen (plain
-text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
-becomes the assistant's name. Files are re-read at the start of every
-conversation, so an edit applies from the next chat (F2 on the XT) without
-restarting the bridge.
+**Claude can use the XT**
+
+- Reads and edits files, lists directories, searches text, runs DOS commands,
+  peeks and pokes memory and I/O ports.
+- Plays GW-BASIC `PLAY` tunes on the PC speaker and draws coloured CP437 text art.
+- **Safe mode** is on by default: anything that changes files, memory or ports
+  asks `Allow ...? (y/n)` first. F3 toggles it.
+- **Memories**: Claude keeps its own notes on the XT's disk, and the list is put
+  in front of it at the start of every conversation.
+
+**Programs on the XT itself**
+
+- The disk image carries assemblers (TINYASM, WASM, JWasm), Bruce's C, GW-BASIC
+  and, if you supply your own floppy images, Turbo C 2.0. Claude is told about
+  them and can write, compile and run programs on the machine.
+
+**Any model**
+
+- Anthropic's API by default; OpenRouter, Z.ai, OpenAI, Ollama, LM Studio and
+  other OpenAI-compatible providers work too, and `/model` switches mid-chat.
+- An offline `--mock` backend lets you try everything without an API key.
+
+**Built to be tinkered with**
+
+- A FreeDOS 1.4 boot image built from scratch by one command (`scripts/build.py`).
+- Reusable DOS libraries in `lib/` (CGA screen, text console, bridge client on
+  mTCP). 8086 instructions only, so it runs on a real 8088.
+- Tested headless in DOSBox-X and on an accurate XT in 86Box.
+
+## What you need
+
+| | |
+|---|---|
+| **To try it** | A Windows PC with Python 3. Everything runs in an emulator. |
+| **For real hardware** | An IBM PC/XT (or compatible) with CGA and a PicoMEM card: it provides the disk (an image on a microSD card) and WiFi (NE2000). |
+| **For the AI** | An API key (Anthropic by default), or run the bridge with `--mock` or against a local Ollama. |
+
+## Run it locally (emulator)
+
+1. **Fetch the tools** (once): `.\scripts\setup-tools.ps1`. This downloads Open
+   Watcom, NASM, DOSBox-X, FreeDOS, mTCP and more into `tools/`, and installs
+   86Box with winget.
+2. **Build** the disk image: `python scripts/build.py` → `build\CLAWDOS.IMG`.
+3. **Start the bridge** in one terminal:
+   ```
+   pip install -r bridge/requirements.txt
+   python bridge/xtbridge.py --mock
+   ```
+   `--mock` answers like Claude would, offline. For the real thing set
+   `ANTHROPIC_API_KEY` (in the environment, or in a `.env` file in the repo
+   root, or run `ant auth login`) and drop `--mock`.
+4. **Boot an emulated XT** in another: `python scripts/run86box.py` (8088,
+   640K, CGA, with an NE1000 card and NAT networking). It boots, brings up the
+   network and shows the `C:\>` prompt.
+5. **Type `CLAWDOS`** (the old name, `CLAUDE`, still works). In the emulator the
+   bridge is the host machine, `10.0.2.2:8023`, which the image is built to use.
+
+Prefer DOSBox-X? `python scripts/rundosbox.py` boots the same image with
+networking. It is faster but less exact (it emulates an 80186).
+
+## Run it on a real XT
+
+1. **Build the image** with the address of the PC that will run the bridge:
+   ```
+   python scripts/build.py --bridge 172.16.0.100:8023
+   ```
+   The address is remembered. On the XT it lives in `C:\NET\MTCP.CFG` as
+   `CLAWDOS_BRIDGE`.
+2. **Run the bridge** on that PC (or a Raspberry Pi) as above, without `--mock`
+   for the real thing. The XT connects in on TCP port 8023, so allow it
+   through the firewall (admin PowerShell):
+   ```
+   New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow
+   ```
+3. **Copy `CLAWDOS.IMG`** into the `HDD` folder on the PicoMEM's microSD card.
+4. **Configure the PicoMEM**: in its BIOS menu pick the image as HDD0 (Disk) and
+   make sure NE2000 is enabled (Other). The card's WiFi settings are its own;
+   see the PicoMEM documentation.
+5. **Boot the XT.** Networking comes up automatically (type `NETUP` to retry),
+   then type `CLAWDOS`.
+
+### Using it
+
+Enter sends. Esc stops a reply or clears the input. Arrows, Home, End and Del
+edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
+chat, F3 safe mode, F10 quit. `CLAWDOS host:port` overrides the bridge address;
+`-m text` sends a message at startup and `-i text` pre-fills the input box.
+Type `/model` to list model providers and switch.
+
+## Reference
+
+### Tools on the XT
+
+The bridge offers the model a fixed set of tools; CLAWDOS.EXE runs them and
+shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
+
+| Tool | What it does |
+|---|---|
+| `sysinfo`, `dir`, `read`, `peek` | Look at the system, directories, files (text or hex) and memory |
+| `search` | Find text in files, with line numbers (much faster than running FIND) |
+| `write`, `edit`, `delete`, `mkdir`, `rename` | Change files; `edit` replaces an exact piece of a text file instead of rewriting it |
+| `run` | Run DOS commands on a plain DOS screen and read back what they printed: one per line, stopping at the first that fails (FreeCOM has no `&&`) |
+| `poke`, `port` | Write memory, read or write I/O ports |
+| `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
+| `textart` | Print coloured CP437 text art into the chat |
+| `memory_list`, `memory_read`, `memory_write` | Claude's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
+
+**Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
+that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
+playing music and memories never ask. `-unsafe` starts with it off, and `-q`
+quits once the `-m` message is answered (both for unattended tests). Esc
+during a tool stops the reply. Programs started by `run` can't use the network
+or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
+
+With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
+`!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and
+`!tooltour` exercises every tool.
 
 ### Programming on the XT
 
@@ -72,15 +186,30 @@ a memory in full when it's relevant. The memory tools never ask in safe mode.
 Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or ask Claude to (that uses
 `delete`, which does ask). The mock and replay backends don't list memories.
 
-### Logs
+### Other models
 
-The bridge keeps two logs, both gitignored:
+The bridge isn't tied to Claude. Besides Anthropic's API it speaks the
+OpenAI-compatible chat API that OpenRouter, Z.ai, OpenAI, Ollama, LM Studio and
+most others offer, so nothing changes on the XT. Built-in providers:
+`anthropic` (default), `openrouter`, `zai`, `openai`, `ollama`, `mock`
+(keys in `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`).
+`--provider NAME --model MODEL` picks where new chats start. On the XT, type
+`/model` to list providers and `/model openrouter:z-ai/glm-4.6` (or
+`/model zai`, or just `/model some-model` on the current provider) to switch
+mid-conversation; the history carries over. To add or change providers, copy
+`bridge/providers.example.toml` to `bridge/providers.toml` (format in
+`bridge/providers.py`). API keys only ever come from environment variables.
 
-- `bridge/xtbridge.log`: a debug log with every protocol line (rotating; `--log FILE`).
-- `bridge/logs/YYYY-MM-DD/*.jsonl`: one file per XT connection, one JSON event per
-  line: what you asked, Claude's replies, tool calls and results, and each API
-  call's model, stop reason and token usage (`--convlog DIR`, `-` for none). Load
-  it with `jq`, pandas or a few lines of Python.
+### System prompts
+
+The system prompt comes from a file: `bridge/prompts/NAME.txt`, chosen with
+`--prompt NAME` (default: `default.txt`). The bridge appends its add-ons after
+it: how the XT's tools work, and the index of the XT's memories. Since
+the file is the whole prompt, it must tell the model about the screen (plain
+text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
+becomes the assistant's name. Files are re-read at the start of every
+conversation, so an edit applies from the next chat (F2 on the XT) without
+restarting the bridge.
 
 ### Testing without an API key
 
@@ -92,66 +221,30 @@ line), `!cp437` (character set), `!slow` and `!stall` (try Esc), and `!error`,
 `!refuse`, `!cutoff`, `!drop` (failure modes). `--speed 3` makes it faster.
 `python bridge/test_bridge.py` runs the protocol tests against it.
 
-### Other models
+### Logs
 
-The bridge isn't tied to Claude. Besides Anthropic's API it speaks the
-OpenAI-compatible chat API that OpenRouter, Z.ai, OpenAI, Ollama, LM Studio and
-most others offer, so nothing changes on the XT. Built-in providers:
-`anthropic` (default), `openrouter`, `zai`, `openai`, `ollama`, `mock`.
-`--provider NAME --model MODEL` picks where new chats start. On the XT, type
-`/model` to list providers and `/model openrouter:z-ai/glm-4.6` (or
-`/model zai`, or just `/model some-model` on the current provider) to switch
-mid-conversation; the history carries over. To add or change providers, copy
-`bridge/providers.example.toml` to `bridge/providers.toml` (format in
-`bridge/providers.py`). API keys only ever come from environment variables.
+The bridge keeps two logs, both gitignored:
 
-CLAUDE looks like Claude Code: a welcome panel with Clawd, the conversation
-scrolling above an input box pinned to the bottom, and a spinner while Claude
-works. Enter sends (typing ahead while Claude replies queues the message), Esc
-stops a reply or clears the input, arrows/Home/End/Del edit, Up/Down recall
-earlier messages, PgUp/PgDn scroll back, F1 help, F2 new chat, F10 quits.
-`CLAUDE host:port` overrides the bridge address; `-m text` sends a message at
-startup and `-i text` pre-fills the input box (handy for hands-free tests).
+- `bridge/xtbridge.log`: a debug log with every protocol line (rotating; `--log FILE`).
+- `bridge/logs/YYYY-MM-DD/*.jsonl`: one file per XT connection, one JSON event per
+  line: what you asked, Claude's replies, tool calls and results, and each API
+  call's model, stop reason and token usage (`--convlog DIR`, `-` for none). Load
+  it with `jq`, pandas or a few lines of Python.
 
-### Tools on the XT
-
-Claude can also act on the machine it's running on. The bridge offers the model
-a fixed set of tools; CLAWDOS.EXE runs them and shows each call in the
-transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
-
-| Tool | What it does |
-|---|---|
-| `sysinfo`, `dir`, `read`, `peek` | Look at the system, directories, files (text or hex) and memory |
-| `search` | Find text in files, with line numbers (much faster than running FIND) |
-| `write`, `edit`, `delete`, `mkdir`, `rename` | Change files; `edit` replaces an exact piece of a text file instead of rewriting it |
-| `run` | Run DOS commands on a plain DOS screen and read back what they printed: one per line, stopping at the first that fails (FreeCOM has no `&&`) |
-| `poke`, `port` | Write memory, read or write I/O ports |
-| `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
-| `textart` | Print coloured CP437 text art into the chat |
-| `memory_list`, `memory_read`, `memory_write` | Claude's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
-
-**Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
-that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
-playing music and memories never ask. `-unsafe` starts with it off, and `-q`
-quits once the `-m` message is answered (both for unattended tests). Esc
-during a tool stops the reply. Programs started by `run` can't use the network
-or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
-
-With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
-`!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and
-`!tooltour` exercises every tool.
-
-## Layout
+## Project layout
 
 | Path | What |
 |---|---|
 | `src/clawdos/` | CLAWDOS.EXE |
+| `src/alias/` | CLAUDE.COM, which starts CLAWDOS.EXE under its old name |
 | `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
 | `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |
 | `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |
 | `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers, clangd shims for the Watcom dialect (`clangd/`) |
-| `docs/` | Roadmap and protocol |
+| `docs/` | [Roadmap](docs/ROADMAP.md), [bridge protocol](docs/PROTOCOL.md), research and design notes |
+
+## License
 
 Programs linking mTCP (CLAWDOS.EXE, anything using `lib/xtbridge`) are GPLv3.
