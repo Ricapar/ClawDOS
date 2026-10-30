@@ -13,6 +13,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,10 @@ import fatimg
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, 'tools')
 BUILD = os.path.join(ROOT, 'build')
+# The near data segment (statics, string literals of the C modules, the stack) is
+# addressed with 16-bit offsets, so it must stay under 64 KB; fail before it gets
+# close enough for the linker to be the one to say so.
+DGROUP_BUDGET = 56 * 1024
 EXTERNAL = os.path.join(ROOT, 'external')   # the user's own disk images (gitignored)
 WATCOM = os.path.join(TOOLS, 'openwatcom')
 
@@ -109,8 +114,10 @@ def build_boot():
 
 def compile_flags(spec, objdir):
     """(compiler flags, extra sources) for an app: the mTCP library and config if it uses TCP/IP."""
-    flags = ['-q', '-0', f'-m{spec.get("model", "s")}', '-bt=dos', '-os', '-s', '-zp2',
-             '-i=' + os.path.join(ROOT, 'lib')]
+    model = spec.get('model', 's')
+    flags = ['-q', '-0', f'-m{model}', '-bt=dos', '-os', '-s', '-zp2', '-i=' + os.path.join(ROOT, 'lib')]
+    if model in 'clh':
+        flags.append('-zc')     # string literals in the code segment, out of DGROUP (data pointers are far)
     extra = []
     if spec.get('mtcp'):
         cfg = os.path.join(ROOT, spec['mtcp'])
@@ -146,6 +153,25 @@ def compile_sources(sources, spec, flags, objdir, env):
     return objs
 
 
+def map_sizes(text):
+    """(memory size, DGROUP size) in bytes from a wlink map; None where the map lacks it."""
+    mem = re.search(r'^Memory size:\s+([0-9A-Fa-f]+)', text, re.M)
+    dgroup = re.search(r'^DGROUP\s+[0-9A-Fa-f]+:[0-9A-Fa-f]+\s+([0-9A-Fa-f]+)', text, re.M)
+    return (int(mem.group(1), 16) if mem else None, int(dgroup.group(1), 16) if dgroup else None)
+
+
+def report_sizes(name, mapfile):
+    """Print the program's footprint from its link map; fail past the DGROUP budget."""
+    with open(mapfile, encoding='utf-8', errors='replace') as f:
+        mem, dgroup = map_sizes(f.read())
+    line = f'     memory {mem:,} bytes' if mem else '     (no Memory size in the map)'
+    if dgroup:
+        line += f', DGROUP {dgroup:,} of {DGROUP_BUDGET:,}'
+    print(line)
+    if dgroup and dgroup > DGROUP_BUDGET:
+        sys.exit(f'build: {name}: DGROUP is {dgroup:,} bytes, over the {DGROUP_BUDGET:,} budget')
+
+
 def link_app(name, objs, objdir, env):
     """Link the object files into build/<name> with a wlink command file."""
     lnk = os.path.join(objdir, 'link.lnk')
@@ -155,6 +181,7 @@ def link_app(name, objs, objdir, env):
         f.write(f'name {os.path.join(BUILD, name)}\n')
         f.writelines(f'file {o}\n' for o in objs)
     run([find_tool('wlink', WATCOM_BINS), f'@{lnk}'], env=env)
+    report_sizes(name, mapfile)
 
 
 def build_app(name, spec, env):
