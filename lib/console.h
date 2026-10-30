@@ -1,4 +1,4 @@
-/* Claude-XT console: a scrolling, word-wrapping text stream on top of screen.h.
+/* ClawDOS console: a scrolling, word-wrapping text stream on top of screen.h.
  * Text is written at the bottom of the scrolling area (above any footer, see
  * scr_footer) like a terminal; lines that fill up wrap at the last space.
  * Margins indent wrapped text, e.g. to hang it under a bullet. A mark lets an

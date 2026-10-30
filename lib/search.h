@@ -1,4 +1,4 @@
-/* Claude-XT search tool: find a piece of text in files, with line numbers,
+/* ClawDOS search tool: find a piece of text in files, with line numbers,
  * without starting a program (FIND took 10-79 s a call on the XT). */
 #ifndef CXT_SEARCH_H
 #define CXT_SEARCH_H

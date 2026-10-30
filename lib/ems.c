@@ -1,4 +1,4 @@
-/* Claude-XT EMS: see ems.h. LIM EMS 3.2 calls through INT 67h. */
+/* ClawDOS EMS: see ems.h. LIM EMS 3.2 calls through INT 67h. */
 
 #include <stdlib.h>
 #include <string.h>

@@ -4,7 +4,7 @@ REM BCC wants lowercase .c names; Turbo C tiny model .COM; GW-BASIC output via a
 SET L=C:\DEVTEST.LOG
 C:
 CD \TESTS\DEV
-ECHO Claude-XT development tools test 2 > %L%
+ECHO ClawDOS development tools test 2 > %L%
 
 ECHO === BCC
 ECHO === BCC >> %L%

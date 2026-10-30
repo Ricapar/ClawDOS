@@ -1,4 +1,4 @@
-; Claude-XT master boot record.
+; ClawDOS master boot record.
 ; Relocates itself to 0000:0600, finds the active partition, loads its first
 ; sector to 0000:7C00 using CHS from the partition entry, and jumps to it with
 ; DL = boot drive and DS:SI -> partition entry (the classic IBM/MS-DOS contract).

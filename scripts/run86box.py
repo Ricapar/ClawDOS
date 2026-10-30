@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch 86Box as an IBM PC/XT (8088 @ 4.77 MHz, 640K, CGA) booting build/CLAUDEXT.IMG.
+"""Launch 86Box as an IBM PC/XT (8088 @ 4.77 MHz, 640K, CGA) booting build/CLAWDOS.IMG.
 
   python scripts/run86box.py [--image PATH] [--speed 4772728]
 

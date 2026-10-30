@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Boot the Claude-XT image headless in DOSBox-X with a test batch file and print its log.
+"""Boot the ClawDOS image headless in DOSBox-X with a test batch file and print its log.
 
   python scripts/boottest.py [image/tests/smoke.bat] [--timeout 90]
 
 The test batch file runs as C:\\AUTOTEST.BAT instead of the normal startup. It
 should write its results to COM1 (captured to build/serial.log) and finish with
-ECHO CLAUDEXT-TEST-DONE > COM1; this script waits for that marker, then stops
+ECHO CLAWDOS-TEST-DONE > COM1; this script waits for that marker, then stops
 DOSBox-X. Files written inside the guest are not a reliable result channel: DOS
 may not have flushed them to the image yet. Exit status is 0 only if the marker was seen.
 """
@@ -20,7 +20,7 @@ import time
 
 import build
 
-DONE = b'CLAUDEXT-TEST-DONE'
+DONE = b'CLAWDOS-TEST-DONE'
 
 # Not 8086: on an 8088/8086 the Crynwr NE2000 packet driver moves packet data with
 # 8-bit IN/OUT loops (it only uses REP INSW/OUTSW on a 186+) while keeping the card in
@@ -126,7 +126,7 @@ def main():
     image = build.build_image(os.path.abspath(a.test))
     test_img = os.path.join(build.BUILD, 'test.img')
     shutil.copyfile(image, test_img)
-    build.build_image()  # leave a clean CLAUDEXT.IMG behind
+    build.build_image()  # leave a clean CLAWDOS.IMG behind
 
     cmd = dosbox_command(a.set)
     bridge_log = os.path.join(build.BUILD, 'bridge.log')

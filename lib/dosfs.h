@@ -1,4 +1,4 @@
-/* Claude-XT file tools: dir, read, write, delete, mkdir, rename. */
+/* ClawDOS file tools: dir, read, write, delete, mkdir, rename. */
 #ifndef CXT_DOSFS_H
 #define CXT_DOSFS_H
 

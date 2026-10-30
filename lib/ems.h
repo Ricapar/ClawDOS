@@ -1,4 +1,4 @@
-/* Claude-XT EMS: one 16 KB page of LIM expanded memory (PicoMEM's PMEMM.EXE
+/* ClawDOS EMS: one 16 KB page of LIM expanded memory (PicoMEM's PMEMM.EXE
  * provides it on the XT), for parking data outside conventional memory while
  * a program the user or the model runs needs every byte of it.
  */

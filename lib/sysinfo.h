@@ -1,4 +1,4 @@
-/* Claude-XT sysinfo tool: a description of the machine for the model. */
+/* ClawDOS sysinfo tool: a description of the machine for the model. */
 #ifndef CXT_SYSINFO_H
 #define CXT_SYSINFO_H
 

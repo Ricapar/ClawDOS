@@ -1,4 +1,4 @@
-# Claude-XT architecture review (2026-10-28)
+# ClawDOS architecture review (2026-10-28)
 
 Scope: `lib/*`, `src/claude/*`, `tests/unit/cxtunit.c`, `scripts/*.py`, `bridge/*.py`, the docs, and `build/claude.map` as built on 2026-10-28. Every finding below was confirmed by three independent verifiers against the sources, the objects (`wdis`) and the map; their corrections are folded in. Severity is the verifiers' significance, not the original reviewer's. Finding ids (F*, C*) key into the appendix.
 
@@ -35,7 +35,7 @@ Three commits since the review. The tables below describe the code as reviewed o
 | Measure | Reviewed | Now | Change |
 |---|---|---|---|
 | Linker memory size | 165,216 | 139,584 | -25,632 |
-| CLAUDE.EXE on disk | 129,618 | 104,700 | -24,918 |
+| CLAWDOS.EXE on disk | 129,618 | 104,700 | -24,918 |
 | DGROUP | 50,896 | 43,312 | -7,584 |
 | `_BSS` | 38,340 | 36,190 | -2,150 |
 
@@ -43,7 +43,7 @@ Action plan items 1, 2, 3, 7 and 11 are done; items 4 and 8 are moot (their code
 
 ## 2. The architecture as it is
 
-CLAUDE.EXE is a single DOS program (OpenWatcom, large model, `-0 -os -zp2`, `wlink eliminate, stack=4096`) made of three layers plus the vendored mTCP stack:
+CLAWDOS.EXE is a single DOS program (OpenWatcom, large model, `-0 -os -zp2`, `wlink eliminate, stack=4096`) made of three layers plus the vendored mTCP stack:
 
 1. **Application (C++, `src/claude/`)**: `claude.cpp` holds the main loop, the input box, the transcript rendering, link liveness (PING/PONG, reconnect with RESUME), the `-watch` VRAM checker and the `ui_*` functions declared in `ui.h`. `tools.cpp` parses the bridge's TOOL/ARG/CALL lines, holds the 19-entry `ToolDef` table (name, title, class R/W/H/M, executor), asks the user in safe mode, runs the executor and streams OUT/DONE back. The two files talk only through `tools.h` (down) and `ui.h` (up).
 2. **Library (C, `lib/`)**: `screen.c` (CGA cell writes, retrace sync, CRTC hardware scroll, footer, scrollback, suspend/resume, shadow watch) and `console.c` (word-wrapping stream on top of it) form the display path. `toolapi.c` defines the tool contract (`ToolCtx`, `targ_*` argument store, `tout_*` output, `tool_esc`, `tool_idle`). Executors each sit in their own file: `dosfs.c` (dir/read/write/delete/mkdir/rename), `edit.c`, `search.c`, `shell.c` (run: `spawnl` with an INT 10h teletype hook), `memory.c`, `sysinfo.c`, `sound.c` (+ pure parser `play.c`), `gfx.c` (+ pure `basdraw.c` interpreter and `raster.c` primitives), `ems.c`. `play.c`, `basdraw.c`, `raster.c`, and the `edit_*`/`search_match`/`mem_*` helpers are hardware-free and are linked into `cxtunit.exe` with `toolapi.c`.
@@ -152,7 +152,7 @@ Sum of the listed project arrays is about 35.2 KB, consistent with the project s
 - `saveScreen` (draw/run): 16,384 bytes from `ems_page()` when EMS is present, else `malloc`, freed after the tool.
 - `watchStart` (`-watch`): one 16,384-byte `malloc`, kept for the run.
 - `edit.c load()`: up to 60,000 bytes via `_dos_allocmem`, freed with `_dos_freemem` before returning (bypasses the C heap so a later `run` gets it back).
-- `shell_run`: `spawnl(P_WAIT)` gives the child whatever DOS memory remains; docs/ROADMAP.md measures about 355 KB resident (CLAUDE.EXE + mTCP buffers + heap) leaving about 285 KB for the child. A documented measurement, not derivable from the map.
+- `shell_run`: `spawnl(P_WAIT)` gives the child whatever DOS memory remains; docs/ROADMAP.md measures about 355 KB resident (CLAWDOS.EXE + mTCP buffers + heap) leaving about 285 KB for the child. A documented measurement, not derivable from the map.
 
 ## 3. Readability and organization
 
@@ -256,12 +256,12 @@ About 27 KB resident (7-8% of 355 KB) and about 19.5 KB of DGROUP (50.9 to ~31 K
 - **F15 (medium): a link drop mid-tool tells the model "Interrupted by the user".** `_settle` fills the pending `tool_use` with `stopped` on the `CancelledError` from `Session.run`'s finally; after RESUME the model believes the user cancelled. Esc and link loss both arrive as `CancelledError`, so set a reason flag before cancel and add a `lost` status through `STATUSES`/`model_text`/`_result_status`. The XT half (`sendResult` ignoring `ui_send`) is cosmetic: the user sees "The reply was cut off" at the next poll. [bridge/providers.py:361](../../bridge/providers.py#L361)
 - **F52 (medium): `-q` without `-unsafe` hangs both ends at the first W tool.** `runCall` ignores `unattended`; `ui_ask` blocks in `biosKeyRead` with no `tool_idle`. Return `TS_DENIED` with "nobody to ask (-q)"; poll `biosIsKeyReady()` + `tool_idle()` in `ui_ask`. [src/claude/tools.cpp:427](../../src/claude/tools.cpp#L427)
 - **C2 (medium): `XTBridge::close()` uses mTCP's blocking `close()`**, up to `TCP_CLOSE_TIMEOUT` 15 s when the peer cannot ACK the FIN, exactly the `linkLost()` case. `2000ul` will not compile (`static_assert >= 5000ul`); `closeNonblocking()` plus polling `isCloseDone()`, and with one socket `reconnect()` must wait for it. [lib/xtbridge.cpp:114](../../lib/xtbridge.cpp#L114)
-- Low: MDA/Hercules takes the CGA path and spins forever on 3DAh (C7); the bridge's overlong-line recovery leaves the tail to be parsed as commands, harmless for CLAUDE.EXE (F59); `send()` clamps at 1024 while PROTOCOL.md says 4096, document 1024 and do not return -1 since callers treat non-zero as a dead link (F83); `has_key()` always says yes for anthropic and `client.api_key`/`credentials` can be checked offline (F57); parked chats are purged only on connect (F18).
+- Low: MDA/Hercules takes the CGA path and spins forever on 3DAh (C7); the bridge's overlong-line recovery leaves the tail to be parsed as commands, harmless for CLAWDOS.EXE (F59); `send()` clamps at 1024 while PROTOCOL.md says 4096, document 1024 and do not return -1 since callers treat non-zero as a dead link (F83); `has_key()` always says yes for anthropic and `client.api_key`/`credentials` can be checked offline (F57); parked chats are purged only on connect (F18).
 
 ### Architecture and design (readiness for M6.2-M6.4 and M7)
 
 - **F7 (medium): `shell.c` fuses the capture ISR, buffers, formatting and hold screen.** Verifiers (2/3) temper it: the stub is NASM and re-implements capture regardless, and CLAUDE can load the stub's dump into the same statics and call `putOutput` unchanged. Do the split (formatting over a byte source) as step one of M6.2, not before. [lib/shell.c:36](../../lib/shell.c#L36)
-- **F13 (medium): HELLO/AUTH/RESUME/PING/reconnect live in `claude.cpp`**; `xtbridge.h` says "see claude.cpp's linkLost". M6.2 approach 1 relaunches CLAUDE.EXE itself, which already has the code; only an M7 second app needs the move. A struct-based `lib/xtlink` (GPL like `XTBridge`) when M7 starts; drop.bat/clock.bat cover it. [src/claude/claude.cpp:875](../../src/claude/claude.cpp#L875)
+- **F13 (medium): HELLO/AUTH/RESUME/PING/reconnect live in `claude.cpp`**; `xtbridge.h` says "see claude.cpp's linkLost". M6.2 approach 1 relaunches CLAWDOS.EXE itself, which already has the code; only an M7 second app needs the move. A struct-based `lib/xtlink` (GPL like `XTBridge`) when M7 starts; drop.bat/clock.bat cover it. [src/claude/claude.cpp:875](../../src/claude/claude.cpp#L875)
 - Low: ~41 + 6 loose statics are M6.2's `ResumeState`, define it as M6.2 work (F42); the EMS-or-heap screen park belongs in a `lib/vsave.c`, and `ems_page()`'s `atexit(release)` means approach 1 needs a file variant anyway (F100, with F49); `runCall` string-compares `"run"`/`"write"`/`"edit"`, add `preview`/`details` pointers when M6.4's W tool arrives (F51); the Python/C tool tables agree and the tooltour catches name drift, so only a regex test of the prose limits is needed (F17); `ui.h`'s header cycle is fixed by a comment or a split header, not a vtable, since a stub `ui.cpp` tests the dispatcher (F53); `xtbridge.h`'s C++ costs 11 bytes and the GPL boundary is the EXE either way (F84); adapter type and the hwscroll flag are one variable, so `sysinfo` says EGA/VGA under `-noscroll` (F77).
 
 ### Build and Python tooling
@@ -346,7 +346,7 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F31 | [lib/raster.c:132](../../lib/raster.c#L132) | medium | PAINT tests every pixel twice: FILLABLE calls point() two times per probe — **gone with the draw tool, `1bcfd23`** |
 | F33 | [lib/search.c:28](../../lib/search.c#L28) | medium | Case-insensitive search calls toupper() twice per compared character |
 | F37 | [lib/shell.c:290](../../lib/shell.c#L290) | medium | runOne's 'could not start' message can overrun why[120] — **fixed in `d7d09a4`** |
-| F39 | [scripts/boottest.py:142](../../scripts/boottest.py#L142) | medium | boottest --expect lacks negative assertions and never checks CLAUDE.EXE's exit code |
+| F39 | [scripts/boottest.py:142](../../scripts/boottest.py#L142) | medium | boottest --expect lacks negative assertions and never checks CLAWDOS.EXE's exit code |
 | F40 | [scripts/build.py:112](../../scripts/build.py#L112) | medium | Large model is the only viable choice; DGROUP has ~14.6 KB headroom and no size report — **done in `ea803a4`** |
 | F43 | [src/claude/claude.cpp:125](../../src/claude/claude.cpp#L125) | medium | history[8][901] = 7.2 KB of DGROUP for input recall |
 | F46 | [src/claude/claude.cpp:959](../../src/claude/claude.cpp#L959) | medium | Several sprintf targets are sized to the typical case (offlineNote, drawHint col, lostReport) — **fixed in `d7d09a4`** |

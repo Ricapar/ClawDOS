@@ -1,4 +1,4 @@
-/* Claude-XT tool calls: see toolapi.h. */
+/* ClawDOS tool calls: see toolapi.h. */
 
 #include <stdarg.h>
 #include <stdio.h>

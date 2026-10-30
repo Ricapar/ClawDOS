@@ -1,4 +1,4 @@
-/* CLAUDE.EXE - chat with Claude from an IBM PC XT.
+/* CLAWDOS.EXE - chat with Claude from an IBM PC XT.
  *
  * Connects to an XTBridge (bridge/xtbridge.py) over TCP, sends what you
  * type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
@@ -6,12 +6,12 @@
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
+ *   CLAWDOS [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
  *
- * Without a host, uses CLAUDE_BRIDGE from the mTCP config file (MTCPCFG), and
+ * Without a host, uses CLAWDOS_BRIDGE from the mTCP config file (MTCPCFG), and
  * CLAUDE_TOKEN if the bridge requires one.
  */
 
@@ -455,7 +455,7 @@ static void welcome(void)
             break;
         case 7: rowText(r, R, "This machine", A_ACCENT); break;
         case 8: rowText(r, R, sys, A_TEXT, RW); break;
-        case 9: rowText(r, R, "Claude-XT \xFA FreeDOS \xFA mTCP", A_TEXT, RW); break;
+        case 9: rowText(r, R, "ClawDOS \xFA FreeDOS \xFA mTCP", A_TEXT, RW); break;
         }
         con_line(r.c);
     }
@@ -1032,10 +1032,10 @@ int main(int argc, char *argv[])
         } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("CLAUDE " VERSION " - chat with Claude via an XTBridge\n\n"
-                   "Usage: CLAUDE [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q]\n"
+            printf("CLAWDOS " VERSION " - chat with Claude via an XTBridge\n\n"
+                   "Usage: CLAWDOS [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q]\n"
                    "              [-m message] [-i text]\n\n"
-                   "Without a host, CLAUDE_BRIDGE from the mTCP config file is used.\n"
+                   "Without a host, CLAWDOS_BRIDGE from the mTCP config file is used.\n"
                    "-nosnow  skip CGA retrace waits (faster on clones and EGA/VGA)\n"
                    "-noscroll  scroll by copying text, not by moving the CGA start address\n"
                    "-unsafe  start with safe mode off: tools run without asking\n"
@@ -1053,9 +1053,9 @@ int main(int argc, char *argv[])
     if (XTBridge::startStack())
         return 1;
     tool_idle = XTBridge::service;    /* keep ACKing the bridge during long tools */
-    if (!host[0] && XTBridge::configValue("CLAUDE_BRIDGE", host, sizeof(host)) != 0) {
-        fprintf(stderr, "No bridge given. Use CLAUDE host[:port], or add a line like\n"
-                        "  CLAUDE_BRIDGE 192.168.1.10:8023\n"
+    if (!host[0] && XTBridge::configValue("CLAWDOS_BRIDGE", host, sizeof(host)) != 0) {
+        fprintf(stderr, "No bridge given. Use CLAWDOS host[:port], or add a line like\n"
+                        "  CLAWDOS_BRIDGE 192.168.1.10:8023\n"
                         "to your mTCP config file (%s).\n", getenv("MTCPCFG"));
         XTBridge::stopStack();
         return 1;

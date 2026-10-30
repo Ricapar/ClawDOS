@@ -1,19 +1,19 @@
-# Claude-XT: Claude on the IBM PC XT
+# ClawDOS: Claude on the IBM PC XT
 
 DOS software that connects a real IBM 5160 (8088 @ 4.77 MHz, 640K, CGA,
-PicoMEM WiFi) to the modern world. First app: **CLAUDE.EXE**, a Claude chat
+PicoMEM WiFi) to the modern world. First app: **CLAWDOS.EXE** (typing the old name, `CLAUDE`, still starts it), a Claude chat
 client that runs on the XT.
 
 ```
- IBM XT  CLAUDE.EXE ──TCP (PicoMEM WiFi)──> bridge/xtbridge.py ──HTTPS──> Claude API
+ IBM XT  CLAWDOS.EXE ──TCP (PicoMEM WiFi)──> bridge/xtbridge.py ──HTTPS──> Claude API
 ```
 
 ## Quick start
 
 1. **Tools** (once): `.\scripts\setup-tools.ps1`
 2. **Build** the disk image, telling it where the bridge will run:
-   `python scripts/build.py --bridge 172.16.0.100:8023` → `build\CLAUDEXT.IMG`
-   (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAUDE_BRIDGE`)
+   `python scripts/build.py --bridge 172.16.0.100:8023` → `build\CLAWDOS.IMG`
+   (the address is remembered; on the XT it lives in `C:\NET\MTCP.CFG` as `CLAWDOS_BRIDGE`)
 3. **Bridge** on the PC: `pip install -r bridge/requirements.txt`, set
    `ANTHROPIC_API_KEY` (in the environment or a `.env` file in the repo root, or
    `ant auth login`), then `python bridge/xtbridge.py`.
@@ -22,7 +22,7 @@ client that runs on the XT.
    No API key yet? `--mock` runs an offline stand-in for Claude (see below). The XT connects in on TCP port 8023,
    so allow it through the firewall (admin PowerShell):
    `New-NetFirewallRule -DisplayName XTBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow`
-4. **Real XT**: copy `CLAUDEXT.IMG` into the `HDD` folder on the PicoMEM's microSD,
+4. **Real XT**: copy `CLAWDOS.IMG` into the `HDD` folder on the PicoMEM's microSD,
    pick it as HDD0 in the PicoMEM BIOS menu (Disk), make sure NE2000 is enabled
    (Other menu), and boot. Networking comes up automatically; type `CLAUDE`.
 5. **Emulator**: `python scripts/run86box.py` boots the same image on an
@@ -116,7 +116,7 @@ startup and `-i text` pre-fills the input box (handy for hands-free tests).
 ### Tools on the XT
 
 Claude can also act on the machine it's running on. The bridge offers the model
-a fixed set of tools; CLAUDE.EXE runs them and shows each call in the
+a fixed set of tools; CLAWDOS.EXE runs them and shows each call in the
 transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 
 | Tool | What it does |
@@ -145,7 +145,7 @@ With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 
 | Path | What |
 |---|---|
-| `src/claude/` | CLAUDE.EXE |
+| `src/claude/` | CLAWDOS.EXE |
 | `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
 | `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
@@ -154,4 +154,4 @@ With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 | `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers, clangd shims for the Watcom dialect (`clangd/`) |
 | `docs/` | Roadmap and protocol |
 
-Programs linking mTCP (CLAUDE.EXE, anything using `lib/xtbridge`) are GPLv3.
+Programs linking mTCP (CLAWDOS.EXE, anything using `lib/xtbridge`) are GPLv3.

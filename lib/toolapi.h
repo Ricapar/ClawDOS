@@ -1,4 +1,4 @@
-/* Claude-XT tool calls: what an executor sees. The bridge sends a call's
+/* ClawDOS tool calls: what an executor sees. The bridge sends a call's
  * arguments as strings (targ_append collects them); an executor reads them
  * with targ*, writes its result for the model with tout_*, sets a one-line
  * summary for the transcript, and returns one of the TS_ statuses.

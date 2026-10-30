@@ -59,7 +59,7 @@ SCENARIOS = {
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
 # The tool tour: (tool, args, expected status, text the result must contain).
-# Tools CLAUDE.EXE doesn't have yet are expected to fail; flip them as they land.
+# Tools CLAWDOS.EXE doesn't have yet are expected to fail; flip them as they land.
 TOUR_EXPECT = {}
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
 
@@ -116,7 +116,7 @@ LOREM = (
     "Writing to that memory while the card is drawing the screen causes the "
     "famous CGA snow, which is why careful programs wait for the horizontal or "
     "vertical retrace before touching it. Scrolling by copying 4000 bytes is "
-    "slow on an 8088, so Claude-XT moves the CRTC start address instead and lets "
+    "slow on an 8088, so ClawDOS moves the CRTC start address instead and lets "
     "the 16 KB of video memory act as a ring of scrollback.\n\n"
     "Networking was never part of the original design, but a packet driver, "
     "mTCP, and a PicoMEM card on WiFi make it a small TCP/IP host. The heavy "
@@ -150,7 +150,7 @@ SMALL_TALK = [
      "characters at a time. Send !help to see the test commands."),
     (r'\b(who|what) are you\b',
      "I'm the mock backend of XTBridge. I imitate Claude closely enough "
-     "to test CLAUDE.EXE: replies stream in token-sized pieces after a short "
+     "to test CLAWDOS.EXE: replies stream in token-sized pieces after a short "
      "pause, I remember the conversation, and I can fail in all the ways "
      "the real API can. Start the bridge without --mock to talk to Claude."),
     (r'\b(xt|8088|ibm|cga|pc)\b',
@@ -164,7 +164,7 @@ SMALL_TALK = [
      "You're welcome! This has been a mock conversation, but the real one "
      "will look exactly the same on your screen."),
     (r'\b(bye|goodbye|see you)\b',
-     "Goodbye! Press F10 to leave CLAUDE.EXE."),
+     "Goodbye! Press F10 to leave CLAWDOS.EXE."),
 ]
 
 

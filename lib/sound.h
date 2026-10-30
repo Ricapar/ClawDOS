@@ -1,4 +1,4 @@
-/* Claude-XT sound: PLAY strings (play.h) on the PC speaker. */
+/* ClawDOS sound: PLAY strings (play.h) on the PC speaker. */
 #ifndef CXT_SOUND_H
 #define CXT_SOUND_H
 

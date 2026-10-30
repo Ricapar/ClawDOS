@@ -1,4 +1,4 @@
-/* Claude-XT edit tool: see edit.h. */
+/* ClawDOS edit tool: see edit.h. */
 
 #include <stdio.h>
 #include <string.h>

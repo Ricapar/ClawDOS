@@ -1,4 +1,4 @@
-/* Claude-XT edit tool: replace exact text in a text file, so the model can
+/* ClawDOS edit tool: replace exact text in a text file, so the model can
  * change a few lines without sending the whole file again. The file is held
  * in memory with CRLF line ends folded to LF (written back as they were), and
  * replaced through a temporary file, so a full disk never leaves half of it.

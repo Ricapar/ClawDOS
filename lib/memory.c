@@ -1,4 +1,4 @@
-/* Claude-XT memories: see memory.h. */
+/* ClawDOS memories: see memory.h. */
 
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-/* Claude-XT shell: see shell.h.
+/* ClawDOS shell: see shell.h.
  *
  * Output is captured by hooking INT 10h function 0Eh (teletype). DOS console
  * output (INT 21h functions 02h, 09h, 40h and INT 29h) is printed through it,

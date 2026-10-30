@@ -1,4 +1,4 @@
-/* Claude-XT memories: notes the model keeps across conversations as
+/* ClawDOS memories: notes the model keeps across conversations as
  * C:\MEMORY\NAME.TXT, through memory_list, memory_read and memory_write. The
  * first line of a memory is its summary. These tools never ask the user.
  */

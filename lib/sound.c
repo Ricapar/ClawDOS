@@ -1,4 +1,4 @@
-/* Claude-XT sound: see sound.h.
+/* ClawDOS sound: see sound.h.
  *
  * Tones come from PIT channel 2 gated onto the speaker through port 61h.
  * Timing reads PIT channel 0, which the BIOS runs in mode 3 with a divisor

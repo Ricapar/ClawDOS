@@ -1,6 +1,6 @@
 # Dot-source to set up the build environment:  . .\scripts\env.ps1
 $root = Split-Path -Parent $PSScriptRoot
-$env:CLAUDEXT_ROOT = $root
+$env:CLAWDOS_ROOT = $root
 $env:WATCOM  = "$root\tools\openwatcom"
 $env:INCLUDE = "$env:WATCOM\h"
 $env:EDPATH  = "$env:WATCOM\eddat"

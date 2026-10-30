@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Launch DOSBox-X as a fast stand-in XT (CGA; 80186 CPU, see boottest.CPUTYPE) booting
-build/CLAUDEXT.IMG, with networking.
+build/CLAWDOS.IMG, with networking.
 
   python scripts/rundosbox.py [--image PATH] [--test image/tests/x.bat] [--cycles max]
 
@@ -32,7 +32,7 @@ def main():
         built = build.build_image(os.path.abspath(a.test))
         image = os.path.join(build.BUILD, 'run.img')
         shutil.copyfile(built, image)
-        build.build_image()  # leave a clean CLAUDEXT.IMG behind
+        build.build_image()  # leave a clean CLAWDOS.IMG behind
     # DOSBox-X exits immediately when given an absolute image path, so mount
     # by a path relative to its working directory.
     cwd = os.path.dirname(image)

@@ -45,7 +45,7 @@ BUILTIN = {
                   'api_key_env': 'ANTHROPIC_API_KEY', 'effort': 'low'},
     'openrouter': {'type': 'openai', 'base_url': 'https://openrouter.ai/api/v1',
                    'api_key_env': 'OPENROUTER_API_KEY', 'model': 'anthropic/claude-opus-5.5',
-                   'headers': {'X-Title': 'Claude-XT'}},
+                   'headers': {'X-Title': 'ClawDOS'}},
     'zai': {'type': 'openai', 'name': 'GLM', 'base_url': 'https://api.z.ai/api/paas/v4',
             'api_key_env': 'ZAI_API_KEY', 'model': 'glm-4.6',
             'extra': {'thinking': {'type': 'disabled'}}},   # replies start sooner

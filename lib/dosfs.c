@@ -1,4 +1,4 @@
-/* Claude-XT file tools: see dosfs.h. Thin wrappers over DOS calls that turn
+/* ClawDOS file tools: see dosfs.h. Thin wrappers over DOS calls that turn
  * DOS error codes into words the model can act on. */
 
 #include <stdio.h>

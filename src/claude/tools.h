@@ -1,4 +1,4 @@
-/* CLAUDE.EXE tool calls: the bridge's TOOL/ARG/CALL lines in, OUT/DONE out
+/* CLAWDOS.EXE tool calls: the bridge's TOOL/ARG/CALL lines in, OUT/DONE out
  * (docs/PROTOCOL.md), with safe mode asking before anything changes. */
 #ifndef CXT_TOOLS_H
 #define CXT_TOOLS_H

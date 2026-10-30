@@ -1,4 +1,4 @@
-/* Claude-XT screen: direct 80x25 color text-mode output for CGA (and compatibles).
+/* ClawDOS screen: direct 80x25 color text-mode output for CGA (and compatibles).
  *
  * On a real CGA the whole screen scrolls in hardware by moving the CRTC start
  * address down through the card's 16 KB of video RAM. That makes scrolling

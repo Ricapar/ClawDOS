@@ -1,4 +1,4 @@
-/* Claude-XT tick-counter helpers: see ticks.h. */
+/* ClawDOS tick-counter helpers: see ticks.h. */
 
 #include "ticks.h"
 

@@ -18,7 +18,7 @@ IF ERRORLEVEL 1 GOTO FAIL
 :DHCP
 C:\NET\DHCP.EXE
 :SYNC
-REM Sync the clock while the network stack is still free (before CLAUDE.EXE).
+REM Sync the clock while the network stack is still free (before CLAWDOS.EXE).
 SET TZ=EST5EDT
 C:\NET\SNTP.EXE -set time.nist.gov
 GOTO END

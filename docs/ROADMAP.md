@@ -1,4 +1,4 @@
-# Claude-XT Roadmap
+# ClawDOS Roadmap
 
 A DOS-based foundation for building apps on a real IBM 5160 that bridge to the
 modern world. First flagship demo: a Claude chat client.
@@ -28,7 +28,7 @@ modern world. First flagship demo: a Claude chat client.
 ## Claude chat architecture
 
 ```
- IBM XT (CLAUDE.EXE)  --plain TCP, LAN-->  Bridge (Python, modern PC/Pi)  --HTTPS-->  Claude API
+ IBM XT (CLAWDOS.EXE)  --plain TCP, LAN-->  Bridge (Python, modern PC/Pi)  --HTTPS-->  Claude API
   CGA text UI, input,                       holds API key, TLS, history,
   scrollback, mTCP                          Unicode->CP437, streaming
 ```
@@ -53,14 +53,14 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       Crynwr NE1000/NE2000 at 340h in emulators, then DHCP. Works in 86Box.
 - [x] **M3 - Bridge server**: `bridge/xtbridge.py` (Claude API, streaming,
       refusal fallbacks, CP437) with an offline mock backend (`--mock`) for testing without an API key.
-- [x] **M4 - CLAUDE.EXE**: streaming chat with word wrap, hardware scrolling,
+- [x] **M4 - CLAWDOS.EXE**: streaming chat with word wrap, hardware scrolling,
       scrollback, stop/new-chat. Verified against the mock bridge in 86Box.
-- [x] **M4.5 - Tools**: Claude acts on the XT through CLAUDE.EXE: files, system
+- [x] **M4.5 - Tools**: Claude acts on the XT through CLAWDOS.EXE: files, system
       info, DOS commands, memory and ports, PC speaker music (PLAY), text art;
       safe mode asks before changes (F3). The CGA drawing tool was dropped
       in October 2026: real compilers on the image made it redundant.
       Design in [superpowers/specs/2026-10-21-xt-tools-design.md](superpowers/specs/2026-10-21-xt-tools-design.md).
-- [x] **M5 - Real hardware**: boot CLAUDEXT.IMG from the PicoMEM, PM2000 over
+- [x] **M5 - Real hardware**: boot CLAWDOS.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
 - [ ] **M6 - Building on the XT**: better tools for Claude writing programs on
       the XT itself (Turbo C, assemblers), from what the CGA demo and WarGames
@@ -86,11 +86,11 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
         replace hand-made copies (XCOPY C:\WG C:\WG3 took 43 s), and the code
         can be browsed on the PC.
 - [ ] **M7 - Foundation**: grow `lib/` (input line editor, windows/menus, more
-      bridge services) and a launcher for Claude-XT apps.
+      bridge services) and a launcher for ClawDOS apps.
 
 ## M6.2: full-memory run
 
-**Problem.** CLAUDE.EXE stays resident while the `run` tool's program runs:
+**Problem.** CLAWDOS.EXE stays resident while the `run` tool's program runs:
 about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
 (Stage 1 memory, `dc21363`, already won ~90 KB). On the XT this cost:
 
@@ -112,7 +112,7 @@ screen as it was, and the link restored.
 
 1. **Exit and relaunch through a stub.** A tiny resident launcher (NASM,
    8086, a few KB; e.g. CXT.COM, which the user starts instead of CLAUDE)
-   runs CLAUDE.EXE. For a big run CLAUDE saves its state (session token,
+   runs CLAWDOS.EXE. For a big run CLAUDE saves its state (session token,
    pending tool id, flags like `-unsafe`, the scrollback/screen, the input
    line), shuts mTCP down cleanly (releasing the packet driver) and exits
    with a code that tells the stub to run the command. The stub runs it with

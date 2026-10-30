@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FAT12/FAT16 disk image tool for Claude-XT. Pure Python, no dependencies.
+"""FAT12/FAT16 disk image tool for ClawDOS. Pure Python, no dependencies.
 
 Works on raw floppy images and MBR-partitioned hard disk images.
 
@@ -378,7 +378,7 @@ class Layout(typing.NamedTuple):
 
 def write_bpb(sector, lay, label):
     """Fill in the BIOS parameter block and extended boot record of a boot sector."""
-    struct.pack_into('<8sHBHBHHBHHHII', sector, 3, b'CLAUDEXT', SECTOR, lay.spc, RESERVED, NFATS,
+    struct.pack_into('<8sHBHBHHBHHHII', sector, 3, b'CLAWDOS ', SECTOR, lay.spc, RESERVED, NFATS,
                      lay.root_ents, lay.total if lay.total < 65536 else 0, lay.media, lay.spf, lay.spt,
                      lay.heads, lay.start_lba, lay.total if lay.total >= 65536 else 0)
     volid = int(datetime.datetime.now().timestamp()) & 0xFFFFFFFF
@@ -446,7 +446,7 @@ def fat16_spc(total):
     raise FatError('partition too large for FAT16')
 
 
-def make_hdd(cyl, geometry=(16, 63), mbr=None, vbr=None, label='CLAUDEXT'):
+def make_hdd(cyl, geometry=(16, 63), mbr=None, vbr=None, label='CLAWDOS'):
     """A hard disk image of cyl cylinders (geometry = (heads, sectors per track)) with one FAT16 partition."""
     heads, spt = geometry
     total_secs = cyl * heads * spt
@@ -558,7 +558,7 @@ def build_parser():
     s.add_argument('--spt', type=int, default=63)
     s.add_argument('--mbr')
     s.add_argument('--vbr')
-    s.add_argument('--label', default='CLAUDEXT')
+    s.add_argument('--label', default='CLAWDOS')
     s = sub.add_parser('mkfloppy')
     s.add_argument('img')
     s.add_argument('--kb', type=int, choices=sorted(FLOPPY_PRESETS), required=True)

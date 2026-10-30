@@ -4,7 +4,7 @@ Date: 2026-10-21. Status: approved in brainstorming, awaiting spec review.
 
 ## Goal
 
-Let the model use tools that run on the IBM PC XT itself, through CLAUDE.EXE:
+Let the model use tools that run on the IBM PC XT itself, through CLAWDOS.EXE:
 browse and edit files, inspect the system, run DOS programs, draw CGA
 graphics, play music on the PC speaker, and poke at hardware. The tool set is
 fixed and hard-coded. Success: a request like "draw me a sunset and play a
@@ -134,7 +134,7 @@ words ("file not found", "access denied", "disk full").
     `tool tour: PASS` or `tool tour: FAIL ...`.
   All of them report the results they get back.
 
-## CLAUDE.EXE
+## CLAWDOS.EXE
 
 - New `TOOL` state.
   - Arguments are collected into a 6 KB key/value buffer, unescaped on arrival.
@@ -173,7 +173,7 @@ words ("file not found", "access denied", "disk full").
   - `-unsafe` starts with safe mode off, mainly for unattended autotests.
   - `-q` (unattended) quits after the `-m` message's reply ends, and shortens
     the hold times for `run` and `draw`.
-- CLAUDE.EXE moves from the compact to the large memory model: its code
+- CLAWDOS.EXE moves from the compact to the large memory model: its code
   segment is already about 63.5 KB of the 64 KB the compact model allows.
 - While a tool runs:
   - The spinner shows a tool verb (Reading, Running, Drawing, Playing, ...).
@@ -214,7 +214,7 @@ memory, start address and cursor, so scrollback survives. On EGA/VGA
 
 If the output overflows 4 KB, the first 1 KB and last 3 KB are kept, with an
 `...(N bytes omitted)...` marker between them. During implementation, verify
-how much memory the child gets, and shrink CLAUDE.EXE's allocation if needed.
+how much memory the child gets, and shrink CLAWDOS.EXE's allocation if needed.
 
 **`draw` (`lib/basdraw` parses, `lib/gfx` draws):**
 - Syntax:

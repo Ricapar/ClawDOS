@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build Claude-XT: boot code, DOS apps, and the bootable hard disk image.
+"""Build ClawDOS: boot code, DOS apps, and the bootable hard disk image.
 
-  python scripts/build.py              build everything -> build/CLAUDEXT.IMG
+  python scripts/build.py              build everything -> build/CLAWDOS.IMG
   python scripts/build.py --bridge 192.168.1.50:8023
                                        set the bridge address (remembered)
   python scripts/build.py --autotest image/tests/smoke.bat
@@ -34,7 +34,7 @@ WATCOM = os.path.join(TOOLS, 'openwatcom')
 # PicoMEM presents hard disk images as 16 heads x 63 sectors. 65 cylinders keeps
 # the partition just under 32 MB (type 04 FAT16), readable by every DOS >= 3.0.
 CYLINDERS = 65
-IMAGE_NAME = 'CLAUDEXT.IMG'
+IMAGE_NAME = 'CLAWDOS.IMG'
 
 MTCP_SRC = os.path.join(TOOLS, 'mtcp-src', 'mTCP-src_2026-10-10')
 MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.cpp', 'udp.cpp',
@@ -46,7 +46,7 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
-    'claude.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
+    'clawdos.exe': {'sources': ['src/claude/claude.cpp', 'src/claude/tools.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c'],
@@ -110,6 +110,9 @@ def build_boot():
     fd = os.path.join(ROOT, 'src', 'boot', 'freedos')
     run([nasm(), '-dISFAT16', '--before', 'cpu 8086', '-i', fd + os.sep,
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
+    # CLAUDE.COM, the old name of CLAWDOS.EXE (see src/alias/claude.asm)
+    run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'claude.com'),
+         os.path.join(ROOT, 'src', 'alias', 'claude.asm')])
 
 
 def compile_flags(spec, objdir):
@@ -364,12 +367,12 @@ def build_image(autotest=None):
         mbr = f.read()
     with open(os.path.join(BUILD, 'fat16.bin'), 'rb') as f:
         vbr = f.read()
-    img = fatimg.make_hdd(CYLINDERS, mbr=mbr, vbr=vbr, label='CLAUDEXT')
+    img = fatimg.make_hdd(CYLINDERS, mbr=mbr, vbr=vbr, label='CLAWDOS')
     fs = fatimg.open_fs(img)
     fill_image(fs, manifest_entries(autotest))
 
-    # Point CLAUDE.EXE (and future bridge apps) at the bridge.
-    cfg = fs.read_file('NET/MTCP.CFG') + f'CLAUDE_BRIDGE {settings()["bridge"]}\r\n'.encode()
+    # Point CLAWDOS.EXE (and future bridge apps) at the bridge.
+    cfg = fs.read_file('NET/MTCP.CFG') + f'CLAWDOS_BRIDGE {settings()["bridge"]}\r\n'.encode()
     fs.write_file('NET/MTCP.CFG', cfg)
 
     out = os.path.join(BUILD, IMAGE_NAME)

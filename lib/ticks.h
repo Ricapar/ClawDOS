@@ -1,4 +1,4 @@
-/* Claude-XT: the BIOS tick counter at 0040:006C, 18.2 ticks a second.
+/* ClawDOS: the BIOS tick counter at 0040:006C, 18.2 ticks a second.
  * It is reset to 0 at midnight (after TICKS_PER_DAY ticks), so two
  * readings must never be subtracted directly: use ticks_elapsed(). Time-outs
  * are then "ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(n)".

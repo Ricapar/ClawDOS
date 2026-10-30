@@ -1,4 +1,4 @@
-/* Claude-XT bridge client: talks the XTBridge line protocol (docs/PROTOCOL.md)
+/* ClawDOS bridge client: talks the XTBridge line protocol (docs/PROTOCOL.md)
  * over one mTCP socket. Built on mTCP, so programs using it are GPLv3.
  *
  * Typical use:
@@ -40,7 +40,7 @@ class XTBridge {
     };
     static void counters(Counters *c);
 
-    /* Look up an app setting (e.g. "CLAUDE_BRIDGE") in the mTCP config file. */
+    /* Look up an app setting (e.g. "CLAWDOS_BRIDGE") in the mTCP config file. */
     static int8_t configValue(const char *key, char *val, uint16_t len);
 
     XTBridge();

@@ -1,4 +1,4 @@
-# Claude-XT disk image manifest: DEST  SOURCE
+# ClawDOS disk image manifest: DEST  SOURCE
 # Sources:
 #   repo:PATH            file in this repository
 #   build:PATH           file in build/
@@ -41,8 +41,9 @@ NET/                fdpkg:NET/CRYNWR.ZIP!DRIVERS/CRYNWR/NE1000.COM
 PICOMEM/            picomem:*.COM
 PICOMEM/            picomem:*.EXE
 
-CLAUDEXT/               build:hello.exe
-CLAUDEXT/               build:claude.exe
+CLAWDOS/        build:hello.exe
+CLAWDOS/        build:clawdos.exe
+CLAWDOS/        build:claude.com
 
 TESTS/                  build:cxtunit.exe
 TESTS/DEV/              repo:image/tests/dev/*

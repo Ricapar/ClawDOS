@@ -1,4 +1,4 @@
-/* Claude-XT bridge client: see xtbridge.h. */
+/* ClawDOS bridge client: see xtbridge.h. */
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-/* Claude-XT PLAY: see play.h. */
+/* ClawDOS PLAY: see play.h. */
 
 #include <stdio.h>
 #include <string.h>

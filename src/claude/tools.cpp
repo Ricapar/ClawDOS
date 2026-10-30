@@ -1,4 +1,4 @@
-/* CLAUDE.EXE tool calls: see tools.h.
+/* CLAWDOS.EXE tool calls: see tools.h.
  *
  * The bridge streams TOOL <id> <name>, ARG <key> <chunk>... and CALL. On CALL
  * we show the call in the transcript, ask first if it's a W (write) tool and

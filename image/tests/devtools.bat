@@ -5,7 +5,7 @@ REM step into C:\DEVTEST.LOG. Riskiest last: if a tool hangs, the log shows wher
 SET L=C:\DEVTEST.LOG
 C:
 CD \TESTS\DEV
-ECHO Claude-XT development tools test > %L%
+ECHO ClawDOS development tools test > %L%
 
 ECHO === TINYASM
 ECHO === TINYASM >> %L%

@@ -1,4 +1,4 @@
-/* What CLAUDE.EXE's screen offers tools.cpp. */
+/* What CLAWDOS.EXE's screen offers tools.cpp. */
 #ifndef CXT_UI_H
 #define CXT_UI_H
 

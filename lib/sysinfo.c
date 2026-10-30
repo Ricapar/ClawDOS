@@ -1,4 +1,4 @@
-/* Claude-XT sysinfo tool: see sysinfo.h. */
+/* ClawDOS sysinfo tool: see sysinfo.h. */
 
 #include <stdio.h>
 #include <string.h>

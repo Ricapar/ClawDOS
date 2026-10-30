@@ -1,4 +1,4 @@
-/* Claude-XT screen: see screen.h. */
+/* ClawDOS screen: see screen.h. */
 
 #include <conio.h>
 #include <i86.h>

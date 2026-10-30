@@ -1,4 +1,4 @@
-/* Claude-XT search tool: see search.h. */
+/* ClawDOS search tool: see search.h. */
 
 #include <stdio.h>
 #include <string.h>

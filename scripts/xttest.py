@@ -61,7 +61,7 @@ def main():
         build.build_boot()
         build.build_apps()
     shutil.copyfile(build.build_image(os.path.abspath(a.test)), IMAGE)
-    build.build_image()  # leave a clean CLAUDEXT.IMG behind
+    build.build_image()  # leave a clean CLAWDOS.IMG behind
 
     running = subprocess.run(['powershell', '-NoProfile', '-Command',
                               'Get-Process 86Box -ErrorAction SilentlyContinue'],

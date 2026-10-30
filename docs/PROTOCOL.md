@@ -10,7 +10,7 @@ receive buffer on the XT always holds a whole line.
 
 | Line | Meaning |
 |---|---|
-| `HELLO XTBRIDGE 1 [AUTH] SESSION <id> TIME <time>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`; `<time>` is the bridge's local time as `2026-10-28T14:03:07`, for a client without a clock of its own (CLAUDE.EXE sets DOS's). Clients look for the words they know and skip the rest. |
+| `HELLO XTBRIDGE 1 [AUTH] SESSION <id> TIME <time>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`; `<time>` is the bridge's local time as `2026-10-28T14:03:07`, for a client without a clock of its own (CLAWDOS.EXE sets DOS's). Clients look for the words they know and skip the rest. |
 | `OK` | Command accepted (`AUTH`, `NEW`, `RESUME` as `OK resumed`). |
 | `INFO <text>` | Backend description (reply to `INFO`). |
 | `TXT <text>` | A piece of the reply. Never contains a newline; append it to the current line. |
@@ -28,8 +28,8 @@ receive buffer on the XT always holds a whole line.
 | `MSG <text>` | Send a user message. The reply streams back as `TXT`/`NL` lines, then `END` or `ERR`. One at a time (`ERR busy` otherwise). |
 | `STOP` | Cancel the reply in progress. |
 | `NEW` | Start a new conversation. |
-| `LOG text` | Diagnostics for the bridge's log (CLAUDE.EXE's link-loss and clock reports); no reply. |
-| `INFO`, `PING`, `QUIT` | Housekeeping. CLAUDE.EXE pings a bridge that has been quiet for 60 s (20 s while waiting for a reply) and treats no answer within 15 s as a lost link. |
+| `LOG text` | Diagnostics for the bridge's log (CLAWDOS.EXE's link-loss and clock reports); no reply. |
+| `INFO`, `PING`, `QUIT` | Housekeeping. CLAWDOS.EXE pings a bridge that has been quiet for 60 s (20 s while waiting for a reply) and treats no answer within 15 s as a lost link. |
 
 A `MSG` starting with `/model` (or `/provider`) is answered by the bridge
 itself rather than the model: `/model` lists the AI providers it knows, and

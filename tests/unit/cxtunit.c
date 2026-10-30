@@ -1,4 +1,4 @@
-/* CXTUNIT.EXE - unit tests for Claude-XT's hardware-free code (parsers).
+/* CXTUNIT.EXE - unit tests for ClawDOS's hardware-free code (parsers).
  * Runs on DOS; image/tests/units.bat sends its output to COM1 and
  * scripts/boottest.py checks for UNITS-OK.
  */

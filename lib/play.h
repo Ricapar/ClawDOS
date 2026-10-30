@@ -1,4 +1,4 @@
-/* Claude-XT PLAY: GW-BASIC's music macro language, parsed into tones.
+/* ClawDOS PLAY: GW-BASIC's music macro language, parsed into tones.
  * No hardware here: the caller's PlayOps makes the sound (sound.h does it on
  * the PC speaker; the unit tests record it).
  *

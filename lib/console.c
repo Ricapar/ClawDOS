@@ -1,4 +1,4 @@
-/* Claude-XT console: see console.h. */
+/* ClawDOS console: see console.h. */
 
 #include <string.h>
 #include "screen.h"

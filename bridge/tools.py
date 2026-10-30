@@ -1,6 +1,6 @@
 """Tools the model can use on the XT, and how a call travels over the wire.
 
-The schemas live here, on the bridge; CLAUDE.EXE only has the executors. A
+The schemas live here, on the bridge; CLAWDOS.EXE only has the executors. A
 call goes to the XT as
 
   TOOL <id> <name>

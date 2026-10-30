@@ -1,4 +1,4 @@
-/* Claude-XT shell: run a DOS command line for the model, on a plain DOS
+/* ClawDOS shell: run a DOS command line for the model, on a plain DOS
  * screen, and capture what it prints. */
 #ifndef CXT_SHELL_H
 #define CXT_SHELL_H
