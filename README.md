@@ -1,20 +1,17 @@
 <h1 align="center">ClawDOS</h1>
 
-<p align="center"><b>Claude, running on a 1983 IBM PC XT.</b><br>
-An 8088 at 4.77 MHz, 640 KB of RAM and a CGA display, chatting with a modern AI over WiFi.</p>
+<p align="center"><img src="docs/images/clawdos-chat.png" alt="ClawDOS chat screen on an emulated IBM PC XT." width="646"></p>
 
-<p align="center"><img src="docs/images/clawdos-chat.png" alt="ClawDOS chat screen on an emulated IBM PC XT: a welcome panel with the Clawd mascot, a question and Claude's streamed reply" width="646"></p>
-
-<p align="center"><sub>ClawDOS on an emulated IBM 5160 (86Box: 8088, CGA), talking to the bridge's offline mock backend.</sub></p>
+<p align="center"><sub>ClawDOS on an emulated IBM 5160</sub></p>
 
 ClawDOS is a chat client and a small DOS software foundation for a real IBM
 PC XT. It looks and feels like [Claude Code](https://claude.com/claude-code):
 a welcome panel, the conversation scrolling above an input box, a spinner
-while Claude thinks. Claude can also look around the XT, read and write its
+while ClawDOS thinks. ClawDOS can also look around the XT, read and write its
 files, compile programs on it and play music on its PC speaker.
 
-The XT only speaks plain TCP. A small Python **bridge** on a modern machine
-handles TLS, the API key and the model, so the XT side stays tiny and fast
+The DOS harness only speaks plain TCP. A Python **bridge** on a modern machine
+handles API communication to your LLM of choice.
 (see [How it works](#how-it-works)).
 
 ## Features
@@ -25,26 +22,26 @@ handles TLS, the API key and the model, so the XT side stays tiny and fast
   the CGA without snow.
 - Hardware scrolling by moving the CGA's start address: scrollback (PgUp/PgDn)
   stays smooth on an 8088.
-- Claude Code-style interface: welcome panel, pinned input box, spinner, status
-  footer. Type ahead while Claude replies and your message is queued.
+- Standard coding harness-style interface: welcome panel, pinned input box, spinner, status
+  footer. Type ahead while ClawDOS replies and your message is queued.
 - Input editing with history recall, Esc to stop a reply, F2 for a new chat.
 - Survives a lost link: it reconnects and resumes the conversation.
 - Sets the XT's clock from the bridge on connect.
 
-**Claude can use the XT**
+**ClawDOS can use the XT**
 
 - Reads and edits files, lists directories, searches text, runs DOS commands,
   peeks and pokes memory and I/O ports.
 - Plays GW-BASIC `PLAY` tunes on the PC speaker and draws coloured CP437 text art.
 - **Safe mode** is on by default: anything that changes files, memory or ports
   asks `Allow ...? (y/n)` first. F3 toggles it.
-- **Memories**: Claude keeps its own notes on the XT's disk, and the list is put
+- **Memories**: ClawDOS keeps its own notes on the XT's disk, and the list is put
   in front of it at the start of every conversation.
 
 **Programs on the XT itself**
 
 - The disk image carries assemblers (TINYASM, WASM, JWasm), Bruce's C, GW-BASIC
-  and, if you supply your own floppy images, Turbo C 2.0. Claude is told about
+  and, if you supply your own floppy images, Turbo C 2.0. ClawDOS is told about
   them and can write, compile and run programs on the machine.
 
 **Any model**
@@ -62,18 +59,18 @@ handles TLS, the API key and the model, so the XT side stays tiny and fast
 
 ## How it works
 
-ClawDOS is a DOS program, not an XT program: it targets the 8086 instruction
+ClawDOS is a DOS program: it targets the 8086 instruction
 set and talks to the network through a standard packet driver, so in principle
 it runs on any PC-compatible running DOS with a network card and a CGA-compatible
 text display. The 4.77 MHz IBM PC XT is simply the slowest machine it has to
 be good on.
 
 The real work happens on the DOS machine. **CLAWDOS.EXE** is the whole client
-experience: the Claude Code-style interface, snow-free drawing and hardware
+experience: the ClawDOS Code-style interface, snow-free drawing and hardware
 scrolling, input editing, safe mode, reconnecting after a lost link, and every
-tool Claude uses. When Claude reads a file, edits a batch file, runs a
+tool ClawDOS uses. When ClawDOS reads a file, edits a batch file, runs a
 compiler, pokes a port or plays a tune, CLAWDOS.EXE does it on the DOS machine
-itself, and Claude's memories live on its disk.
+itself, and ClawDOS's memories live on its disk.
 
 The **bridge** is the shim between the old world and the new. A 1980s CPU
 can't do modern TLS, so the bridge holds the API key, speaks HTTPS to the
@@ -87,10 +84,10 @@ flowchart LR
         direction TB
         subgraph APP["CLAWDOS.EXE"]
             direction TB
-            UI["Chat interface<br/>streaming text, scrollback,<br/>input box, safe mode"]
+            UI["Chat interface"]
             TOOLS["Tool executors<br/>files, search, DOS commands,<br/>memory &amp; ports, speaker, text art"]
         end
-        SYS[("Disk, memory, I/O ports,<br/>PC speaker, DOS programs,<br/>Claude's memories")]
+        SYS[("Disk, memory, I/O ports,<br/>PC speaker, DOS programs,<br/>ClawDOS's memories")]
         NET["mTCP + packet driver"]
         TOOLS <--> SYS
         APP <--> NET
@@ -100,7 +97,7 @@ flowchart LR
         BRIDGE["xtbridge.py<br/>TLS, API key, history,<br/>relays tool calls"]
     end
 
-    API["Claude API<br/>(or an OpenAI-compatible provider)"]
+    API["LLM API<br/>(Anthropic or an OpenAI-compatible provider)"]
 
     NET <-->|"plain TCP<br/>simple text protocol"| BRIDGE
     BRIDGE <-->|"HTTPS"| API
@@ -129,13 +126,13 @@ format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
    pip install -r bridge/requirements.txt
    python bridge/xtbridge.py --mock
    ```
-   `--mock` answers like Claude would, offline. For the real thing set
+   `--mock` answers like ClawDOS would, offline. For the real thing set
    `ANTHROPIC_API_KEY` (in the environment, or in a `.env` file in the repo
    root, or run `ant auth login`) and drop `--mock`.
 4. **Boot an emulated XT** in another: `python scripts/run86box.py` (8088,
    640K, CGA, with an NE1000 card and NAT networking). It boots, brings up the
    network and shows the `C:\>` prompt.
-5. **Type `CLAWDOS`** (the old name, `CLAUDE`, still works). In the emulator the
+5. **Type `CLAWDOS`**. In the emulator the
    bridge is the host machine, `10.0.2.2:8023`, which the image is built to use.
 
 Prefer DOSBox-X? `python scripts/rundosbox.py` boots the same image with
@@ -186,7 +183,7 @@ shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`)
 | `poke`, `port` | Write memory, read or write I/O ports |
 | `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
 | `textart` | Print coloured CP437 text art into the chat |
-| `memory_list`, `memory_read`, `memory_write` | Claude's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
+| `memory_list`, `memory_read`, `memory_write` | ClawDOS's own notes across conversations, in `C:\MEMORY\NAME.TXT` |
 
 **Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
 that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
@@ -215,7 +212,7 @@ The image carries development tools that were tested on an 8088 at 4.77 MHz
 | `LDEBUG` | lDebug, a scriptable FreeDOS DEBUG (Fair License) | |
 
 They live in `C:\DEVEL` (licences in `C:\DEVEL\DOC`) and `C:\TC`, and
-`C:\MEMORY\DEVTOOLS.TXT`, Claude's first memory, tells it how to use them.
+`C:\MEMORY\DEVTOOLS.TXT`, ClawDOS's first memory, tells it how to use them.
 Examples are in `C:\TESTS\DEV`. Turbo C is commercial: the build copies it from
 your own floppy images in `external/` (e.g. `Borland - Turbo C v2.0 - Disk 3 of
 6 - Command Line and Utilities.img`) and leaves it out if they aren't there.
@@ -224,12 +221,12 @@ what else runs on an XT and what a licensed copy would add.
 
 ### Memories
 
-Claude keeps notes on the XT itself, in `C:\MEMORY\NAME.TXT` (first line: a
+ClawDOS keeps notes on the XT itself, in `C:\MEMORY\NAME.TXT` (first line: a
 one-line summary; at most 4000 bytes each). At the start of every conversation
 the bridge runs `memory_list` on the XT (you'll see a `Memories` line) and puts
-the list into the system prompt, so Claude knows what it saved before and reads
+the list into the system prompt, so ClawDOS knows what it saved before and reads
 a memory in full when it's relevant. The memory tools never ask in safe mode.
-Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or ask Claude to (that uses
+Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or ask ClawDOS to (that uses
 `delete`, which does ask). The mock and replay backends don't list memories.
 
 ### Other models
@@ -256,16 +253,6 @@ text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
 becomes the assistant's name. Files are re-read at the start of every
 conversation, so an edit applies from the next chat (F2 on the XT) without
 restarting the bridge.
-
-### Testing without an API key
-
-`python bridge/xtbridge.py --mock` answers like Claude would: a pause, then
-text streamed in small pieces, with conversation memory. Nothing leaves your
-machine. Messages starting with `!` run test scenarios; send `!help` on the XT
-for the list. Among them: `!scroll` (60 lines), `!wide` (over-long word and
-line), `!cp437` (character set), `!slow` and `!stall` (try Esc), and `!error`,
-`!refuse`, `!cutoff`, `!drop` (failure modes). `--speed 3` makes it faster.
-`python bridge/test_bridge.py` runs the protocol tests against it.
 
 ### Logs
 
