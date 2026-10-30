@@ -67,7 +67,7 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       sessions of 2026-10-25/26 showed (bridge/logs/). Details below.
   - [x] **M6.1 - Dev tools pack**: `edit` (replace text in a file instead of
         rewriting all of it: 49 whole-file writes of up to 5.4 KB happened),
-        `search` (grep with line numbers inside CLAUDE: FIND took 10-79 s a
+        `search` (grep with line numbers inside CLAWDOS: FIND took 10-79 s a
         call), `run` with a list of commands that stops at the first failure
         (FreeCOM has no `&`/`&&`; each TCC call was its own tool call), and the
         clock set from the bridge on connect (every file on the XT is dated
@@ -104,23 +104,23 @@ about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
 
 **Goal.** A program `run` starts has at least ~560 KB free, so stock Turbo C
 compiles with its own headers, spawns TLINK itself, and Turbo C's MAKE.EXE
-(already on the image in C:\TC) can drive builds. CLAUDE comes back afterwards
+(already on the image in C:\TC) can drive builds. CLAWDOS comes back afterwards
 on the same conversation with the program's output as the tool result, the chat
 screen as it was, and the link restored.
 
 **Approaches** (pick one in the design session):
 
 1. **Exit and relaunch through a stub.** A tiny resident launcher (NASM,
-   8086, a few KB; e.g. CXT.COM, which the user starts instead of CLAUDE)
-   runs CLAWDOS.EXE. For a big run CLAUDE saves its state (session token,
+   8086, a few KB; e.g. CXT.COM, which the user starts instead of CLAWDOS)
+   runs CLAWDOS.EXE. For a big run CLAWDOS saves its state (session token,
    pending tool id, flags like `-unsafe`, the scrollback/screen, the input
    line), shuts mTCP down cleanly (releasing the packet driver) and exits
    with a code that tells the stub to run the command. The stub runs it with
    output capture (the INT 10h hook moves into the stub), writes the output,
-   then runs CLAUDE again in resume mode. No vectors point into freed memory,
-   because CLAUDE really exits. Costs a reload of the ~120 KB EXE and a
+   then runs CLAWDOS again in resume mode. No vectors point into freed memory,
+   because CLAWDOS really exits. Costs a reload of the ~120 KB EXE and a
    reconnect (a few seconds) per big run.
-2. **Swap CLAUDE out to EMS.** Like Ralf Brown's SPAWNO: copy CLAUDE's memory
+2. **Swap CLAWDOS out to EMS.** Like Ralf Brown's SPAWNO: copy CLAWDOS's memory
    into EMS pages (PicoMEM offers up to 4 MB), shrink to a small stub, exec,
    copy back. No reload, but every hooked vector (INT 10h capture, 1Bh/23h
    Ctrl-Break, the packet driver's receive upcall into mTCP) must be unhooked
@@ -128,7 +128,7 @@ screen as it was, and the link restored.
    still dies while the receiver is gone. Needs EMS (none in 86Box's XT
    unless an EMS board is emulated); a disk swap file would be the fallback.
 
-Leaning toward 1: simpler, no EMS dependency, and CLAUDE's exit/start paths
+Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths
 are already tested. The open questions either way:
 
 - **Bridge: a tool call that outlives its connection.** Today a disconnect
@@ -142,7 +142,7 @@ are already tested. The open questions either way:
   tool argument the model sets, or automatically for known heavy programs
   (TCC, TLINK, MAKE, batch files). DEVTOOLS.TXT must say which.
 - **Where state goes.** A file in C:\CXT (survives a crash or reboot, so
-  CLAUDE could even recover after the program hangs the XT) or an EMS page.
+  CLAWDOS could even recover after the program hangs the XT) or an EMS page.
 - **Safe mode:** the y/n prompt stays before the exit; Esc and the
   exit-code hold screen move into the stub.
 

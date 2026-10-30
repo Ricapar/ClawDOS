@@ -43,7 +43,6 @@ PICOMEM/            picomem:*.EXE
 
 CLAWDOS/        build:hello.exe
 CLAWDOS/        build:clawdos.exe
-CLAWDOS/        build:claude.com
 
 TESTS/                  build:cxtunit.exe
 TESTS/DEV/              repo:image/tests/dev/*

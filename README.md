@@ -269,7 +269,6 @@ The bridge keeps two logs, both gitignored:
 | Path | What |
 |---|---|
 | `src/clawdos/` | CLAWDOS.EXE |
-| `src/alias/` | CLAUDE.COM, which starts CLAWDOS.EXE under its old name |
 | `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `xtbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
 | `tests/unit/` | CXTUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
 | `bridge/` | XTBridge server and a test client (`chat.py`) |

@@ -1,6 +1,6 @@
 # Type into an emulator window (default: 86Box) by injecting hardware scan codes,
 # which emulators reading raw keyboard input will see (SendKeys is not enough).
-#   .\scripts\sendkeys.ps1 'CLAUDE{ENTER}'
+#   .\scripts\sendkeys.ps1 'CLAWDOS{ENTER}'
 #   .\scripts\sendkeys.ps1 'hello{ENTER}' -Process 86Box -DelayMs 60
 # Special keys: {ENTER} {ESC} {BS} {TAB} {F1}..{F10} {PGUP} {PGDN} {UP} {DOWN} {LEFT} {RIGHT}
 param(

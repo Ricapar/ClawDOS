@@ -110,9 +110,6 @@ def build_boot():
     fd = os.path.join(ROOT, 'src', 'boot', 'freedos')
     run([nasm(), '-dISFAT16', '--before', 'cpu 8086', '-i', fd + os.sep,
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
-    # CLAUDE.COM, the old name of CLAWDOS.EXE (see src/alias/claude.asm)
-    run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'claude.com'),
-         os.path.join(ROOT, 'src', 'alias', 'claude.asm')])
 
 
 def compile_flags(spec, objdir):
