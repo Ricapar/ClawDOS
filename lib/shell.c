@@ -328,7 +328,7 @@ static void hold(int code, int holdSecs)
     unsigned long start;
     char buf[60];
 
-    sprintf(buf, "\n-- exit code %d - any key returns to Claude --", code);
+    sprintf(buf, "\n-- exit code %d - any key returns to ClawDOS --", code);
     teletype(buf);
     while (_bios_keybrd(_KEYBRD_READY))
         _bios_keybrd(_KEYBRD_READ);

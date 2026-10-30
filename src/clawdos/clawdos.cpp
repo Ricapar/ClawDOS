@@ -428,7 +428,7 @@ static void welcome(void)
         if (i == 0) {
             int col;
             rowFrame(r, G_TL, G_H, G_TR, A_CLAWD);
-            col = rowText(r, 4, " Claude for the IBM PC XT ", A_TITLE);
+            col = rowText(r, 4, " ClawDOS ", A_TITLE);
             rowText(r, col - 1, " v" VERSION " ", A_DIM);
             r.c[MID] = G_TDOWN | (A_CLAWD << 8);
         } else if (i == 11) {
@@ -438,7 +438,7 @@ static void welcome(void)
             r.c[0] = r.c[MID] = r.c[SCR_COLS - 1] = G_V | (A_CLAWD << 8);
         }
         switch (i) {
-        case 2: rowCenter(r, L, LW, "Welcome to Claude!", A_TITLE); break;
+        case 2: rowCenter(r, L, LW, "Welcome to ClawDOS!", A_TITLE); break;
         case 4: case 5: case 6: case 7: rowCenter(r, L, LW, clawd[i - 4], A_CLAWD); break;
         case 9: rowCenter(r, L, LW, backend, A_DIM); break;
         case 10: rowCenter(r, L, LW, host, A_DIM); break;
@@ -988,7 +988,7 @@ static void reconnect(void)
         note("Reconnected to the bridge. It doesn't remember the earlier conversation.", A_DIM);
     else if (cutOff)
         note("Reconnected; the conversation carries on. The last reply was cut off: "
-             "ask Claude to continue if you need the rest.", A_DIM);
+             "ask ClawDOS to continue if you need the rest.", A_DIM);
     else
         note("Reconnected; the conversation carries on.", A_DIM);
     drawFooter();
@@ -1032,7 +1032,7 @@ int main(int argc, char *argv[])
         } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("CLAWDOS " VERSION " - chat with Claude via an XTBridge\n\n"
+            printf("CLAWDOS " VERSION " - chat with an AI via an XTBridge\n\n"
                    "Usage: CLAWDOS [host[:port]] [-nosnow] [-noscroll] [-unsafe] [-q]\n"
                    "              [-m message] [-i text]\n\n"
                    "Without a host, CLAWDOS_BRIDGE from the mTCP config file is used.\n"

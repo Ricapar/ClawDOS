@@ -52,7 +52,7 @@ BUILTIN = {
     'openai': {'type': 'openai', 'name': 'ChatGPT', 'base_url': 'https://api.openai.com/v1',
                'api_key_env': 'OPENAI_API_KEY', 'model': 'gpt-5'},
     'ollama': {'type': 'openai', 'base_url': 'http://localhost:11434/v1', 'model': 'llama3.2'},
-    'mock': {'type': 'mock', 'name': 'Claude', 'model': 'mock'},
+    'mock': {'type': 'mock', 'name': 'ClawDOS', 'model': 'mock'},
 }
 
 
@@ -161,7 +161,7 @@ class Backends:
     def describe(self, chat):
         """One line saying which backend, model and prompt a chat uses."""
         if isinstance(chat, MockChat):
-            return 'mock Claude (offline, send !help)'
+            return 'mock ClawDOS (offline, send !help)'
         prompt = '' if self.prompt == prompts.DEFAULT else f', prompt {self.prompt}'
         return f'{chat.provider}: {chat.model}{prompt}'
 
@@ -401,7 +401,7 @@ class AnthropicChat:   # pylint: disable=too-few-public-methods  # duck-typed ch
                 report(self, rnd, started, first, model=getattr(final, 'model', None) or self.model,
                        stop_reason=final.stop_reason, usage=anthropic_usage(final))
                 if final.stop_reason == 'refusal':
-                    raise Refused('Claude declined to answer that.')
+                    raise Refused('The model declined to answer that.')
                 kept = echo_blocks(final.content)
                 self.messages.append({'role': 'assistant', 'content': kept})
                 if final.stop_reason == 'max_tokens':

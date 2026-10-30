@@ -144,15 +144,15 @@ MARKDOWN_SAMPLE = (
 # Plain conversational replies, picked by the first pattern that matches.
 SMALL_TALK = [
     (r'\b(hi|hello|hey|howdy|greetings)\b',
-     "Hello from the mock bridge! I'm a stand-in for Claude, so no API calls "
+     "Hello from the mock bridge! I'm a stand-in for ClawDOS, so no API calls "
      "are being made. Everything about the connection is real though: your "
      "XT sent that message over TCP, and this reply is streaming back a few "
      "characters at a time. Send !help to see the test commands."),
     (r'\b(who|what) are you\b',
-     "I'm the mock backend of XTBridge. I imitate Claude closely enough "
+     "I'm the mock backend of XTBridge. I imitate the real model closely enough "
      "to test CLAWDOS.EXE: replies stream in token-sized pieces after a short "
      "pause, I remember the conversation, and I can fail in all the ways "
-     "the real API can. Start the bridge without --mock to talk to Claude."),
+     "the real API can. Start the bridge without --mock for the real thing."),
     (r'\b(xt|8088|ibm|cga|pc)\b',
      "Your machine is a classic: an Intel 8088 at 4.77 MHz with 640 KB of "
      "memory and a CGA card. That's about 0.33 MIPS, so every byte drawn on "
@@ -276,7 +276,7 @@ class MockChat:
         raise MockAPIError('API error 529: Overloaded (simulated)')
 
     async def _cmd_refuse(self, _text):
-        raise Refused('Claude declined to answer that. (simulated)')
+        raise Refused('The model declined to answer that. (simulated)')
         yield   # never reached: makes this an async generator like the others
 
     async def _cmd_cutoff(self, _text):
@@ -355,8 +355,8 @@ class MockChat:
         if self.history:
             reply += f"Before that you said “{self.history[-1][0]}”, so the bridge is keeping our history. "
         reply += self.rng.choice([
-            "On the real bridge, Claude would answer this properly.",
-            "That's an interesting thought; the real Claude would have more to say about it.",
+            "On the real bridge, ClawDOS would answer this properly.",
+            "That's an interesting thought; the real ClawDOS would have more to say about it.",
             "I'm only a mock, but your message arrived intact.",
         ])
         return reply
