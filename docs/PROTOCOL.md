@@ -64,7 +64,10 @@ Calls run one at a time, then the reply continues with more `TXT`, `TOOL` or
 the turn (`END stopped`) and tells the model the call was interrupted. At most
 25 rounds of tool calls happen per message. `OUT`/`DONE` with no call pending
 are ignored. A client that runs no tools answers every `CALL` with
-`DONE <id> error`.
+`DONE <id> error`. A call the client has not answered after 20 minutes (long
+enough for a compile under `run`, during which the XT cannot talk) is reported
+to the model as an error, and once that turn is settled the bridge closes the
+connection and parks the conversation for a `RESUME`.
 
 ```
 S: TXT Let me look at your startup file.

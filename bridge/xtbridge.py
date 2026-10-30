@@ -51,6 +51,11 @@ log = logging.getLogger('xtbridge')
 sessions = set()         # connected clients, for spotting stale ones
 CONNECTIONS = itertools.count(1)   # numbers the clients as they are accepted
 PARK_SECONDS = 30 * 60   # how long a dropped XT's conversation waits for RESUME
+# The longest a tool call may take before the XT is presumed dead. The XT can't
+# talk while a program started by `run` executes (a compile can take minutes),
+# and a hung or power-cycled XT sends no FIN, so without this the call would
+# wait forever and the conversation would never be parked.
+TOOL_TIMEOUT = 20 * 60
 
 
 class Conversation:
@@ -128,6 +133,7 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
                 pass
         self.tools_sent = 0
         self.tool = None             # (id, future, OUT chunks) of the call in progress
+        self.xt_silent = False       # a tool call timed out: hang up once the turn is settled
         purge_parked()
         self.conv = Conversation()
         self.conv.session = self
@@ -374,13 +380,22 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         """Have the XT run one tool call; returns its ToolResult."""
         self.tools_sent += 1
         call.id = f't{self.tools_sent}'
+        silent = ToolResult('error', f'the XT did not answer within {TOOL_TIMEOUT // 60} minutes')
+        if self.xt_silent:           # an earlier call this turn already gave up on it
+            return silent
         self.tool = (call.id, asyncio.get_running_loop().create_future(), [])
         self.clog.event('tool_call', id=call.id, name=call.name, args=call.args)
         started = time.monotonic()
         try:
             for verb, payload in call_lines(call.id, call):
                 await self.send(verb, to_cp437(payload))
-            result = await self.tool[1]
+            try:
+                result = await asyncio.wait_for(asyncio.shield(self.tool[1]), TOOL_TIMEOUT)
+            except asyncio.TimeoutError:
+                log.info('%s tool %s %s: no answer in %d s, presuming the XT dead',
+                         self.peer, call.id, call.name, TOOL_TIMEOUT)
+                self.xt_silent = True
+                result = silent
         finally:
             self.tool = None
         self.clog.event('tool_result', id=call.id, status=result.status, text=result.text,
@@ -452,6 +467,9 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
             self.clog.event('turn_end', outcome=outcome, detail=detail, rounds=turn['rounds'],
                             ms=int((time.monotonic() - turn['started']) * 1000), usage=turn['usage'])
             await reply.aclose()
+            if self.xt_silent:       # the turn is in the history; park it for a RESUME
+                log.info('%s hanging up on the silent XT', self.peer)
+                self.writer.close()
 
     async def tell(self, verb, payload=b''):
         """send(), for wrapping up a reply: the link may already be gone."""

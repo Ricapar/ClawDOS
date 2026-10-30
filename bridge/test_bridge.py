@@ -309,6 +309,23 @@ class Tools(BridgeTest):
         text, _, _ = await self.c.ask_tools(r'!tool delete path=C:\X', lambda n, a: ('error', 'nope'))
         self.assertIn('-> error: nope', text)
 
+    async def test_silent_xt_times_out(self):
+        """A call the XT never answers ends as an error after TOOL_TIMEOUT; the bridge then hangs up."""
+        old, xtbridge.TOOL_TIMEOUT = xtbridge.TOOL_TIMEOUT, 0.3
+        self.addCleanup(setattr, xtbridge, 'TOOL_TIMEOUT', old)
+        await self.c.send('MSG !tool sysinfo')
+        while (await self.c.line())[0] != 'CALL':
+            pass
+        out, verbs = [], []
+        with self.assertRaises(EOFError):            # the XT is presumed dead: connection closed
+            while True:
+                verb, rest = await self.c.line()
+                verbs.append(verb)
+                if verb == 'TXT':
+                    out.append(rest.decode('cp437'))
+        self.assertIn('sysinfo -> error: the XT did not answer within', ''.join(out))
+        self.assertIn('END', verbs)                  # the model's turn was completed first
+
     async def test_stray_done_ignored(self):
         """DONE and OUT with no call in progress are ignored."""
         await self.c.send('DONE t9 ok')

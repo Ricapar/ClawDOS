@@ -30,6 +30,7 @@ Three commits since the review. The tables below describe the code as reviewed o
 | `fa10de3` | `lib/ticks.h`: rollover-safe `ticks_elapsed()`, one set of tick macros for every timeout | C6 fixed; F28's tick half done |
 | `1eb59cb` | `-watch` removed with screen.c's shadow copy of VRAM | F97 |
 | `ea803a4` | Build prints memory size and DGROUP per program, fails past 56 KB; `-zc` for far-data models | F40, C9 |
+| (next) | Bridge gives up on a tool call after 20 minutes: error to the model, then hangs up so the conversation parks | F2 |
 
 | Measure | Reviewed | Now | Change |
 |---|---|---|---|
@@ -298,7 +299,7 @@ Ordered by payoff over effort. S = under an hour, M = an afternoon, L = a day or
 2. **Done (`d7d09a4`).** `#define NOTRACE` in claude.cfg (S): ~10 KB resident, one line; re-run net.bat and tools.bat (F12).
 3. **Done (`916ea7a`).** Defer the console wrap and fix textart's 78 (S): C1 + F99, a showcase bug on every full-width line.
 4. **Moot (`1bcfd23` removed the draw tool).** Depth-limit `factor()` and fix the ellipse seed (S): F20, C5; both are model-input paths into the resident client; both get a unit test.
-5. **Bound the tool-call wait on the bridge and check the 6 KB argument budget** (S-M): F2 `wait_for`, F1 size check with the limit in the descriptions; no keepalive during tools.
+5. **F2 half done (`TOOL_TIMEOUT`); F1 open.** Bound the tool-call wait on the bridge and check the 6 KB argument budget (S-M): F2 `wait_for`, F1 size check with the limit in the descriptions; no keepalive during tools.
 6. **Make `-q` deny W tools and service mTCP in `ui_ask`** (S): F52; return a nonzero exit on ERR (F96).
 7. **Done (`ea803a4`).** Build-size report with a DGROUP budget (S): parse the map after wlink, print per app, fail past 56 KB (F40); add `-zc` while there (C9, ~4-5 KB DGROUP).
 8. **Moot (`1bcfd23` removed the draw tool).** Span fill and single-probe PAINT in the draw path (M): F4 `hspan` + row table, F31 `fillable()`, F29 trivial reject/16-bit fast path; 5-10x on filled drawings.
@@ -324,7 +325,7 @@ Line numbers corrected by the verifiers are used where the original anchor was w
 | F5 | [lib/memory.c:74](../../lib/memory.c#L74) | high | tool_memory_list: strcpy of a 12-char 8.3 name into name[9] overflows the stack — **fixed in `d7d09a4`** |
 | F6 | [lib/screen.c:337](../../lib/screen.c#L337) | high | screen.c (hardware scroll, rebase, footer mirror, scrollback) has zero automated coverage |
 | F1 | [bridge/tools.py:284](../../bridge/tools.py#L284) | medium | Bridge never checks tool arguments against the XT's 6 KB budget |
-| F2 | [bridge/xtbridge.py:383](../../bridge/xtbridge.py#L383) | medium | A tool call's lifetime is bound to the TCP connection; hung XT leaks the session |
+| F2 | [bridge/xtbridge.py:383](../../bridge/xtbridge.py#L383) | medium | A tool call's lifetime is bound to the TCP connection; hung XT leaks the session — **fixed: `TOOL_TIMEOUT` in xtbridge.py** |
 | F3 | [lib/console.c:107](../../lib/console.c#L107) | medium | Word wrap (console.c) has no regression test — **fixed in `916ea7a`** |
 | F7 | [lib/shell.c:36](../../lib/shell.c#L36) | medium | shell.c fuses the INT 10h capture ISR, buffers, formatting and hold screen |
 | F8 | [lib/shell.c:282](../../lib/shell.c#L282) | medium | Nothing is handed back to DOS before spawnl; the whole image stays resident |
