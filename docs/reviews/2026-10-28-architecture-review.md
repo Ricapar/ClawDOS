@@ -30,7 +30,7 @@ Three commits since the review. The tables below describe the code as reviewed o
 | `fa10de3` | `lib/ticks.h`: rollover-safe `ticks_elapsed()`, one set of tick macros for every timeout | C6 fixed; F28's tick half done |
 | `1eb59cb` | `-watch` removed with screen.c's shadow copy of VRAM | F97 |
 | `ea803a4` | Build prints memory size and DGROUP per program, fails past 56 KB; `-zc` for far-data models | F40, C9 |
-| (next) | Bridge gives up on a tool call after 20 minutes: error to the model, then hangs up so the conversation parks | F2 |
+| `209ba66` | Bridge gives up on a tool call after 20 minutes: error to the model, then hangs up so the conversation parks | F2 |
 
 | Measure | Reviewed | Now | Change |
 |---|---|---|---|
