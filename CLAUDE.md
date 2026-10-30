@@ -19,13 +19,13 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
 - Accurate XT: `python scripts/run86box.py`, then `.\scripts\winshot.ps1 [-Delay N]` and read build\shot.png.
   `scripts/sendkeys.ps1` can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
-  `CLAUDE -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
+  `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
   makes bridge/prompts/NAME.txt the system prompt, with the tools add-on appended); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
   Tools: schemas in bridge/tools.py, executors dispatched by src/clawdos/tools.cpp; mock `!tool NAME k=v` calls one,
-  `!tooltour` all. CLAUDE `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.
-  `--replay LOG` plays a logged session back to the XT (bridge/replay.py); CLAUDE `-noscroll` turns off
+  `!tooltour` all. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.
+  `--replay LOG` plays a logged session back to the XT (bridge/replay.py); CLAWDOS `-noscroll` turns off
   hardware scrolling.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
   the state they change `volatile`.
