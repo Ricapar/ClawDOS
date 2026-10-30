@@ -7,6 +7,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Setup once: `.\scripts\setup-tools.ps1`. Toolchains live in `tools/` (gitignored), outputs in `build/`.
 - Build everything: `python scripts/build.py` (apps -> build/*.EXE, disk -> build/CLAUDEXT.IMG).
   Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
+- Code navigation: the clangd-lsp and pyright-lsp plugins are enabled for this project (.claude/settings.json;
+  clangd and pyright-langserver must be on PATH). clangd reads build/compile_commands.json, written by every build
+  or by `python scripts/build.py --compiledb`; scripts/clangd/ holds the shims that let clang parse Watcom code.
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1;
   `image/tests/net.bat` checks networking. `--bridge` runs the mock bridge alongside on port 18023, so tests use `10.0.2.2:18023` (log in build/bridge.log) and
   `--expect TEXT` fails unless TEXT is in the serial or bridge log: `image/tests/tools.bat --bridge --expect

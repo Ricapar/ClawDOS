@@ -1,0 +1,5 @@
+{
+  "include": ["scripts", "bridge", "tests"],
+  "exclude": ["tools", "build", "external", "**/__pycache__"],
+  "extraPaths": ["scripts", "bridge"]
+}

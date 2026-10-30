@@ -203,6 +203,41 @@ def build_apps(only=None):
         build_app(name, spec, env)
 
 
+CLANGD_DIR = os.path.join(ROOT, 'scripts', 'clangd')
+# clang only has to parse the sources (clangd reads them for code navigation and
+# diagnostics): a 32-bit Windows target with Microsoft extensions comes closest to
+# Watcom's dialect, and scripts/clangd/watcom.h papers over the rest.
+CLANG_FLAGS = ['--target=i686-pc-windows-msvc', '-fms-extensions', '-fno-ms-compatibility', '-nostdinc',
+               '-isystem', os.path.join(CLANGD_DIR, 'include'), '-isystem', os.path.join(WATCOM, 'h'),
+               '-include', os.path.join(CLANGD_DIR, 'watcom.h'),
+               '-Wno-nonportable-include-path']    # DOS file names have no case: #include "TYPES.H" is fine
+
+
+def write_compiledb():
+    """build/compile_commands.json: how clangd should read each DOS source, derived from
+    APPS so it sees the same include paths and config headers as the Watcom build."""
+    entries, seen = [], set()
+    for name, spec in APPS.items():
+        objdir = os.path.join(BUILD, 'obj', os.path.splitext(name)[0])
+        os.makedirs(objdir, exist_ok=True)
+        flags, extra = compile_flags(spec, objdir)
+        clang = list(CLANG_FLAGS)
+        for f in flags:
+            if f.startswith('-i='):
+                clang += ['-I', f[3:]]
+            elif f.startswith('-fi='):
+                clang += ['-include', f[4:]]
+        for src in [os.path.join(ROOT, s) for s in spec['sources']] + extra:
+            if src in seen or os.path.splitext(src)[1].lower() not in ('.c', '.cpp'):
+                continue
+            seen.add(src)
+            entries.append({'directory': ROOT, 'file': src, 'arguments': ['clang'] + clang + ['-c', src]})
+    out = os.path.join(BUILD, 'compile_commands.json')
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(entries, f, indent=1)
+    return out
+
+
 _missing_external = set()
 
 
@@ -373,12 +408,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
     ap.add_argument('--bridge', help='host:port of the XTBridge (remembered for later builds)')
+    ap.add_argument('--compiledb', action='store_true',
+                    help='only write build/compile_commands.json for clangd (a full build writes it too)')
     a = ap.parse_args()
+    if a.compiledb:
+        print(write_compiledb())
+        return
     print(f'[settings] bridge = {settings(bridge=a.bridge)["bridge"]}')
     print('[boot]')
     build_boot()
     print('[apps]')
     build_apps()
+    write_compiledb()
     print('[image]')
     build_image(a.autotest)
 

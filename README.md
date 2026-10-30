@@ -151,7 +151,7 @@ With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
 | `bridge/` | XTBridge server and a test client (`chat.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |
 | `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |
-| `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers |
+| `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers, clangd shims for the Watcom dialect (`clangd/`) |
 | `docs/` | Roadmap and protocol |
 
 Programs linking mTCP (CLAUDE.EXE, anything using `lib/xtbridge`) are GPLv3.

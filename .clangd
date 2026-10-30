@@ -1,0 +1,5 @@
+# clangd reads the Open Watcom DOS sources through build/compile_commands.json,
+# written by `python scripts/build.py --compiledb` (and by every full build).
+# The dialect shims live in scripts/clangd/.
+CompileFlags:
+  CompilationDatabase: build
