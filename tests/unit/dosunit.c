@@ -18,6 +18,8 @@
 #include "chunked.h"
 #include "sse.h"
 #include "httpp.h"
+#include "cfg.h"
+#include <stdlib.h>
 
 static int passed, failed;
 
@@ -492,6 +494,75 @@ static void testHttpHead(void)
     CHECK("date bad", http_parse_date("yesterday", &y, &mo, &d, &hh, &mi, &ss) == -1);
 }
 
+/* --- cfg ---------------------------------------------------------------------- */
+
+static const char CFG_TEXT[] =
+    "# ClawDOS settings\r\n"
+    "provider anthropic\r\n"
+    "theme claude   \r\n"
+    "timezone -5\r\n"
+    "name Claude\r\n"
+    "\r\n"
+    "[anthropic]\r\n"
+    "type anthropic\r\n"
+    "tunnel 192.168.1.10:8443\r\n"
+    "host api.anthropic.com\r\n"
+    "key sk-ant-abc#def\r\n"
+    "model claude-opus-5-5\r\n"
+    "effort low\r\n"
+    "\r\n"
+    "[openrouter]\r\n"
+    "type anthropic\r\n"
+    "tunnel 192.168.1.10:8444\r\n"
+    "host openrouter.ai\r\n"
+    "path /api/v1/messages\r\n"
+    "auth bearer\r\n"
+    "key sk-or-x\r\n"
+    "model anthropic/claude-opus-5.5\r\n"
+    "cache 0\r\n";
+
+static void testCfg(void)
+{
+    Cfg *c = (Cfg *)malloc(sizeof(Cfg));
+    Provider *p;
+    char text[400];
+    int i;
+
+    cfg_defaults(c);
+    CHECK("cfg parse ok", cfg_parse(c, CFG_TEXT) == 0);
+    CHECK("cfg two providers", c->nproviders == 2);
+    CHECK("cfg timezone", c->timezone == -5);
+    CHECK_STR("cfg theme trimmed", c->theme, "claude");
+    CHECK_STR("cfg startup provider", c->provider, "anthropic");
+    p = cfg_provider(c, "ANTHROPIC");
+    CHECK("cfg provider case", p != NULL);
+    if (p) {
+        CHECK_STR("cfg default path", p->path, "/v1/messages");
+        CHECK_STR("cfg default auth", p->auth, "x-api-key");
+        CHECK_STR("cfg key keeps hash", p->key, "sk-ant-abc#def");
+        CHECK("cfg default cache", p->cache == 1);
+        CHECK_STR("cfg effort", p->effort, "low");
+        CHECK("cfg nothing missing", cfg_missing(p) == NULL);
+    }
+    p = cfg_provider(c, "openrouter");
+    CHECK("cfg openrouter", p != NULL && !strcmp(p->auth, "bearer") && p->cache == 0
+          && !strcmp(p->path, "/api/v1/messages"));
+    CHECK("cfg unknown provider", cfg_provider(c, "nope") == NULL);
+    cfg_defaults(c);
+    CHECK("cfg missing tunnel", cfg_parse(c, "[x]\ntype anthropic\nhost h\nkey k\nmodel m\n") == 0
+          && !strcmp(cfg_missing(&c->providers[0]), "tunnel"));
+    cfg_defaults(c);
+    CHECK("cfg bad global key line", cfg_parse(c, "theme claude\nbogus 1\n") == 2);
+    cfg_defaults(c);
+    text[0] = 0;
+    for (i = 0; i < 9; i++)
+        sprintf(text + strlen(text), "[p%d]\n", i);
+    CHECK("cfg ninth section", cfg_parse(c, text) == 9);
+    cfg_defaults(c);
+    CHECK("cfg defaults", c->timezone == 0 && !strcmp(c->name, "Claude") && c->nproviders == 0);
+    free(c);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -507,6 +578,7 @@ int main(void)
     testChunked();
     testSse();
     testHttpHead();
+    testCfg();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
