@@ -17,6 +17,7 @@
 #include "json.h"
 #include "chunked.h"
 #include "sse.h"
+#include "httpp.h"
 
 static int passed, failed;
 
@@ -460,6 +461,37 @@ static void testSse(void)
     CHECK_STR("sse after overflow", events, ":ok|");
 }
 
+/* --- http head ---------------------------------------------------------------- */
+
+static void testHttpHead(void)
+{
+    HttpHead h;
+    int y, mo, d, hh, mi, ss;
+    CHECK("head ok", http_parse_head("HTTP/1.1 200 OK\r\nDate: Fri, 31 Oct 2026 14:03:07 GMT\r\n"
+                                     "transfer-encoding: Chunked\r\nConnection: keep-alive\r\n\r\n", &h) == 0);
+    CHECK("head 200 chunked", h.status == 200 && h.chunked && h.contentLength == -1 && !h.close && h.retryAfter == 0);
+    CHECK_STR("head date", h.date, "Fri, 31 Oct 2026 14:03:07 GMT");
+    CHECK("head 529", http_parse_head("HTTP/1.1 529 Overloaded\r\nContent-Length: 87\r\nretry-after: 12\r\n\r\n", &h) == 0
+          && h.status == 529 && h.contentLength == 87 && !h.chunked && h.retryAfter == 12);
+    CHECK("head close", http_parse_head("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n", &h) == 0 && h.close);
+    CHECK("head no blank line", http_parse_head("HTTP/1.1 200 OK\r\nX: y\r\n", &h) == -1);
+    CHECK("head bad status", http_parse_head("HTTP/1.1 abc\r\n\r\n", &h) == -1);
+    CHECK("date parse", http_parse_date("Fri, 31 Oct 2026 23:30:00 GMT", &y, &mo, &d, &hh, &mi, &ss) == 0
+          && y == 2026 && mo == 10 && d == 31 && hh == 23 && mi == 30 && ss == 0);
+    http_shift_time(&y, &mo, &d, &hh, -5);
+    CHECK("date shift back", y == 2026 && mo == 10 && d == 31 && hh == 18);
+    y = 2026; mo = 10; d = 31; hh = 23;
+    http_shift_time(&y, &mo, &d, &hh, 2);
+    CHECK("date shift into next month", y == 2026 && mo == 11 && d == 1 && hh == 1);
+    y = 2028; mo = 2; d = 28; hh = 23;
+    http_shift_time(&y, &mo, &d, &hh, 2);
+    CHECK("date shift leap day", y == 2028 && mo == 2 && d == 29 && hh == 1);
+    y = 2027; mo = 1; d = 1; hh = 0;
+    http_shift_time(&y, &mo, &d, &hh, -1);
+    CHECK("date shift into last year", y == 2026 && mo == 12 && d == 31 && hh == 23);
+    CHECK("date bad", http_parse_date("yesterday", &y, &mo, &d, &hh, &mi, &ss) == -1);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -474,6 +506,7 @@ int main(void)
     testJson();
     testChunked();
     testSse();
+    testHttpHead();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
