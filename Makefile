@@ -18,7 +18,7 @@ BOOTTEST := $(PYTHON) scripts/boottest.py --no-build
 
 .DEFAULT_GOAL := help
 .PHONY: help setup venv build compiledb clean test check boot boottests test8088 \
-        run dosbox shot bridge mock chat
+        run dosbox shot tunnel mock bridge chat
 
 help:
 	@echo "make <target>   (see the top of the Makefile for variables)"
@@ -50,7 +50,8 @@ clean: ## delete build/ except settings.json (the remembered bridge address)
 
 # --- tests --------------------------------------------------------------------
 
-test: $(VENV_PY) ## bridge unit tests (fast, no emulator)
+test: $(VENV_PY) ## unit tests of the Python (fast, no emulator)
+	$(PYTHON) tunnel/test_mockapi.py
 	$(VENV_PY) bridge/test_tools.py
 	$(VENV_PY) bridge/test_bridge.py
 
@@ -82,11 +83,14 @@ dosbox: build ## boot the image in DOSBox-X with networking (faster, less exact)
 shot: ## screenshot 86Box to build/shot.png
 	$(PYTHON) scripts/shot.py
 
-bridge: $(VENV_PY) ## run the bridge to Claude (ARGS=... for more flags)
-	$(VENV_PY) bridge/dosbridge.py $(ARGS)
+tunnel: ## run the TLS tunnel the DOS PC talks through (ARGS=--map PORT=HOST:443 ...)
+	$(PYTHON) tunnel/tunnel.py $(ARGS)
 
-mock: $(VENV_PY) ## run the bridge with the offline mock instead of Claude
-	$(VENV_PY) bridge/dosbridge.py --mock $(ARGS)
+mock: ## run the mock Messages API (plain HTTP on 18023) instead of the real one
+	$(PYTHON) tunnel/mockapi.py $(ARGS)
+
+bridge: $(VENV_PY) ## run the old DOS Bridge (goes away with the native client)
+	$(VENV_PY) bridge/dosbridge.py $(ARGS)
 
 chat: $(VENV_PY) ## chat with a running bridge from this terminal
 	$(VENV_PY) bridge/chat.py $(ARGS)
