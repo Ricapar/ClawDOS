@@ -172,6 +172,7 @@ class Handler(BaseHTTPRequestHandler):
             if status == 'error' and content.startswith('Error: '):
                 content = content[7:]
             pending.call.result = ToolResult(status, content)
+            print(f'tool {pending.call.name} -> {status}: {content[:100]!r}', flush=True)
             chat, gen = pending.chat, pending.gen
             server.pending = None
         else:

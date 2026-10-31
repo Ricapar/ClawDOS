@@ -1,6 +1,6 @@
 @ECHO OFF
-REM Tool calls end to end (scripts/boottest.py image/tests/tools.bat --bridge
-REM --expect "tool tour: PASS"): the mock bridge's !tooltour calls every tool on
+REM Tool calls end to end (scripts/boottest.py image/tests/tools.bat --mock
+REM --expect "tool tour: PASS"): the mock API's !tooltour calls every tool on
 REM this machine and logs the verdict.
 ECHO CLAWDOS-TOOLS-TEST > COM1
 CALL C:\NET\NETUP.BAT

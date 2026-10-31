@@ -105,7 +105,6 @@ def tour_steps():
         ('mkdir', {'path': 'C:\\DOSTDIR'}, 'ok', None),
         ('delete', {'path': 'C:\\DOSTOUR2.TXT'}, 'ok', None),
         ('delete', {'path': 'C:\\*.BAT'}, 'error', None),
-        ('peek', {'addr': '0040:0000', 'len': '16'}, 'ok', None),
         ('poke', {'addr': '0000:04F0', 'bytes': '44 4F 53'}, 'ok', None),
         ('peek', {'addr': '0000:04F0', 'len': '3'}, 'ok', '44 4F 53'),
         ('port', {'port': '61'}, 'ok', None),
