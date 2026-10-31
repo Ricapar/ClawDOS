@@ -564,7 +564,8 @@ static void testCfg(void)
         sprintf(text + strlen(text), "[p%d]\n", i);
     CHECK("cfg ninth section", cfg_parse(c, text) == 9);
     cfg_defaults(c);
-    CHECK("cfg defaults", c->timezone == 0 && !strcmp(c->name, "Claude") && c->nproviders == 0);
+    CHECK("cfg defaults", c->timezone == 0 && !strcmp(c->name, "Claude") && c->nproviders == 0 && c->clock == 1);
+    CHECK("cfg clock off", cfg_parse(c, "clock 0\n") == 0 && c->clock == 0);
     free(c);
 }
 

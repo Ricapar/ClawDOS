@@ -718,6 +718,17 @@ static void uiIdle(void)
     }
 }
 
+/* While a tool runs (tool_esc calls this): keep the connection alive and the
+   spinner moving. Keys are left to tool_esc, which is looking for Esc. */
+static void toolIdle(void)
+{
+    Net::service();
+    if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
+        lastSpin = TICKS_NOW;
+        drawStatus();
+    }
+}
+
 static int uiEscPressed(void)
 {
     return stopRequested || quitting || Net::breakPressed;
@@ -1014,7 +1025,7 @@ int main(int argc, char *argv[])
         theme = &themes[i];
     if (Net::startStack())
         return 1;
-    tool_idle = Net::service;          /* keep the connection alive during long tools */
+    tool_idle = toolIdle;              /* keep the connection alive and the spinner moving during tools */
 
     scr_init();
     if (noscroll)

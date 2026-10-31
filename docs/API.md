@@ -26,6 +26,7 @@ Lines are `key value` (spaces or tabs between), `#` starts a comment except in
 provider anthropic          # the [section] used at startup (-p overrides)
 theme claude                # claude or opencode
 timezone -5                 # hours from UTC, for the clock set from the Date header
+clock 1                     # default; 0 leaves the DOS clock alone
 name Claude                 # {name} in PROMPT.TXT (a section may override)
 
 [anthropic]
@@ -126,9 +127,12 @@ Unknown events and keys are ignored.
 
 ## The clock
 
-The first response's `Date` header, shifted by `timezone`, sets the DOS clock
-when its year is before 2020 (the PC has no battery clock), with the note
-`Clock set from the API; it said ...` on screen and in CLAWDOS.LOG.
+At startup, before any turn, CLAWDOS sends a bare `GET {path}` through the
+tunnel (a 405, no tokens) and reads the `Date` header. Shifted by `timezone`,
+it sets the DOS clock when the DOS year is before 2020 (the PC has no battery
+clock), with the note `Clock set from the API; it said ...` on screen and in
+CLAWDOS.LOG. It happens outside any turn so the reply timers never straddle the
+jump. `clock 0` turns it off.
 
 ## The tunnel
 

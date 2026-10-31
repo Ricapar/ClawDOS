@@ -81,6 +81,7 @@ class Chat {
     void   drain(void);
     void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
     void   setClock(const char *date);
+    void   syncClock(void);                       /* a bare GET at startup, for its Date header */
     void   logRound(int round);
     void   loadMemories(void);
     void   pause(int secs);

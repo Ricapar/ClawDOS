@@ -6,8 +6,10 @@
 #include "apireq.h"
 #include "ticks.h"
 
-Http::Http() : idle(NULL), rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), left(0), done(1), out(NULL),
-               outLen(0), outMax(0), lastIdle(0)
+#define HTTP_TX_MAX 512
+
+Http::Http() : idle(NULL), rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), txBuf(NULL), txLen(0),
+               left(0), done(1), out(NULL), outLen(0), outMax(0), lastIdle(0)
 {
     sk.put = sockPut;
     sk.ctx = this;
@@ -23,12 +25,36 @@ void Http::tick(void)
     }
 }
 
+/* Stage outgoing bytes; a full buffer goes out as one send (one byte per TCP
+   send would be a packet per byte on an XT). */
 int Http::sockPut(Sink *s, const char *p, unsigned n)
 {
     Http *h = (Http *)s->ctx;
-    int rc = h->conn.send(p, n);
-    h->tick();
-    return rc;
+    if (!h->txBuf)
+        h->txBuf = (char *)malloc(HTTP_TX_MAX);
+    if (!h->txBuf)
+        return -1;
+    while (n) {
+        unsigned room = HTTP_TX_MAX - h->txLen, take = n < room ? n : room;
+        memcpy(h->txBuf + h->txLen, p, take);
+        h->txLen += take;
+        p += take;
+        n -= take;
+        if (h->txLen == HTTP_TX_MAX && h->flush())
+            return -1;
+    }
+    return 0;
+}
+
+int8_t Http::flush(void)
+{
+    int rc = 0;
+    if (txLen) {
+        rc = conn.send(txBuf, txLen);
+        txLen = 0;
+        tick();
+    }
+    return (int8_t)rc;
 }
 
 int8_t Http::open(const char *hostport)
@@ -38,6 +64,7 @@ int8_t Http::open(const char *hostport)
     if (!rx)
         return -1;
     rxLen = rxPos = 0;
+    txLen = 0;
     done = 1;
     return conn.connect(hostport, 8443);
 }

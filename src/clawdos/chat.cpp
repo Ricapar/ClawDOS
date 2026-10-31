@@ -74,6 +74,8 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         return -1;
     if (connect())
         return -1;
+    if (cfg->clock)
+        syncClock();
     if (!prov->key[0]) {
         sprintf(errBuf, "No API key for [%s]: add a key line to " CFG_PATH ".", prov->id);
         warn(errBuf);
@@ -300,6 +302,34 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
 
 /* --- the clock ------------------------------------------------------------------ */
 
+/* Before any turn, so no timer straddles the jump: ask the API for anything
+   (a GET gets a 405 and costs no tokens) and read the Date header. */
+void Chat::syncClock(void)
+{
+    HttpHead h;
+    Sink *s = http.sink();
+
+    if (clockSet || !http.isOpen())
+        return;
+    sink_puts(s, "GET ");
+    sink_puts(s, prov->path);
+    sink_puts(s, " HTTP/1.1\r\nHost: ");
+    sink_puts(s, prov->host);
+    sink_puts(s, "\r\nConnection: keep-alive\r\n\r\n");
+    if (http.flush())
+        return;
+    http.beginResponse();
+    if (http.readHead(&h, 10) != 0) {
+        http.close();                 /* the next request reconnects */
+        return;
+    }
+    drain();
+    if (h.close)
+        http.close();
+    if (h.date[0])
+        setClock(h.date);
+}
+
 void Chat::setClock(const char *date)
 {
     struct dosdate_t dd;
@@ -431,6 +461,8 @@ int8_t Chat::request(int noTools)
         rc = http.sendHead(prov, count.count);
         if (rc == 0 && api_body(http.sink(), &r) != 0)
             rc = -1;
+        if (rc == 0 && http.flush())
+            rc = -1;
         if (rc == 0)
             rc = waitHead(&h);
         if (rc == 1) {
@@ -453,8 +485,6 @@ int8_t Chat::request(int noTools)
                 return 1;
             continue;
         }
-        if (!clockSet && h.date[0])
-            setClock(h.date);
         if (h.status == 200) {
             rc = stream();
             if (rc == 2)

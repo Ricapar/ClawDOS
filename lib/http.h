@@ -24,8 +24,10 @@ class Http {
     void   close(void);
     int    isOpen(void) { return conn.isConnected(); }
 
-    Sink  *sink(void) { return &sk; }                  /* writes go to the socket */
+    Sink  *sink(void) { return &sk; }                  /* writes are staged and go out in 512-byte pieces */
+    int8_t flush(void);                                /* send what the sink still holds; 0 ok */
     int8_t sendHead(const Provider *p, unsigned long length);   /* api_head into the socket */
+    void   beginResponse(void) { headLen = 0; }                 /* after writing a request by hand */
 
     /* Read the status line and headers (<= HTTP_HEAD_MAX) within `secs`; call
        again after a timeout, what arrived so far is kept.
@@ -53,6 +55,8 @@ class Http {
     unsigned rxLen, rxPos;
     char *headBuf;                /* the response head being collected */
     unsigned headLen;
+    char *txBuf;                  /* staged outgoing bytes */
+    unsigned txLen;
     HttpHead head;
     Chunked ch;
     long left;                    /* Content-Length bytes still to come */

@@ -75,6 +75,7 @@ SCENARIOS = {
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
     '!tool': 'call one DOS tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
     '!tooltour': 'call every DOS tool in turn and check the results',
+    '!toolstall': 'call sysinfo, then think for 30 seconds before answering (the spinner during tool rounds)',
     '!play': 'play a tune on the PC speaker',
 }
 
@@ -323,6 +324,11 @@ class MockChat:
 
     def _cmd_tooltour(self, _text):
         yield from self.tooltour()
+
+    def _cmd_toolstall(self, _text):
+        yield from self.call('sysinfo', {})
+        self.pause(30)
+        yield from self.stream(' That was a 30-second think after the tool.')
 
     def call(self, name, args):
         """Announce a tool call (without ending the line), make it, report it."""

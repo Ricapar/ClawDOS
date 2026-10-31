@@ -54,6 +54,14 @@ int tool_sysinfo(ToolCtx *t)
         tout_puts(t, "EMS: none\n");
 
     for (drive = 3; drive <= 26; drive++) {     /* C: to Z:; A: and B: would seek */
+        /* Does the letter have a device? IOCTL 08h answers from the drive table
+           without touching hardware; asking free space of a letter that has
+           none sends FreeDOS to the disk BIOS, which can take seconds each. */
+        r.x.ax = 0x4408;
+        r.h.bl = (unsigned char)drive;
+        intdos(&r, &r);
+        if (r.x.cflag)
+            continue;
         r.h.ah = 0x36;
         r.h.dl = (unsigned char)drive;
         intdos(&r, &r);
