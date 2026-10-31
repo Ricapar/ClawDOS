@@ -65,7 +65,9 @@ def parse_args():
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the serial or bridge log (repeatable)')
     ap.add_argument('--bridge', action='store_true',
-                    help=f'run the mock bridge (dosbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
+                    help=f'run the old mock bridge (dosbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
+    ap.add_argument('--mock', action='store_true',
+                    help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_BRIDGE_PORT} during the test')
     return ap.parse_args()
 
 
@@ -85,14 +87,19 @@ def dosbox_command(extra_sets):
 
 
 @contextlib.contextmanager
-def mock_bridge(bridge_log):
-    """Run the mock bridge, logging to bridge_log; it is killed when the block ends."""
+def mock_bridge(bridge_log, api=False):
+    """Run the mock bridge (or, with api, the mock Messages API), logging to
+    bridge_log; it is killed when the block ends."""
+    if api:
+        cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
+               '--speed', '0', '--port', str(TEST_BRIDGE_PORT)]
+    else:
+        cmd = [sys.executable, os.path.join(build.ROOT, 'bridge', 'dosbridge.py'),
+               '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT), '--log', '-', '--convlog', '-', '-v']
     with open(bridge_log, 'wb') as f:
-        with subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'dosbridge.py'),
-                               '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT),
-                               '--log', '-', '--convlog', '-', '-v'],
-                              stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as bridge:
+        with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as bridge:
             try:
+                time.sleep(0.5)
                 yield bridge
             finally:
                 bridge.kill()
@@ -131,12 +138,12 @@ def main():
     cmd = dosbox_command(a.set)
     bridge_log = os.path.join(build.BUILD, 'bridge.log')
     serial = os.path.join(build.BUILD, 'serial.log')
-    with mock_bridge(bridge_log) if a.bridge else contextlib.nullcontext():
+    with mock_bridge(bridge_log, a.mock) if (a.bridge or a.mock) else contextlib.nullcontext():
         run_dosbox(cmd, serial, a.timeout)
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
-    if a.bridge:
-        print('--- bridge log ---')
+    if a.bridge or a.mock:
+        print('--- bridge log ---' if a.bridge else '--- mock API log ---')
         sys.stdout.write(read_log(bridge_log).decode('utf-8', 'replace'))
         log += read_log(bridge_log)
     if DONE not in log:

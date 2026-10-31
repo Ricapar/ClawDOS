@@ -14,6 +14,9 @@ static long boundary;           /* end of the last complete message */
 static long turnStart;
 static int turnMessages;
 static int needSep;             /* at a boundary in a non-empty file: next write gets ",\r\n" */
+static char savedTail[8];       /* what hist_reopen_last took off, so a rollback can put it back */
+static unsigned savedTailLen;
+static long savedTailAt;
 
 /* Find the end of the last complete top-level object in the file. */
 static long scanBoundary(void)
@@ -115,6 +118,7 @@ void hist_turn_begin(void)
 {
     turnStart = boundary;
     turnMessages = 0;
+    savedTailLen = 0;
 }
 
 static int truncateTo(long pos)
@@ -136,12 +140,41 @@ int hist_rollback_message(void)
 int hist_rollback_turn(void)
 {
     turnMessages = 0;
+    if (savedTailLen && savedTailAt + (long)savedTailLen == turnStart) {
+        /* the turn reopened the message before it: put its closing bytes back */
+        if (truncateTo(savedTailAt))
+            return -1;
+        lseek(fd, savedTailAt, SEEK_SET);
+        if (write(fd, savedTail, savedTailLen) != (int)savedTailLen)
+            return -1;
+        end = boundary = turnStart;
+        needSep = 1;
+        savedTailLen = 0;
+        return 0;
+    }
     return truncateTo(turnStart);
 }
 
 int hist_turn_messages(void)
 {
     return turnMessages;
+}
+
+int hist_reopen_last(unsigned n)
+{
+    if (fd < 0 || (long)n > end || n > sizeof savedTail)
+        return -1;
+    lseek(fd, end - (long)n, SEEK_SET);
+    if (read(fd, savedTail, n) != (int)n)
+        return -1;
+    savedTailLen = n;
+    savedTailAt = end - (long)n;
+    end -= n;
+    if (chsize(fd, end))
+        return -1;
+    boundary = end;
+    needSep = 0;
+    return 0;
 }
 
 int hist_copy(Sink *s)

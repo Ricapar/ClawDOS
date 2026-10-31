@@ -1,0 +1,587 @@
+/* The agent loop, see chat.h. */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dos.h>
+#include <direct.h>
+#include <io.h>
+
+#include "chat.h"
+#include "apireq.h"
+#include "json.h"
+#include "history.h"
+#include "httpp.h"
+#include "ticks.h"
+#include "memory.h"
+#include "tools.h"
+#include "utf8.h"
+
+#define SSE_MAX        16384u
+#define TOOL_INPUT_MAX 16384u
+#define RX_MAX         2048u
+#define MEMORIES_MAX   4200u
+#define READ_TIMEOUT   300          /* seconds without a byte: the link is dead */
+#define MAX_ROUNDS     25           /* tool rounds per user message */
+#define PROMPT_PATH    "C:\\CLAWDOS\\PROMPT.TXT"
+#define TOOLS_PATH     "C:\\CLAWDOS\\TOOLS.JSN"
+#define CHATS_DIR      "C:\\CLAWDOS\\CHATS"
+#define CFG_PATH       "C:\\CLAWDOS\\CLAWDOS.CFG"
+#define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
+
+Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
+               rxBuf(NULL), err(""), mergeNext(0), assistantInTurn(0), reasked(0), clockSet(0), streamRc(0),
+               reqStart(0), firstText(0)
+{
+    addr[0] = path[0] = desc[0] = pendingTool[0] = 0;
+}
+
+int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
+{
+    const char *missing;
+
+    cfg = c;
+    ui = u;
+    prov = cfg_provider(cfg, providerId && providerId[0] ? providerId : cfg->provider);
+    if (prov == NULL) {
+        sprintf(errBuf, "No provider [%.20s] in CLAWDOS.CFG.", providerId && providerId[0] ? providerId : cfg->provider);
+        err = errBuf;
+        return -1;
+    }
+    if (hostOverride && hostOverride[0])
+        strncpy(prov->tunnel, hostOverride, sizeof prov->tunnel - 1);
+    if ((missing = cfg_missing(prov)) != NULL && strcmp(missing, "key")) {
+        sprintf(errBuf, "Provider [%s] has no %s line in CLAWDOS.CFG.", prov->id, missing);
+        err = errBuf;
+        return -1;
+    }
+    if (!sseBuf)
+        sseBuf = (char *)malloc(SSE_MAX);
+    if (!toolInput)
+        toolInput = (char *)malloc(TOOL_INPUT_MAX);
+    if (!memories)
+        memories = (char *)malloc(MEMORIES_MAX);
+    if (!rxBuf)
+        rxBuf = (char *)malloc(RX_MAX);
+    if (!sseBuf || !toolInput || !memories || !rxBuf) {
+        err = "Out of memory for the API buffers.";
+        return -1;
+    }
+    memories[0] = 0;
+    if (newConversation())
+        return -1;
+    if (connect())
+        return -1;
+    if (!prov->key[0]) {
+        sprintf(errBuf, "No API key for [%s]: add a key line to " CFG_PATH ".", prov->id);
+        ui->note(errBuf, 1);
+    }
+    return 0;
+}
+
+void Chat::close(void)
+{
+    http.close();
+    hist_close();
+}
+
+const char *Chat::address(void)
+{
+    return prov ? prov->tunnel : "";
+}
+
+const char *Chat::describe(void)
+{
+    sprintf(desc, "%.16s: %.48s", prov->id, prov->model);
+    return desc;
+}
+
+int8_t Chat::connect(void)
+{
+    char line[40];
+    if (http.open(prov->tunnel)) {
+        sprintf(errBuf, "%.60s (%.48s)", http.errorText(), prov->tunnel);
+        err = errBuf;
+        return -1;
+    }
+    connections++;
+    if (connections > 1) {
+        sprintf(line, "connection #%d", connections);
+        ui->log(line);
+    }
+    return 0;
+}
+
+int8_t Chat::switchProvider(const char *id, const char *model)
+{
+    Provider *p = cfg_provider(cfg, id);
+    const char *missing;
+    if (p == NULL) {
+        sprintf(errBuf, "No provider called %.20s; /model lists them.", id);
+        err = errBuf;
+        return -1;
+    }
+    if ((missing = cfg_missing(p)) != NULL && strcmp(missing, "key")) {
+        sprintf(errBuf, "Provider %s has no %s line in CLAWDOS.CFG.", p->id, missing);
+        err = errBuf;
+        return -1;
+    }
+    if (model && model[0]) {
+        strncpy(p->model, model, sizeof p->model - 1);
+        p->model[sizeof p->model - 1] = 0;
+    }
+    if (p != prov)
+        http.close();
+    prov = p;
+    return 0;
+}
+
+/* --- the conversation file ----------------------------------------------------- */
+
+int8_t Chat::newConversation(void)
+{
+    struct dosdate_t d;
+    int n;
+
+    hist_close();
+    mkdir(CHATS_DIR);
+    _dos_getdate(&d);
+    for (n = 1; n < 1000; n++) {
+        sprintf(path, "%s\\%02u%02u%03d.JSN", CHATS_DIR, d.month, d.day, n);
+        if (access(path, 0) != 0)
+            break;
+    }
+    if (hist_open(path)) {
+        sprintf(errBuf, "Cannot create %s", path);
+        err = errBuf;
+        return -1;
+    }
+    mergeNext = 0;
+    pendingTool[0] = 0;
+    loadMemories();
+    return 0;
+}
+
+void Chat::loadMemories(void)
+{
+    ToolCtx t;
+    tout_reset(&t);
+    t.unattended = 1;
+    memories[0] = 0;
+    if (tool_memory_list(&t) == TS_OK) {
+        unsigned n = t.len < MEMORIES_MAX - 1 ? t.len : MEMORIES_MAX - 1;
+        memcpy(memories, t.out, n);
+        memories[n] = 0;
+    }
+}
+
+int Chat::histPut(Sink *s, const char *p, unsigned n)
+{
+    (void)s;
+    return hist_write(p, n);
+}
+
+void Chat::writeUserText(const char *text)
+{
+    Sink s;
+    s.put = histPut;
+    s.ctx = NULL;
+    s.count = 0;
+    if (mergeNext) {
+        hist_reopen_last(2);              /* the "]}" of the tool results message */
+        hist_puts(",{\"type\":\"text\",\"text\":\"");
+    } else {
+        hist_puts("{\"role\":\"user\",\"content\":\"");
+    }
+    json_escape_cp437(&s, text, strlen(text));
+    hist_puts(mergeNext ? "\"}]}" : "\"}");
+    hist_message_done();
+    mergeNext = 0;
+}
+
+void Chat::writeResult(const char *id, const char *text, int isError, const char *note)
+{
+    Sink s;
+    s.put = histPut;
+    s.ctx = NULL;
+    s.count = 0;
+    hist_puts("{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"");
+    hist_puts(id);
+    hist_puts("\",\"content\":\"");
+    json_escape_cp437(&s, text, strlen(text));
+    hist_puts(isError ? "\",\"is_error\":true}" : "\",\"is_error\":false}");
+    if (note) {
+        hist_puts(",{\"type\":\"text\",\"text\":\"");
+        json_escape_cp437(&s, note, strlen(note));
+        hist_puts("\"}");
+    }
+    hist_puts("]}");
+    hist_message_done();
+    pendingTool[0] = 0;
+}
+
+/* After a turn ends early: leave the file valid for the next request. */
+void Chat::settle(void)
+{
+    if (assistantInTurn == 0) {
+        hist_rollback_turn();
+        return;
+    }
+    if (pendingTool[0]) {
+        writeResult(pendingTool, "Interrupted by the user.", 1, NULL);
+        mergeNext = 1;
+    }
+}
+
+/* --- streaming callbacks ------------------------------------------------------- */
+
+void Chat::onText(void *ctx, const char *cp437, unsigned n)
+{
+    Chat *c = (Chat *)ctx;
+    if (!c->firstText)
+        c->firstText = TICKS_NOW;
+    c->ui->text(cp437, n);
+}
+
+void Chat::onThinking(void *ctx)
+{
+    Chat *c = (Chat *)ctx;
+    c->ui->thinking();
+}
+
+int Chat::onHist(void *ctx, const char *p, unsigned n)
+{
+    (void)ctx;
+    return hist_write(p, n);
+}
+
+void Chat::onEvent(void *ctx, const char *event, const char *data, unsigned n)
+{
+    Chat *c = (Chat *)ctx;
+    if (c->streamRc == 0)
+        c->streamRc = apistream_event(&c->as, event, data, n);
+}
+
+/* --- waiting on the network ---------------------------------------------------- */
+
+void Chat::pause(int secs)
+{
+    unsigned long start = TICKS_NOW;
+    while (ticks_elapsed(TICKS_NOW, start) < SECS_TO_TICKS(secs)) {
+        http.service();
+        ui->idle();
+        if (ui->escPressed())
+            return;
+    }
+}
+
+int Chat::waitRead(char *buf, unsigned max)
+{
+    unsigned long start = TICKS_NOW;
+    for (;;) {
+        int n = http.read(buf, max, 1);
+        if (n != -2)
+            return n;
+        ui->idle();
+        if (ui->escPressed())
+            return -3;
+        if (ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(READ_TIMEOUT))
+            return -2;
+    }
+}
+
+int8_t Chat::waitHead(HttpHead *h)
+{
+    unsigned long start = TICKS_NOW;
+    for (;;) {
+        int8_t rc = http.readHead(h, 1);
+        if (rc != -2)
+            return rc;
+        ui->idle();
+        if (ui->escPressed())
+            return 1;
+        if (ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(READ_TIMEOUT))
+            return -2;
+    }
+}
+
+/* Finish reading a body we no longer need, so the connection can be reused. */
+void Chat::drain(void)
+{
+    int n, guard = 0;
+    while (!http.bodyDone() && guard++ < 64) {
+        n = http.read(rxBuf, RX_MAX, 2);
+        if (n <= 0) {
+            if (n != 0)
+                http.close();
+            break;
+        }
+    }
+}
+
+/* The error message of a non-200 response (error.message), or the status. */
+void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
+{
+    static char *body;
+    unsigned len = 0;
+    const char *v;
+    unsigned vlen;
+    int n;
+
+    if (!body)
+        body = (char *)malloc(1600);
+    sprintf(msg, "API error %d", h->status);
+    if (!body)
+        return;
+    while (len < 1500 && (n = waitRead(body + len, 1500 - len)) > 0)
+        len += n;
+    drain();
+    if (len && json_find(body, len, "error.message", &v, &vlen) == JSON_STRING) {
+        unsigned k = json_unescape(v, vlen, body, 1500);
+        char *cp = (char *)malloc(max);
+        if (cp) {
+            unsigned c = utf8_to_cp437(body, k, cp, max - 1);
+            cp[c] = 0;
+            sprintf(msg, "API error %d: %.*s", h->status, (int)(max - 20), cp);
+            free(cp);
+        }
+    }
+}
+
+/* --- the clock ------------------------------------------------------------------ */
+
+void Chat::setClock(const char *date)
+{
+    struct dosdate_t dd;
+    struct dostime_t dt;
+    int y, mo, d, h, mi, s;
+    char line[90];
+
+    clockSet = 1;
+    if (http_parse_date(date, &y, &mo, &d, &h, &mi, &s))
+        return;
+    http_shift_time(&y, &mo, &d, &h, cfg->timezone);
+    _dos_getdate(&dd);
+    _dos_gettime(&dt);
+    if (dd.year >= 2020)
+        return;
+    sprintf(line, "Clock set from the API; it said %04u-%02u-%02u %02u:%02u:%02u",
+            dd.year, dd.month, dd.day, dt.hour, dt.minute, dt.second);
+    dd.year = (unsigned short)y;
+    dd.month = (unsigned char)mo;
+    dd.day = (unsigned char)d;
+    dt.hour = (unsigned char)h;
+    dt.minute = (unsigned char)mi;
+    dt.second = (unsigned char)s;
+    dt.hsecond = 0;
+    _dos_setdate(&dd);
+    _dos_settime(&dt);
+    ui->note(line, 0);
+    ui->log(line);
+}
+
+void Chat::logRound(int round)
+{
+    char line[200];
+    unsigned long now = TICKS_NOW;
+    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld",
+            prov->id, as.model[0] ? as.model : prov->model, round,
+            firstText ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
+            as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite);
+    ui->log(line);
+}
+
+/* --- one API round ---------------------------------------------------------------- */
+
+int8_t Chat::stream(void)
+{
+    int n;
+
+    sse_init(&sse, sseBuf, SSE_MAX);
+    apistream_init(&as, toolInput, TOOL_INPUT_MAX);
+    as.text = onText;
+    as.thinking = onThinking;
+    as.hist = onHist;
+    as.ctx = this;
+    streamRc = 0;
+    firstText = 0;
+    for (;;) {
+        n = waitRead(rxBuf, RX_MAX);
+        if (n > 0) {
+            if (sse_feed(&sse, rxBuf, (unsigned)n, onEvent, this) < 0 && streamRc == 0) {
+                streamRc = -1;
+                strcpy(as.error, "event too long");
+            }
+            if (streamRc == 1) {
+                drain();
+                return 0;
+            }
+            if (streamRc < 0) {
+                hist_rollback_message();
+                ui->note(as.error, 1);
+                drain();
+                return -1;
+            }
+            continue;
+        }
+        hist_rollback_message();
+        http.close();
+        if (n == -3)
+            return 1;
+        if (!reasked) {                  /* lost mid-reply: ask once more */
+            reasked = 1;
+            ui->note("[link lost, asking again]", 1);
+            return 2;
+        }
+        ui->note(n == -2 ? "The API stopped answering." : "The link was lost again; giving up on this reply.", 1);
+        return -1;
+    }
+}
+
+int8_t Chat::request(int noTools)
+{
+    ApiReq r;
+    HttpHead h;
+    char msg[160];
+    int attempt = 0;
+    int fresh;
+
+    r.p = prov;
+    r.promptPath = PROMPT_PATH;
+    r.toolsPath = TOOLS_PATH;
+    r.name = prov->name[0] ? prov->name : cfg->name;
+    r.memories = memories;
+    r.noTools = noTools;
+
+    for (;;) {
+        Sink count;
+        int8_t rc;
+
+        sink_count(&count);
+        if (api_body(&count, &r) != 0) {
+            ui->note("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".", 1);
+            return -1;
+        }
+        fresh = 0;
+        if (!http.isOpen()) {
+            if (connect()) {
+                ui->note(err, 1);
+                return -1;
+            }
+            fresh = 1;
+        }
+        reqStart = TICKS_NOW;
+        rc = http.sendHead(prov, count.count);
+        if (rc == 0 && api_body(http.sink(), &r) != 0)
+            rc = -1;
+        if (rc == 0)
+            rc = waitHead(&h);
+        if (rc == 1) {
+            http.close();
+            return 1;
+        }
+        if (rc != 0) {
+            int stale = !fresh && !http.headStarted();
+            http.close();
+            if (stale)                    /* an idle keep-alive connection the far end had dropped */
+                continue;
+            if (++attempt > 2) {
+                ui->note(rc == -2 ? "No answer from the API." : rc == -3 ? "The API sent a bad response."
+                                                                       : "The connection failed.", 1);
+                return -1;
+            }
+            ui->note(attempt == 1 ? "No reply; trying again in 2 s" : "Still nothing; trying again in 8 s", 1);
+            pause(attempt == 1 ? 2 : 8);
+            if (ui->escPressed())
+                return 1;
+            continue;
+        }
+        if (!clockSet && h.date[0])
+            setClock(h.date);
+        if (h.status == 200) {
+            rc = stream();
+            if (rc == 2)
+                continue;                 /* re-ask after a lost link */
+            return rc;
+        }
+        readErrorBody(&h, msg, sizeof msg);
+        if (h.close)
+            http.close();
+        if (h.status == 429 || h.status >= 500) {
+            int wait = h.retryAfter ? h.retryAfter : (attempt == 0 ? 2 : 8);
+            if (++attempt > 2) {
+                ui->note(msg, 1);
+                return -1;
+            }
+            sprintf(msg + strlen(msg), "; trying again in %d s", wait);
+            ui->note(msg, 1);
+            pause(wait);
+            if (ui->escPressed())
+                return 1;
+            continue;
+        }
+        ui->note(msg, 1);
+        return -1;
+    }
+}
+
+/* --- a turn ---------------------------------------------------------------------- */
+
+int8_t Chat::turn(const char *text)
+{
+    int round;
+
+    hist_turn_begin();
+    assistantInTurn = 0;
+    reasked = 0;
+    writeUserText(text);
+    for (round = 0; ; round++) {
+        ToolCtx t;
+        int status;
+        int8_t rc = request(round >= MAX_ROUNDS);
+        if (rc != 0) {
+            settle();
+            return rc;
+        }
+        hist_message_done();
+        assistantInTurn++;
+        logRound(round);
+        if (as.hasTool)
+            strncpy(pendingTool, as.toolId, sizeof pendingTool - 1);
+        if (!strcmp(as.stopReason, "refusal")) {
+            ui->note("The model declined to answer that.", 1);
+            hist_rollback_turn();
+            pendingTool[0] = 0;
+            return -1;
+        }
+        if (!strcmp(as.stopReason, "max_tokens"))
+            ui->note("[reply cut off: too long]", 1);
+        if (strcmp(as.stopReason, "tool_use")) {
+            if (as.hasTool) {             /* a call cut off before it was complete */
+                writeResult(as.toolId, "Error: reply cut off before the call was complete", 1, NULL);
+                mergeNext = 1;
+            }
+            return 0;
+        }
+        if (!as.hasTool)
+            return 0;
+        tout_reset(&t);
+        if (as.toolInputOverflow) {
+            ui->note("Tool call arguments too long; not run.", 1);
+            tout_puts(&t, "arguments too long");
+            status = TS_ERROR;
+        } else {
+            status = ui->tool(as.toolName, as.toolInput, as.toolInputLen, &t);
+        }
+        writeResult(as.toolId, tools_result_text(status, &t), status != TS_OK,
+                    round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
+        if (status == TS_STOPPED) {
+            mergeNext = 1;
+            return 1;
+        }
+        if (round >= MAX_ROUNDS) {        /* the model kept calling tools after the cap */
+            mergeNext = 1;
+            return 0;
+        }
+    }
+}

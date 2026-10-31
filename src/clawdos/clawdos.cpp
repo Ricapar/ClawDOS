@@ -1,18 +1,19 @@
 /* CLAWDOS.EXE - chat with Claude from an IBM PC 5160.
  *
- * Connects to a DOS Bridge (bridge/dosbridge.py) over TCP, sends what you
- * type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
+ * Talks the Messages API itself (chat.cpp) through a TLS tunnel, sends what
+ * you type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
  * screen. The look follows Claude Code: a welcome panel with Clawd, "> "
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAWDOS [host[:port]] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
+ *   CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
  *
- * Without a host, uses CLAWDOS_BRIDGE from the mTCP config file (MTCPCFG), and
- * CLAUDE_TOKEN if the bridge requires one.
+ * Settings, providers and the API key come from C:\CLAWDOS\CLAWDOS.CFG; a host
+ * on the command line replaces the provider's tunnel address (the tests point
+ * it at the mock API).
  */
 
 #include <stdio.h>
@@ -23,7 +24,9 @@
 
 #include "types.h"
 #include "inlines.h"
-#include "dosbridge.h"
+#include "net.h"
+#include "cfg.h"
+#include "chat.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -31,7 +34,9 @@
 #include "ticks.h"
 #include "ui.h"
 
-#define VERSION   "0.2"
+#define VERSION   "0.3"
+#define CFG_PATH  "C:\\CLAWDOS\\CLAWDOS.CFG"
+#define LOG_PATH  "C:\\CLAWDOS\\CLAWDOS.LOG"
 #define INPUT_MAX 900
 #define HIST_N    8
 
@@ -104,33 +109,17 @@ static const Theme *theme = &themes[0];
 
 enum State { IDLE, WAITING, STREAMING };
 
-static DOSBridge bridge;
+static Chat chat;
+static Cfg *cfg;
 static State state = IDLE;
 static int quitting;
+static int exitCode;
 static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
 static const char *toolVerb;          /* spinner verb while a tool runs */
-static char host[80];
-static char backend[80];
-static char token[64];
-
-/* Link liveness: the bridge answers PING at any time, even mid-reply. */
-#define PING_IDLE   SECS_TO_TICKS(60)   /* silence before a PING when idle */
-#define PING_BUSY   SECS_TO_TICKS(20)   /* ...and while waiting for Claude */
-#define PONG_WAIT   SECS_TO_TICKS(15)   /* no answer by then: the link is dead */
-#define RETRY_WAIT  SECS_TO_TICKS(10)   /* between reconnect attempts */
-static int linkUp;
-static unsigned long lastRx;          /* ticks when the bridge last sent a line */
-static int pinged;
-static unsigned long pingedAt;
-static unsigned long retryStart, retryWait;  /* next reconnect attempt */
-static char offlineNote[100];
-static DOSBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
-static char session[16];              /* the bridge's name for our conversation, for RESUME */
-static int resumed;                   /* the last connect carried the conversation on */
-static int cutOff;                    /* the link died in the middle of a reply */
-static char lostReport[200];          /* why the last link died, for the bridge's log */
-static char clockReport[80];          /* what the clock said before the bridge set it */
+static int stopRequested;             /* Esc during a turn */
+static unsigned long lastSpin;
+static char host[80];                 /* command-line address, if any */
 
 static char input[INPUT_MAX + 1];
 static int inputLen, inputPos;
@@ -295,13 +284,14 @@ static void drawHint(void)
     col = rowText(r, 2, "F1 help \xFA F2 new chat \xFA F3 ", A_DIM);
     col = rowText(r, col, tools_safe() ? "safe:on" : "safe:off", tools_safe() ? A_GOOD : A_ERR);
     col = rowText(r, col, " \xFA PgUp/PgDn \xFA F10 quit", A_DIM);
-    {   /* the bridge's address, right-aligned; a long one is cut to the room left */
-        int len = strlen(host), room = SCR_COLS - 5 - col;
+    {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
+        const char *where = chat.address();
+        int len = strlen(where), room = SCR_COLS - 5 - col;
         if (len > room)
             len = room;
         col = SCR_COLS - 2 - len - 2;
-        r.c[col] = G_BULLET | ((bridge.isConnected() ? A_GOOD : A_ERR) << 8);
-        rowText(r, col + 2, host, A_DIM, len);
+        r.c[col] = G_BULLET | ((chat.connected() ? A_GOOD : A_ERR) << 8);
+        rowText(r, col + 2, where, A_DIM, len);
     }
     scr_putn(SCR_ROWS - 1, 0, r.c, SCR_COLS);
 }
@@ -407,7 +397,7 @@ static void showHelp(void)
         "Enter sends \xFA Esc stops a reply (or clears what you typed)",
         "\x18/\x19 recall earlier messages \xFA \x1B/\x1A Home End Del edit \xFA Ctrl-U clears",
         "PgUp/PgDn scroll back \xFA F2 or /new starts over \xFA F10 or /quit leaves",
-        "/model lists the bridge's AI providers \xFA /model name switches",
+        "/model lists the AI providers in CLAWDOS.CFG \xFA /model name switches",
         "/theme lists the colour themes \xFA /theme name switches",
         "F3 toggles safe mode (asks before tools change files, memory or ports)",
         0
@@ -461,7 +451,7 @@ static void systemLine(char *buf)
     union REGS r;
     int86(0x12, &r, &r);              /* conventional memory in KB */
     sprintf(buf, "%uK RAM \xFA %s \xFA ", r.x.ax, scr_has_hwscroll() ? "CGA" : "EGA/VGA");
-    DOSBridge::localAddress(buf + strlen(buf));
+    Net::localAddress(buf + strlen(buf));
 }
 
 /* Claude Code's welcome panel: Clawd on the left, tips on the right. */
@@ -497,8 +487,8 @@ static void welcome(void)
         switch (i) {
         case 2: rowCenter(r, L, LW, "Welcome to ClawDOS!", A_TITLE); break;
         case 4: case 5: case 6: case 7: rowCenter(r, L, LW, clawd[i - 4], A_CLAWD); break;
-        case 9: rowCenter(r, L, LW, backend, A_DIM); break;
-        case 10: rowCenter(r, L, LW, host, A_DIM); break;
+        case 9: rowCenter(r, L, LW, chat.describe(), A_DIM); break;
+        case 10: rowCenter(r, L, LW, chat.address(), A_DIM); break;
         }
         switch (i) {
         case 2: rowText(r, R, "Tips for getting started", A_ACCENT); break;
@@ -559,7 +549,8 @@ static void setState(State s)
 
 static void newChat(void)
 {
-    bridge.send("NEW");
+    if (chat.newConversation())
+        note(chat.errorText(), A_ERR);
     con_init();
     welcome();
     blankLine();
@@ -568,6 +559,8 @@ static void newChat(void)
 }
 
 static void submit(void);
+static void handleKey(unsigned key);
+static void modelCommand(const char *arg);
 
 static void finished(void)
 {
@@ -606,10 +599,6 @@ static void submit(void)
         setInput("");
         return;
     }
-    if (!linkUp) {
-        note("Not connected to the bridge; your message is still in the box.", A_ERR);
-        return;
-    }
     if (!stricmp(input, "/new") || !stricmp(input, "/clear")) {
         setInput("");
         newChat();
@@ -620,41 +609,135 @@ static void submit(void)
         showHelp();
         return;
     }
-    echoUser(input);
-    if (bridge.send("MSG", input)) {
-        note(bridge.errorText(), A_ERR);
-        return;                       /* keep the text for another try */
+    if (!strnicmp(input, "/model", 6) && (input[6] == 0 || input[6] == ' ')) {
+        modelCommand(input + 6);
+        setInput("");
+        return;
     }
-    setState(WAITING);
-    setInput("");
+    echoUser(input);
+    {
+        static char text[INPUT_MAX + 1];
+        int rc;
+        strcpy(text, input);
+        setInput("");
+        setState(WAITING);
+        stopRequested = 0;
+        rc = chat.turn(text);
+        if (rc == 1) {
+            note("Interrupted by user", A_ERR);
+            if (!chat.answered())
+                setInput(text);       /* nothing came back: keep the text for another try */
+        } else if (rc < 0) {
+            if (quitAfterReply)
+                exitCode = 1;
+            if (!chat.answered())
+                setInput(text);
+        }
+    }
+    finished();
 }
 
-static void handleLine(const char *verb, const char *payload)
+/* /model lists the providers in CLAWDOS.CFG, /model NAME[:MODEL] or /model MODEL switches. */
+static void modelCommand(const char *arg)
 {
-    if (tools_line(verb, payload))
-        return;
-    if (!strcmp(verb, "TXT") || !strcmp(verb, "NL")) {
-        if (scr_viewing())
-            scr_view(0);
-        if (state == WAITING) {
-            startReply();
-            setState(STREAMING);
+    char buf[100];
+    int i;
+
+    while (*arg == ' ')
+        arg++;
+    if (!*arg) {
+        for (i = 0; i < cfg->nproviders; i++) {
+            const Provider *p = &cfg->providers[i];
+            sprintf(buf, "  %-12.12s %-40.40s%s%s", p->id, p->model, p == chat.provider() ? "  (current)" : "",
+                    cfg_missing(p) ? "  (incomplete)" : "");
+            note(buf, A_DIM);
         }
-        if (verb[0] == 'T')
-            con_write(payload);
-        else
-            con_newline();
-    } else if (!strcmp(verb, "END")) {
-        tools_stopping(0);
-        if (*payload)
-            note("Interrupted by user", A_ERR);
-        finished();
-    } else if (!strcmp(verb, "ERR")) {
-        tools_stopping(0);
-        note(payload, A_ERR);
-        finished();
+        note("/model NAME, /model NAME:MODEL or /model MODEL switches.", A_DIM);
+        return;
+    }
+    {
+        char id[40], *colon;
+        const char *model = NULL;
+        strncpy(id, arg, sizeof id - 1);
+        id[sizeof id - 1] = 0;
+        if ((colon = strchr(id, ':')) != NULL) {
+            *colon = 0;
+            model = colon + 1;
+        } else if (!cfg_provider(cfg, id)) {   /* a model name for the current provider */
+            model = arg;
+            strcpy(id, chat.provider()->id);
+        }
+        if (chat.switchProvider(id, model)) {
+            note(chat.errorText(), A_ERR);
+            return;
+        }
+        sprintf(buf, "Now %s", chat.describe());
+        note(buf, A_DIM);
     }
 }
+
+/* --- what the agent loop needs from the screen (chat.h) ------------------- */
+
+static void uiText(const char *text, unsigned n)
+{
+    static char buf[520];
+
+    if (scr_viewing())
+        scr_view(0);
+    if (state == WAITING) {
+        startReply();
+        setState(STREAMING);
+    }
+    while (n) {
+        unsigned k = n > 512 ? 512 : n;
+        memcpy(buf, text, k);
+        buf[k] = 0;
+        con_write(buf);
+        text += k;
+        n -= k;
+    }
+}
+
+static void uiThinking(void)
+{
+}
+
+static void uiNote(const char *text, int error)
+{
+    note(text, error ? A_ERR : A_DIM);
+}
+
+/* Called while the loop waits on the network: keys and the spinner. */
+static void uiIdle(void)
+{
+    while (biosIsKeyReady())
+        handleKey(biosKeyRead());
+    if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
+        lastSpin = TICKS_NOW;
+        drawStatus();
+    }
+}
+
+static int uiEscPressed(void)
+{
+    return stopRequested || quitting || Net::breakPressed;
+}
+
+static void uiLog(const char *line)
+{
+    FILE *f = fopen(LOG_PATH, "a");
+    struct dosdate_t d;
+    struct dostime_t t;
+
+    if (f == NULL)
+        return;
+    _dos_getdate(&d);
+    _dos_gettime(&t);
+    fprintf(f, "%04u-%02u-%02u %02u:%02u:%02u %s\n", d.year, d.month, d.day, t.hour, t.minute, t.second, line);
+    fclose(f);
+}
+
+static ChatUi chatUi = { uiText, uiThinking, uiNote, tools_call, uiIdle, uiEscPressed, uiLog };
 
 
 /* --- tool calls (ui.h) ----------------------------------------------------- */
@@ -733,7 +816,7 @@ void ui_tool_done(void)
 {
     /* Ctrl-Break during a tool (say, to stop a program under run) shouldn't
        also end the chat. */
-    DOSBridge::breakPressed = 0;
+    Net::breakPressed = 0;
     toolVerb = NULL;
     drawStatus();
     placeCursor();
@@ -747,12 +830,14 @@ void ui_redraw(void)
 
 int ui_send(const char *verb, const char *payload)
 {
-    return bridge.send(verb, payload);
+    (void)verb;                       /* the old bridge protocol: nothing to send to */
+    (void)payload;
+    return -1;
 }
 
 void ui_local_address(char *buf)
 {
-    DOSBridge::localAddress(buf);
+    Net::localAddress(buf);
 }
 
 
@@ -815,10 +900,9 @@ static void handleKey(unsigned key)
 
     switch (ch) {
     case KEY_ESC:
-        if (state != IDLE) {
-            bridge.send("STOP");
-            tools_stopping(1);        /* calls already on their way won't run */
-        } else
+        if (state != IDLE)
+            stopRequested = 1;        /* the loop sees it at its next wait */
+        else
             setInput("");
         return;
     case KEY_ENTER:
@@ -855,6 +939,9 @@ static void handleKey(unsigned key)
 
 static void fatal(const char *text)
 {
+    char line[200];
+    sprintf(line, "fatal: %.180s", text);
+    uiLog(line);
     blankLine();
     con_margins(0, SCR_COLS - 1);
     con_attr(A_ERR);
@@ -867,209 +954,10 @@ static void fatal(const char *text)
     setState(IDLE);
     if (!quitAfterReply)              /* unattended runs have nobody to press it */
         biosKeyRead();
-    bridge.close();
-    DOSBridge::stopStack();
+    chat.close();
+    Net::stopStack();
     scr_done();
     exit(1);
-}
-
-/* Wait up to `secs` for the next protocol line. */
-static int waitLine(int secs)
-{
-    unsigned long start = TICKS_NOW;
-    while (ticks_elapsed(TICKS_NOW, start) < SECS_TO_TICKS(secs)) {
-        int rc = bridge.poll();
-        if (rc != 0)
-            return rc;
-        if (DOSBridge::breakPressed)
-            return -1;
-    }
-    return 0;
-}
-
-/* `n` decimal digits at *p, or -1. */
-static int digits(const char **p, int n)
-{
-    int v = 0;
-    for (; n; n--, ++*p) {
-        if (**p < '0' || **p > '9')
-            return -1;
-        v = v * 10 + (**p - '0');
-    }
-    return v;
-}
-
-/* Set the DOS clock from the bridge's ("TIME 2026-10-28T14:03:07" in its
-   HELLO): the DOS PC has no battery clock, and SNTP at boot doesn't always take,
-   which left every file dated 1980. A clock that was well off is reported to
-   the bridge's log. */
-static void setClock(const char *hello)
-{
-    const char *p = strstr(hello, "TIME ");
-    struct dosdate_t dd;
-    struct dostime_t dt;
-    int y, mo, d, h, mi, s;
-    long now, was;
-
-    if (p == NULL)
-        return;
-    p += 5;
-    if ((y = digits(&p, 4)) < 0 || *p++ != '-' || (mo = digits(&p, 2)) < 0 || *p++ != '-'
-        || (d = digits(&p, 2)) < 0 || *p++ != 'T' || (h = digits(&p, 2)) < 0 || *p++ != ':'
-        || (mi = digits(&p, 2)) < 0 || *p++ != ':' || (s = digits(&p, 2)) < 0)
-        return;
-    _dos_getdate(&dd);
-    _dos_gettime(&dt);
-    now = h * 3600L + mi * 60 + s;
-    was = dt.hour * 3600L + dt.minute * 60 + dt.second;
-    if (dd.year == y && dd.month == mo && dd.day == d && labs(now - was) <= 2)
-        return;
-    if (dd.year != y || dd.month != mo || dd.day != d || labs(now - was) > 60)
-        sprintf(clockReport, "Clock set from the bridge; it said %04u-%02u-%02u %02u:%02u:%02u",
-                dd.year, dd.month, dd.day, dt.hour, dt.minute, dt.second);
-    dd.year = (unsigned short)y;
-    dd.month = (unsigned char)mo;
-    dd.day = (unsigned char)d;
-    dt.hour = (unsigned char)h;
-    dt.minute = (unsigned char)mi;
-    dt.second = (unsigned char)s;
-    dt.hsecond = 0;
-    _dos_setdate(&dd);
-    _dos_settime(&dt);
-}
-
-/* Connect and say hello. Returns NULL, or what went wrong (link closed). */
-static const char *connectBridge(void)
-{
-    if (bridge.connect(host, DOSBRIDGE_PORT))
-        return bridge.errorText();
-    char fresh[sizeof(session)] = "";
-    const char *s;
-
-    if (waitLine(10) <= 0 || strcmp(bridge.verb(), "HELLO")) {
-        bridge.close();
-        return "The bridge didn't say hello.";
-    }
-    if ((s = strstr(bridge.payload(), "SESSION ")) != NULL) {   /* "DOSBRIDGE 1 [AUTH] SESSION id" */
-        strncpy(fresh, s + 8, sizeof(fresh) - 1);
-        fresh[strcspn(fresh, " ")] = 0;
-    }
-    setClock(bridge.payload());
-    if (strstr(bridge.payload(), "AUTH")) {
-        bridge.send("AUTH", token);
-        if (waitLine(10) <= 0 || strcmp(bridge.verb(), "OK")) {
-            bridge.close();
-            return "The bridge rejected our CLAUDE_TOKEN.";
-        }
-    }
-    /* After a lost link, ask for the old conversation back. An older bridge,
-       or one that has forgotten it, answers ERR and we carry on with a new one. */
-    resumed = 0;
-    if (session[0]) {
-        bridge.send("RESUME", session);
-        resumed = waitLine(10) > 0 && !strcmp(bridge.verb(), "OK");
-    }
-    if (!resumed)
-        strcpy(session, fresh);
-    bridge.send("INFO");
-    if (waitLine(10) > 0 && !strcmp(bridge.verb(), "INFO"))
-        strncpy(backend, bridge.payload(), sizeof(backend) - 1);
-    linkUp = 1;
-    lastRx = TICKS_NOW;
-    pinged = 0;
-    DOSBridge::counters(&rxNet);
-    if (lostReport[0]) {              /* tell the bridge's log what happened */
-        bridge.send("LOG", lostReport);
-        lostReport[0] = 0;
-    }
-    if (clockReport[0]) {
-        bridge.send("LOG", clockReport);
-        clockReport[0] = 0;
-    }
-    return NULL;
-}
-
-/* What the network did between the bridge's last line and now. Packets sent
-   and retransmitted with nothing received: our side kept talking into a dead
-   link (WiFi). Nothing sent: we never got the data out. */
-static void noteLinkLoss(const char *why)
-{
-    DOSBridge::Counters now;
-    DOSBridge::counters(&now);
-    sprintf(lostReport, "Link lost (%.50s) %lus after the bridge's last line; since then: "
-                        "sent %lu, retransmitted %lu, received %lu, send errors %lu, dropped %lu",
-            why, (unsigned long)TICKS_TO_SECS(ticks_elapsed(TICKS_NOW, lastRx)), now.sent - rxNet.sent,
-            now.retransmitted - rxNet.retransmitted, now.received - rxNet.received,
-            now.sendErrors - rxNet.sendErrors, now.dropped - rxNet.dropped);
-}
-
-/* The link is gone: say so, drop whatever was in flight, and retry later
-   instead of leaving the chat. */
-static void linkLost(const char *why)
-{
-    noteLinkLoss(why);
-    bridge.close();
-    linkUp = 0;
-    tools_reset();
-    toolVerb = NULL;
-    queued = 0;
-    cutOff = state != IDLE;
-    if (cutOff)
-        note("The reply was cut off.", A_ERR);
-    note(why, A_ERR);
-    setState(IDLE);
-    if (quitAfterReply) {             /* unattended: one reconnect, then fail */
-        const char *err = connectBridge();
-        fatal(err ? err : "Lost the bridge mid-reply (reconnected, then gave up).");
-    }
-    retryStart = TICKS_NOW;
-    retryWait = SECS_TO_TICKS(5);
-    snprintf(offlineNote, sizeof(offlineNote), "Bridge offline; reconnecting to %s ...", host);
-    statusNote = offlineNote;
-    drawStatus();
-    drawHint();
-}
-
-static void reconnect(void)
-{
-    const char *err;
-
-    snprintf(offlineNote, sizeof(offlineNote), "Reconnecting to %s ...", host);
-    statusNote = offlineNote;
-    drawStatus();
-    err = connectBridge();
-    if (err) {
-        snprintf(offlineNote, sizeof(offlineNote), "Bridge offline (%.40s) - retrying in 10s. F10 quits.", err);
-        drawStatus();
-        retryStart = TICKS_NOW;
-        retryWait = RETRY_WAIT;
-        return;
-    }
-    statusNote = NULL;
-    if (!resumed)
-        note("Reconnected to the bridge. It doesn't remember the earlier conversation.", A_DIM);
-    else if (cutOff)
-        note("Reconnected; the conversation carries on. The last reply was cut off: "
-             "ask ClawDOS to continue if you need the rest.", A_DIM);
-    else
-        note("Reconnected; the conversation carries on.", A_DIM);
-    drawFooter();
-}
-
-/* Ping a quiet bridge; give up on one that doesn't answer. */
-static void checkLink(void)
-{
-    unsigned long now = TICKS_NOW;
-
-    if (pinged) {
-        if (ticks_elapsed(now, pingedAt) > PONG_WAIT)
-            linkLost("The bridge stopped answering.");
-    } else if (ticks_elapsed(now, lastRx) > (state == IDLE ? PING_IDLE : PING_BUSY)) {
-        if (bridge.send("PING"))
-            linkLost(bridge.errorText());
-        else
-            pinged = 1, pingedAt = now;
-    }
 }
 
 int main(int argc, char *argv[])
@@ -1078,7 +966,8 @@ int main(int argc, char *argv[])
     int noscroll = 0, unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
     const char *prefill = NULL;
-    int i;
+    const char *providerArg = NULL;
+    int i, bad;
 
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-noscroll") || !stricmp(argv[i], "/noscroll")) {
@@ -1091,11 +980,15 @@ int main(int argc, char *argv[])
             firstMessage = argv[++i];
         } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
             prefill = argv[++i];
+        } else if ((!stricmp(argv[i], "-p") || !stricmp(argv[i], "/p")) && i + 1 < argc) {
+            providerArg = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("CLAWDOS " VERSION " - chat with an AI via a DOS Bridge\n\n"
-                   "Usage: CLAWDOS [host[:port]] [-noscroll] [-unsafe] [-q]\n"
+            printf("CLAWDOS " VERSION " - chat with an AI from DOS\n\n"
+                   "Usage: CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q]\n"
                    "              [-m message] [-i text]\n\n"
-                   "Without a host, CLAWDOS_BRIDGE from the mTCP config file is used.\n"
+                   "Settings come from " CFG_PATH ". A host replaces the\n"
+                   "provider's tunnel address (plain HTTP, e.g. the mock API in tests).\n"
+                   "-p       use this [provider] section instead of the configured one\n"
                    "-noscroll  scroll by copying text, not by moving the CGA start address\n"
                    "-unsafe  start with safe mode off: tools run without asking\n"
                    "-q       quit once the -m message is answered (unattended tests)\n"
@@ -1109,21 +1002,26 @@ int main(int argc, char *argv[])
 
     tools_init(!unsafe, quick);
     quitAfterReply = quick && firstMessage != NULL;
-    if (DOSBridge::startStack())
-        return 1;
-    tool_idle = DOSBridge::service;    /* keep ACKing the bridge during long tools */
-    if (!host[0] && DOSBridge::configValue("CLAWDOS_BRIDGE", host, sizeof(host)) != 0) {
-        fprintf(stderr, "No bridge given. Use CLAWDOS host[:port], or add a line like\n"
-                        "  CLAWDOS_BRIDGE 192.168.1.10:8023\n"
-                        "to your mTCP config file (%s).\n", getenv("MTCPCFG"));
-        DOSBridge::stopStack();
+    cfg = (Cfg *)malloc(sizeof(Cfg));
+    if (cfg == NULL) {
+        fprintf(stderr, "Out of memory.\n");
         return 1;
     }
-    DOSBridge::configValue("CLAUDE_TOKEN", token, sizeof(token));
-    char themeName[16];
-    if (DOSBridge::configValue("CLAWDOS_THEME", themeName, sizeof(themeName)) == 0
-        && (i = findTheme(themeName)) >= 0)
+    cfg_defaults(cfg);
+    bad = cfg_load(cfg, CFG_PATH);
+    if (bad == -1) {
+        fprintf(stderr, "Cannot read %s.\nIt holds the tunnel address, the provider and the API key.\n", CFG_PATH);
+        return 1;
+    }
+    if (bad > 0) {
+        fprintf(stderr, "%s line %d: unknown setting or too many providers.\n", CFG_PATH, bad);
+        return 1;
+    }
+    if (cfg->theme[0] && (i = findTheme(cfg->theme)) >= 0)
         theme = &themes[i];
+    if (Net::startStack())
+        return 1;
+    tool_idle = Net::service;          /* keep the connection alive during long tools */
 
     scr_init();
     if (noscroll)
@@ -1131,13 +1029,12 @@ int main(int argc, char *argv[])
     con_track_cursor(0);            /* the cursor lives in the input box */
     con_init();
     scr_footer(footerRows(), A_TEXT);
-    sprintf(note_, "Connecting to the bridge at %s ...", host);
+    sprintf(note_, "Connecting to %.60s ...", host[0] ? host : "the tunnel");
     statusNote = note_;
     drawFooter();
 
-    const char *err = connectBridge();
-    if (err)
-        fatal(err);
+    if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi))
+        fatal(chat.errorText());
 
     welcome();
     statusNote = NULL;
@@ -1147,40 +1044,17 @@ int main(int argc, char *argv[])
     if (prefill)
         setInput(prefill);
 
-    unsigned long lastSpin = TICKS_NOW;
-
     while (!quitting) {
-        if (linkUp) {
-            int rc = bridge.poll();
-            if (rc > 0) {
-                pinged = 0;
-                DOSBridge::counters(&rxNet);
-                handleLine(bridge.verb(), bridge.payload());
-                lastRx = TICKS_NOW;      /* after it: a tool may have run a while */
-                continue;
-            }
-            if (rc < 0)
-                linkLost(bridge.errorText());
-            else
-                checkLink();
-        } else if (ticks_elapsed(TICKS_NOW, retryStart) >= retryWait) {
-            reconnect();
-        }
-        if (DOSBridge::breakPressed)
+        if (Net::breakPressed)
             break;
         if (biosIsKeyReady())
             handleKey(biosKeyRead());
-        if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
-            lastSpin = TICKS_NOW;
-            drawStatus();
-        }
+        Net::service();
     }
 
-    if (linkUp)
-        bridge.send("QUIT");
-    bridge.close();
-    DOSBridge::stopStack();
+    chat.close();
+    Net::stopStack();
     scr_done();
     printf("Thanks for chatting!\n");
-    return 0;
+    return exitCode;
 }

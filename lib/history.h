@@ -30,6 +30,10 @@ void hist_turn_begin(void);           /* remember where this turn started */
 int  hist_rollback_message(void);     /* truncate to the last boundary */
 int  hist_rollback_turn(void);        /* truncate to the turn start */
 int  hist_turn_messages(void);        /* complete messages since turn_begin */
+/* Take the last n bytes off the last complete message (its closing "]}") so
+   more can be appended to it; finish with hist_message_done. A later
+   hist_rollback_turn restores the message if turn_begin preceded the reopen. */
+int  hist_reopen_last(unsigned n);
 int  hist_copy(Sink *s);              /* file contents (no brackets) into the sink */
 
 #ifdef __cplusplus

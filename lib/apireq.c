@@ -134,14 +134,17 @@ int api_head(Sink *s, const Provider *p, unsigned long length)
     PUT(" HTTP/1.1\r\nHost: ");
     PUT(p->host);
     PUT("\r\n");
-    if (!stricmp(p->auth, "bearer")) {
-        PUT("Authorization: Bearer ");
-        PUT(p->key);
-    } else {
-        PUT("x-api-key: ");
-        PUT(p->key);
+    if (p->key[0]) {                       /* no key: no header (the API says 401) */
+        if (!stricmp(p->auth, "bearer")) {
+            PUT("Authorization: Bearer ");
+            PUT(p->key);
+        } else {
+            PUT("x-api-key: ");
+            PUT(p->key);
+        }
+        PUT("\r\n");
     }
-    PUT("\r\nanthropic-version: 2023-06-01\r\n");
+    PUT("anthropic-version: 2023-06-01\r\n");
     if (p->betas[0]) {
         PUT("anthropic-beta: ");
         PUT(p->betas);

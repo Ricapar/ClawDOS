@@ -27,9 +27,11 @@ class Http {
     Sink  *sink(void) { return &sk; }                  /* writes go to the socket */
     int8_t sendHead(const Provider *p, unsigned long length);   /* api_head into the socket */
 
-    /* Read the status line and headers (<= HTTP_HEAD_MAX) within `secs`.
+    /* Read the status line and headers (<= HTTP_HEAD_MAX) within `secs`; call
+       again after a timeout, what arrived so far is kept.
        0 ok, -1 link lost, -2 timeout, -3 malformed. */
     int8_t readHead(HttpHead *h, int secs);
+    int    headStarted(void) { return headLen > 0; }   /* any byte of the response yet? */
     /* Decoded body bytes: >0 bytes, 0 body finished, -1 link lost, -2 timeout. */
     int    read(char *buf, unsigned max, int secs);
     int    bodyDone(void) { return done; }
@@ -42,6 +44,8 @@ class Http {
     Sink sk;
     char *rx;                     /* raw bytes from the socket not yet consumed */
     unsigned rxLen, rxPos;
+    char *headBuf;                /* the response head being collected */
+    unsigned headLen;
     HttpHead head;
     Chunked ch;
     long left;                    /* Content-Length bytes still to come */

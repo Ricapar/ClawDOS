@@ -613,6 +613,15 @@ static void testHistory(void)
     CHECK_STR("hist append after reopen", histText(),
               "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]},\r\n"
               "{\"role\":\"user\",\"content\":\"c\"}");
+    hist_turn_begin();
+    hist_reopen_last(1);
+    hist_puts(",\"x\":1}");
+    hist_message_done();
+    CHECK_STR("hist reopen last message", histText(),
+              "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]},\r\n"
+              "{\"role\":\"user\",\"content\":\"c\",\"x\":1}");
+    CHECK("hist rollback after reopen restores the message", hist_rollback_turn() == 0
+          && !strcmp(histText() + strlen(histText()) - 29, "{\"role\":\"user\",\"content\":\"c\"}"));
     hist_close();
     remove("C:\\HISTTEST.JSN");
 }

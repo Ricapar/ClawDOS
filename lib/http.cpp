@@ -6,7 +6,7 @@
 #include "apireq.h"
 #include "ticks.h"
 
-Http::Http() : rx(NULL), rxLen(0), rxPos(0), left(0), done(1), out(NULL), outLen(0), outMax(0)
+Http::Http() : rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), left(0), done(1), out(NULL), outLen(0), outMax(0)
 {
     sk.put = sockPut;
     sk.ctx = this;
@@ -41,6 +41,7 @@ void Http::close(void)
 int8_t Http::sendHead(const Provider *p, unsigned long length)
 {
     sk.count = 0;
+    headLen = 0;
     return (int8_t)(api_head(&sk, p, length) ? -1 : 0);
 }
 
@@ -69,11 +70,12 @@ int Http::fill(int secs)
 
 int8_t Http::readHead(HttpHead *h, int secs)
 {
-    static char *buf;
-    unsigned len = 0;
+    char *buf;
+    unsigned len = headLen;
 
-    if (!buf)
-        buf = (char *)malloc(HTTP_HEAD_MAX);
+    if (!headBuf)
+        headBuf = (char *)malloc(HTTP_HEAD_MAX);
+    buf = headBuf;
     if (!buf || !rx)
         return -1;
     for (;;) {
@@ -81,6 +83,7 @@ int8_t Http::readHead(HttpHead *h, int secs)
             if (len >= HTTP_HEAD_MAX - 1)
                 return -3;
             buf[len++] = rx[rxPos++];
+            headLen = len;
             if (len >= 4 && !memcmp(buf + len - 4, "\r\n\r\n", 4)) {
                 buf[len] = 0;
                 if (http_parse_head(buf, &head))
