@@ -57,6 +57,9 @@ socket to the same HTTP client.
 - Native TLS or a PicoMEM-side tunnel. Enabled by this design, not part of it.
 - Images, the bridge-side git history and the other roadmap items that assumed a
   smart bridge (M6.x). They need a new home; not here.
+- Server-side refusal fallbacks (the `server-side-fallback` beta the bridge
+  sends). See The request for why; it can return later as a non-streaming
+  special case if refusals turn out to matter.
 - `--replay LOG` (bridge/replay.py). It replayed bridge-protocol logs, which stop
   existing. A mock scenario can re-create what it was used for later.
 
@@ -92,7 +95,7 @@ socket to the same HTTP client.
 | `C:\CLAWDOS\PROMPT.TXT` | The complete system prompt with `{name}` and `{memories}` placeholders. Replaces bridge/prompts/default.txt and the TOOLS_PROMPT / MEMORY_PROMPT add-ons, which move into this file. Source: `image/clawdos/PROMPT.TXT`. |
 | `C:\CLAWDOS\TOOLS.JSN` | The `tools` array of the request, verbatim. Replaces the schemas in bridge/tools.py. Source: `image/clawdos/TOOLS.JSN`, the single source of truth; the mock reads the same file. |
 | `C:\CLAWDOS\CHATS\*.JSN` | One file per conversation: the `messages` array's elements, in the Anthropic format (below). Also the conversation log. |
-| `C:\CLAWDOS\CLAWDOS.LOG` | One line per API round: date, provider, model, ms to first token, ms total, stop reason, tokens in/out/cache read/cache write. Replaces bridge/convlog.py's usage events. |
+| `C:\CLAWDOS\CLAWDOS.LOG` | Append-only diagnostics: one line per API round (date, provider, model, ms to first token, ms total, stop reason, tokens in/out/cache read/cache write) and one per note that used to go to the bridge's log as a `LOG` line (clock set, link lost, reconnects, retries, tool call errors). Replaces bridge/convlog.py's usage events and the bridge log. |
 | `C:\MEMORY\*.TXT` | Unchanged. |
 
 `CLAWDOS.CFG` is line-oriented like MTCP.CFG (`key value`, `#` comments), with
@@ -113,17 +116,24 @@ path /v1/messages
 key sk-ant-...              # or: keyfile C:\CLAWDOS\ANTHROP.KEY
 model claude-opus-5-5
 effort low
-betas server-side-fallback-2026-07-01
+# auth x-api-key (default) or bearer; betas adds an anthropic-beta header
 
 [openrouter]
 type anthropic
 tunnel 192.168.1.10:8444
 host openrouter.ai
 path /api/v1/messages
+auth bearer
 key sk-or-...
 model anthropic/claude-opus-5.5
 name Claude
 ```
+
+Every line of a provider section except `type`, `tunnel`, `host`, `path`, `key`
+and `model` is optional, and the request only carries what is set: no `effort`
+line, no `output_config`; no `betas`, no `anthropic-beta` header. `cache_control`
+is sent unless `cache 0`. That is how an `[openrouter]`-style section works on
+day one without the writer knowing anything about OpenRouter.
 
 `CLAWDOS_BRIDGE`, `CLAUDE_TOKEN` and `CLAWDOS_THEME` leave MTCP.CFG. On the
 command line, `CLAWDOS [host:port]` now means "reach the current provider at this
@@ -140,23 +150,36 @@ boots; CLAWDOS says which file to edit.
 ### The request
 
 One `POST {path} HTTP/1.1` per API round, on the open connection, with
-`Host`, `x-api-key`, `anthropic-version: 2023-06-01`, `anthropic-beta` (from
-`betas`), `Content-Type: application/json`, `Content-Length`, `Connection:
-keep-alive`, `Accept: text/event-stream`. The body is produced by a writer that
-walks a fixed sequence of parts and either counts or sends them, so the length
-is known without buffering:
+`Host`, `x-api-key` (or `Authorization: Bearer` with `auth bearer`),
+`anthropic-version: 2023-06-01`, `anthropic-beta` (only with `betas`),
+`Content-Type: application/json`, `Content-Length`, `Connection: keep-alive`,
+`Accept: text/event-stream`. The body is produced by a writer that walks a fixed
+sequence of parts, some conditional on the config, and either counts or sends
+them, so the length is known without buffering:
 
 ```
 {"model":"...","max_tokens":16000,"stream":true,
- "output_config":{"effort":"low"},
- "cache_control":{"type":"ephemeral"},
+ "output_config":{"effort":"low"},                 if effort is set
+ "cache_control":{"type":"ephemeral"},             unless cache 0
+ "tool_choice":{"type":"auto","disable_parallel_tool_use":true},
+                                                   {"type":"none"} on the 26th round
  "system":[{"type":"text","text":<PROMPT.TXT with substitutions, JSON-escaped>,
             "cache_control":{"type":"ephemeral"}}],
  "tools":<TOOLS.JSN verbatim>,
  "messages":[<CHATS file verbatim>]
- [,"tool_choice":{"type":"none"}]   on the 26th round only (see loop)
 }
 ```
+
+`disable_parallel_tool_use` is deliberate: the model then makes at most one tool
+call per round, so one arguments buffer suffices and the tools run in the order
+the user sees them. It costs a request per call instead of per batch of calls;
+on this machine the tools were always run one at a time anyway. No `thinking`
+field is sent: the models we use think adaptively by default and `effort` is the
+only control. The bridge's server-side fallback beta (`fallbacks: "default"`) is
+**not** carried over: a fallback mid-reply requires dropping blocks that were
+already written before the fallback marker, which an append-only history cannot
+do. A refusal therefore ends the turn (below) instead of being retried on
+another model.
 
 `{memories}` is the output of the local `memory_list` executor, taken once per
 conversation as the bridge did; `{name}` from the provider or global `name`. The
@@ -175,10 +198,18 @@ copy. CLAWDOS writes:
 - the user's text: `{"role":"user","content":"..."}` (CP437 → UTF-8, escaped);
   after tool results it is appended as a text block to the pending user message,
   since roles must alternate (the bridge's `_add_user`).
-- the assistant message, assembled from the stream: text blocks (the raw
-  JSON-escaped `text_delta` fragments concatenated, which is valid because each
-  delta is a complete JSON string) and `tool_use` blocks (`id`, `name`, and the
-  concatenated `input_json_delta` fragments as `input`).
+- the assistant message, assembled from the stream, block by block in the order
+  they arrive: `text` blocks (the raw JSON-escaped `text_delta` fragments
+  concatenated, which is valid because each delta is a complete JSON string),
+  `thinking` blocks (`thinking_delta` fragments, then the `signature_delta` as
+  `"signature"`), `redacted_thinking` blocks (the `data` from the block start)
+  and `tool_use` blocks (`id`, `name`, and the concatenated `input_json_delta`
+  fragments as `input`). Thinking blocks are never shown, but they **must** be
+  echoed back unchanged on later rounds ("preserved thinking": stripping them
+  can make the next request a 400), which is why the writer copies every block
+  type it knows and the file holds exactly what the API sent. A block of a type
+  the writer does not know ends the turn with an error rather than being
+  silently dropped.
 - tool results: `{"role":"user","content":[{"type":"tool_result","tool_use_id":
   "...","content":"...","is_error":true}, ...]}` with the status texts the bridge
   used (`Error: ...`, `The user denied this tool call.`, `Interrupted by the
@@ -207,10 +238,12 @@ module in lib/ with unit tests in tests/unit/dosunit.c:
    chunked decoding, a line reader over the body. Reads in 2 KB pieces through
    mTCP, keeps the connection open after the body unless the server closed it.
 2. **sse.c**: splits the body into events (`event:` and `data:` lines, blank line
-   ends an event). One `data:` line fits in 8 KB; a longer one is an error for
-   the turn ("event too long"), which the mock exercises.
+   ends an event). One `data:` line fits in 16 KB (a `signature_delta` carries a
+   base64 blob of a few KB; text and JSON deltas are small); a longer one is an
+   error for the turn ("event too long"), which the mock exercises.
 3. **json.c**: a non-recursive tokenizer for small objects (events are a few
-   hundred bytes; the largest is a `content_block_start` for a tool_use). Gives
+   hundred bytes; the largest are a `signature_delta` and a `content_block_start`
+   for a tool_use). Gives
    key lookup by path (`delta.text`, `delta.partial_json`, `message.usage.
    input_tokens`, `error.message`), string unescaping including `\uXXXX` and
    surrogate pairs into UTF-8, and escaping for the writer. Also parses a
@@ -221,12 +254,14 @@ module in lib/ with unit tests in tests/unit/dosunit.c:
    accents is replaced by a table of the Latin-1 letters CP437 lacks), and
    CP437 → UTF-8 (a 256-entry table) for what we send.
 
-The events we act on: `message_start` (usage), `content_block_start` (text or
-tool_use: id, name), `content_block_delta` (`text_delta` → decode, write to the
-console and to the history; `input_json_delta` → append to the arguments buffer
-and the history), `content_block_stop` (a tool_use block is complete), `message_
-delta` (stop_reason, output usage), `message_stop`, `error`, `ping`. Unknown
-events and keys are ignored.
+The events we act on: `message_start` (usage), `content_block_start` (text,
+thinking, redacted_thinking or tool_use: id, name), `content_block_delta`
+(`text_delta` → decode, write to the console and to the history;
+`thinking_delta` and `signature_delta` → history only, with the spinner showing
+"thinking"; `input_json_delta` → append to the arguments buffer and the
+history), `content_block_stop` (a block is complete), `message_delta`
+(stop_reason, output usage), `message_stop`, `error`, `ping`. Unknown events and
+unknown keys are ignored; an unknown block type is an error (above).
 
 The arguments buffer grows from today's 6 KB to 16 KB in far memory (the `edit`
 tool's `old`/`new` and `write`'s `text` are the big ones); a tool call whose
@@ -256,9 +291,11 @@ submit. A tool call in progress is stopped as today.
   truncate.
 - The link drops mid-stream: what was shown stays on screen, the partial
   assistant message is dropped from the file, and the request is sent again on a
-  new connection with a `[link lost, asking again]` note. The model answers from
-  scratch; that is the price of a stateless API and it is simpler than today's
-  RESUME, which disappears along with session ids.
+  new connection with a `[link lost, asking again]` note, **once per turn**; a
+  second drop ends the turn with an error. The model answers from scratch; that
+  is the price of a stateless API and it is simpler than today's RESUME, which
+  disappears along with session ids. Each reconnect is logged as
+  `connection #n`, which drop.bat watches for.
 - `stop_reason refusal`: "The model declined to answer that." and the user
   message is removed from the file (bridge behaviour).
 
@@ -267,7 +304,8 @@ submit. A tool call in progress is stopped as today.
 The response's `Date` header is RFC 1123 GMT; `timezone` from CLAWDOS.CFG gives
 local time, and the DOS clock is set once per run when it is clearly wrong (year
 < 2020), with the same transcript note as today ("Clock set from the bridge"
-becomes "Clock set from the API"). The clock boot test watches for that text.
+becomes "Clock set from the API"). The note also goes to CLAWDOS.LOG, which is
+how the clock boot test sees it (Testing, below).
 
 ### `/model`
 
@@ -314,8 +352,12 @@ current), the config file and the tunnel.
   splitting, request length counting equals bytes sent, history truncate and
   settle rules, CLAWDOS.CFG parsing, Date header parsing.
 - Boot tests: `--bridge` becomes `--mock` in scripts/boottest.py and runs
-  `tunnel/mockapi.py` on 18023. tools.bat, drop.bat, memory.bat, clock.bat keep
-  their `--expect` strings (clock's changes to the new note). New: `retry.bat`
+  `tunnel/mockapi.py` on 18023. The mock's log still goes into the test log, but
+  CLAWDOS's own notes no longer pass through it: every test batch file ends with
+  `TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1` so `--expect` sees them on the serial
+  log. tools.bat, drop.bat, memory.bat, clock.bat keep their `--expect` strings
+  (clock's changes to the new note; the tool tour's PASS line is printed by the
+  mock, which checks the results it gets back as today). New: `retry.bat`
   (`!retry`, expects the second attempt's text), `chunks.bat`, `bigevent.bat`
   (expects the error note and a usable prompt afterwards).
 - `make test` runs `tunnel/test_mockapi.py` with the system `python3` (no venv).
@@ -341,6 +383,10 @@ tighter than that, the arguments buffer moves to the EMS page.
 - Prompt, tools and config as plain files on the PC.
 - Content-Length by a counting pass, never chunked requests.
 - One keep-alive connection; Esc closes it.
+- One tool call per round (`disable_parallel_tool_use`); no fallbacks beta.
+- Every content block type the API sends is stored and echoed back; thinking is
+  never displayed.
+- CLAWDOS.LOG is the diagnostics channel the boot tests read.
 - Tunnel is byte-copying only; socat/stunnel must work as drop-ins.
 - Python left behind has no dependencies and no application logic.
 
