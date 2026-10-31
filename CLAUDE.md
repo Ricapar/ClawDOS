@@ -8,6 +8,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
   (gitignored), outputs in `build/`. Bridge Python deps go in `.venv` (`.venv/bin/pip install -r bridge/requirements.txt`;
   Homebrew's Python refuses global installs); run the bridge and its tests with `.venv/bin/python`.
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
+- The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (bridge unit tests),
+  `make boottests` (every DOSBox-X test), `make check` (both), `make run`, `make mock`. Keep it in step with them.
 - Build everything: `python scripts/build.py` (apps -> build/*.EXE, disk -> build/CLAWDOS.IMG).
   Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
 - Code navigation: the clangd-lsp and pyright-lsp plugins are enabled for this project (.claude/settings.json;
