@@ -1,6 +1,6 @@
 /* CLAWDOS.EXE - chat with Claude from an IBM PC XT.
  *
- * Connects to an XTBridge (bridge/xtbridge.py) over TCP, sends what you
+ * Connects to a DOS Bridge (bridge/dosbridge.py) over TCP, sends what you
  * type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
  * screen. The look follows Claude Code: a welcome panel with Clawd, "> "
  * for your messages, a bullet for Claude's, a spinner while it works, and an
@@ -23,7 +23,7 @@
 
 #include "types.h"
 #include "inlines.h"
-#include "xtbridge.h"
+#include "dosbridge.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -104,7 +104,7 @@ static const Theme *theme = &themes[0];
 
 enum State { IDLE, WAITING, STREAMING };
 
-static XTBridge bridge;
+static DOSBridge bridge;
 static State state = IDLE;
 static int quitting;
 static int queued;                    /* Enter pressed while Claude was busy */
@@ -125,7 +125,7 @@ static int pinged;
 static unsigned long pingedAt;
 static unsigned long retryStart, retryWait;  /* next reconnect attempt */
 static char offlineNote[100];
-static XTBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
+static DOSBridge::Counters rxNet;      /* mTCP's counters when the bridge last sent a line */
 static char session[16];              /* the bridge's name for our conversation, for RESUME */
 static int resumed;                   /* the last connect carried the conversation on */
 static int cutOff;                    /* the link died in the middle of a reply */
@@ -275,7 +275,7 @@ static void drawInputLine(int i)
     if (line == 0)
         r.c[2] = '>' | (A_BRIGHT << 8);
     if (inputLen == 0 && i == 0) {
-        rowText(r, BOX_TEXT, state == IDLE ? "Try \"what is an 8088?\"  (F1 for help)" : "",
+        rowText(r, BOX_TEXT, state == IDLE ? "What would you like to do?\"  (F1 for help)" : "",
                 A_DIM);
     } else if (line < lineCount) {
         int first = lineStart[line];
@@ -461,7 +461,7 @@ static void systemLine(char *buf)
     union REGS r;
     int86(0x12, &r, &r);              /* conventional memory in KB */
     sprintf(buf, "%uK RAM \xFA %s \xFA ", r.x.ax, scr_has_hwscroll() ? "CGA" : "EGA/VGA");
-    XTBridge::localAddress(buf + strlen(buf));
+    DOSBridge::localAddress(buf + strlen(buf));
 }
 
 /* Claude Code's welcome panel: Clawd on the left, tips on the right. */
@@ -733,7 +733,7 @@ void ui_tool_done(void)
 {
     /* Ctrl-Break during a tool (say, to stop a program under run) shouldn't
        also end the chat. */
-    XTBridge::breakPressed = 0;
+    DOSBridge::breakPressed = 0;
     toolVerb = NULL;
     drawStatus();
     placeCursor();
@@ -752,7 +752,7 @@ int ui_send(const char *verb, const char *payload)
 
 void ui_local_address(char *buf)
 {
-    XTBridge::localAddress(buf);
+    DOSBridge::localAddress(buf);
 }
 
 
@@ -868,7 +868,7 @@ static void fatal(const char *text)
     if (!quitAfterReply)              /* unattended runs have nobody to press it */
         biosKeyRead();
     bridge.close();
-    XTBridge::stopStack();
+    DOSBridge::stopStack();
     scr_done();
     exit(1);
 }
@@ -881,7 +881,7 @@ static int waitLine(int secs)
         int rc = bridge.poll();
         if (rc != 0)
             return rc;
-        if (XTBridge::breakPressed)
+        if (DOSBridge::breakPressed)
             return -1;
     }
     return 0;
@@ -900,7 +900,7 @@ static int digits(const char **p, int n)
 }
 
 /* Set the DOS clock from the bridge's ("TIME 2026-10-28T14:03:07" in its
-   HELLO): the XT has no battery clock, and SNTP at boot doesn't always take,
+   HELLO): the DOS PC has no battery clock, and SNTP at boot doesn't always take,
    which left every file dated 1980. A clock that was well off is reported to
    the bridge's log. */
 static void setClock(const char *hello)
@@ -941,7 +941,7 @@ static void setClock(const char *hello)
 /* Connect and say hello. Returns NULL, or what went wrong (link closed). */
 static const char *connectBridge(void)
 {
-    if (bridge.connect(host, XTBRIDGE_PORT))
+    if (bridge.connect(host, DOSBRIDGE_PORT))
         return bridge.errorText();
     char fresh[sizeof(session)] = "";
     const char *s;
@@ -950,7 +950,7 @@ static const char *connectBridge(void)
         bridge.close();
         return "The bridge didn't say hello.";
     }
-    if ((s = strstr(bridge.payload(), "SESSION ")) != NULL) {   /* "XTBRIDGE 1 [AUTH] SESSION id" */
+    if ((s = strstr(bridge.payload(), "SESSION ")) != NULL) {   /* "DOSBRIDGE 1 [AUTH] SESSION id" */
         strncpy(fresh, s + 8, sizeof(fresh) - 1);
         fresh[strcspn(fresh, " ")] = 0;
     }
@@ -977,7 +977,7 @@ static const char *connectBridge(void)
     linkUp = 1;
     lastRx = TICKS_NOW;
     pinged = 0;
-    XTBridge::counters(&rxNet);
+    DOSBridge::counters(&rxNet);
     if (lostReport[0]) {              /* tell the bridge's log what happened */
         bridge.send("LOG", lostReport);
         lostReport[0] = 0;
@@ -994,8 +994,8 @@ static const char *connectBridge(void)
    link (WiFi). Nothing sent: we never got the data out. */
 static void noteLinkLoss(const char *why)
 {
-    XTBridge::Counters now;
-    XTBridge::counters(&now);
+    DOSBridge::Counters now;
+    DOSBridge::counters(&now);
     sprintf(lostReport, "Link lost (%.50s) %lus after the bridge's last line; since then: "
                         "sent %lu, retransmitted %lu, received %lu, send errors %lu, dropped %lu",
             why, (unsigned long)TICKS_TO_SECS(ticks_elapsed(TICKS_NOW, lastRx)), now.sent - rxNet.sent,
@@ -1092,7 +1092,7 @@ int main(int argc, char *argv[])
         } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
             prefill = argv[++i];
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("CLAWDOS " VERSION " - chat with an AI via an XTBridge\n\n"
+            printf("CLAWDOS " VERSION " - chat with an AI via a DOS Bridge\n\n"
                    "Usage: CLAWDOS [host[:port]] [-noscroll] [-unsafe] [-q]\n"
                    "              [-m message] [-i text]\n\n"
                    "Without a host, CLAWDOS_BRIDGE from the mTCP config file is used.\n"
@@ -1109,19 +1109,19 @@ int main(int argc, char *argv[])
 
     tools_init(!unsafe, quick);
     quitAfterReply = quick && firstMessage != NULL;
-    if (XTBridge::startStack())
+    if (DOSBridge::startStack())
         return 1;
-    tool_idle = XTBridge::service;    /* keep ACKing the bridge during long tools */
-    if (!host[0] && XTBridge::configValue("CLAWDOS_BRIDGE", host, sizeof(host)) != 0) {
+    tool_idle = DOSBridge::service;    /* keep ACKing the bridge during long tools */
+    if (!host[0] && DOSBridge::configValue("CLAWDOS_BRIDGE", host, sizeof(host)) != 0) {
         fprintf(stderr, "No bridge given. Use CLAWDOS host[:port], or add a line like\n"
                         "  CLAWDOS_BRIDGE 192.168.1.10:8023\n"
                         "to your mTCP config file (%s).\n", getenv("MTCPCFG"));
-        XTBridge::stopStack();
+        DOSBridge::stopStack();
         return 1;
     }
-    XTBridge::configValue("CLAUDE_TOKEN", token, sizeof(token));
+    DOSBridge::configValue("CLAUDE_TOKEN", token, sizeof(token));
     char themeName[16];
-    if (XTBridge::configValue("CLAWDOS_THEME", themeName, sizeof(themeName)) == 0
+    if (DOSBridge::configValue("CLAWDOS_THEME", themeName, sizeof(themeName)) == 0
         && (i = findTheme(themeName)) >= 0)
         theme = &themes[i];
 
@@ -1154,7 +1154,7 @@ int main(int argc, char *argv[])
             int rc = bridge.poll();
             if (rc > 0) {
                 pinged = 0;
-                XTBridge::counters(&rxNet);
+                DOSBridge::counters(&rxNet);
                 handleLine(bridge.verb(), bridge.payload());
                 lastRx = TICKS_NOW;      /* after it: a tool may have run a while */
                 continue;
@@ -1166,7 +1166,7 @@ int main(int argc, char *argv[])
         } else if (ticks_elapsed(TICKS_NOW, retryStart) >= retryWait) {
             reconnect();
         }
-        if (XTBridge::breakPressed)
+        if (DOSBridge::breakPressed)
             break;
         if (biosIsKeyReady())
             handleKey(biosKeyRead());
@@ -1179,7 +1179,7 @@ int main(int argc, char *argv[])
     if (linkUp)
         bridge.send("QUIT");
     bridge.close();
-    XTBridge::stopStack();
+    DOSBridge::stopStack();
     scr_done();
     printf("Thanks for chatting!\n");
     return 0;

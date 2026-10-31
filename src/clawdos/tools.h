@@ -1,7 +1,7 @@
 /* CLAWDOS.EXE tool calls: the bridge's TOOL/ARG/CALL lines in, OUT/DONE out
  * (docs/PROTOCOL.md), with safe mode asking before anything changes. */
-#ifndef CXT_TOOLS_H
-#define CXT_TOOLS_H
+#ifndef CLAWDOS_TOOLS_H
+#define CLAWDOS_TOOLS_H
 
 void tools_init(int safe, int unattended);
 int  tools_safe(void);

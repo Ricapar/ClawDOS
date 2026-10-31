@@ -48,11 +48,11 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.cpp', 'src/clawdos/tools.cpp', 'lib/screen.c',
-                               'lib/console.c', 'lib/xtbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
+                               'lib/console.c', 'lib/dosbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c'],
                    'model': 'l', 'mtcp': 'src/clawdos/clawdos.cfg'},
-    'cxtunit.exe': {'sources': ['tests/unit/cxtunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
+    'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c'],
                     'model': 'l'},
 }
@@ -391,7 +391,7 @@ def build_image(autotest=None):
 
 SETTINGS_FILE = os.path.join(BUILD, 'settings.json')
 DEFAULT_SETTINGS = {
-    # Where the XT finds xtbridge.py. 10.0.2.2 is the host PC as seen from
+    # Where the DOS PC finds dosbridge.py. 10.0.2.2 is the host PC as seen from
     # 86Box's SLiRP network; real hardware needs the bridge machine's LAN IP.
     'bridge': '10.0.2.2:8023',
 }
@@ -416,7 +416,7 @@ def main():
     """Command line: set the bridge address, then build the boot code, the programs and the image."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
-    ap.add_argument('--bridge', help='host:port of the XTBridge (remembered for later builds)')
+    ap.add_argument('--bridge', help='host:port of the DOS Bridge (remembered for later builds)')
     ap.add_argument('--compiledb', action='store_true',
                     help='only write build/compile_commands.json for clangd (a full build writes it too)')
     a = ap.parse_args()

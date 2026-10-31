@@ -1,6 +1,6 @@
 /* ClawDOS sound: PLAY strings (play.h) on the PC speaker. */
-#ifndef CXT_SOUND_H
-#define CXT_SOUND_H
+#ifndef CLAWDOS_SOUND_H
+#define CLAWDOS_SOUND_H
 
 #include "toolapi.h"
 

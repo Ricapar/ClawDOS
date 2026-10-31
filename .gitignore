@@ -13,9 +13,9 @@
 __pycache__/
 # Local bridge provider config (see bridge/providers.example.toml)
 /bridge/providers.toml
-# Local secrets (ANTHROPIC_API_KEY etc.; read by bridge/xtbridge.py)
+# Local secrets (ANTHROPIC_API_KEY etc.; read by bridge/dosbridge.py)
 /.env
-# Bridge debug logs (xtbridge.log, replay.log, saved sessions)
+# Bridge debug logs (dosbridge.log, replay.log, saved sessions)
 /bridge/*.log*
 # Conversation logs (JSONL, bridge/convlog.py)
 /bridge/logs/

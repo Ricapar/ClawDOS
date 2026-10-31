@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch DOSBox-X as a fast stand-in XT (CGA; 80186 CPU, see boottest.CPUTYPE) booting
+"""Launch DOSBox-X as a fast stand-in PC (CGA; 80186 CPU, see boottest.CPUTYPE) booting
 build/CLAWDOS.IMG, with networking.
 
   python scripts/rundosbox.py [--image PATH] [--test image/tests/x.bat] [--cycles max]

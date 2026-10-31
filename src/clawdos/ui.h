@@ -1,6 +1,6 @@
 /* What CLAWDOS.EXE's screen offers tools.cpp. */
-#ifndef CXT_UI_H
-#define CXT_UI_H
+#ifndef CLAWDOS_UI_H
+#define CLAWDOS_UI_H
 
 void ui_tool_header(const char *title, const char *arg);   /* "* Title(arg)" */
 void ui_tool_detail(const char *text);                     /* dim line under it */

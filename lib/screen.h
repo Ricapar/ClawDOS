@@ -16,8 +16,8 @@
  *
  * Rows/cols are logical screen positions (0..24, 0..79).
  */
-#ifndef CXT_SCREEN_H
-#define CXT_SCREEN_H
+#ifndef CLAWDOS_SCREEN_H
+#define CLAWDOS_SCREEN_H
 
 #ifdef __cplusplus
 extern "C" {

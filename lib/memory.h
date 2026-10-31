@@ -2,8 +2,8 @@
  * C:\MEMORY\NAME.TXT, through memory_list, memory_read and memory_write. The
  * first line of a memory is its summary. These tools never ask the user.
  */
-#ifndef CXT_MEMORY_H
-#define CXT_MEMORY_H
+#ifndef CLAWDOS_MEMORY_H
+#define CLAWDOS_MEMORY_H
 
 #include "toolapi.h"
 

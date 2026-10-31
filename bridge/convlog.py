@@ -1,10 +1,10 @@
-"""Conversation log: one JSONL file per XT connection, for analysis later.
+"""Conversation log: one JSONL file per DOS PC connection, for analysis later.
 
   bridge/logs/2026-10-25/091123-172.16.0.229-c1.jsonl
 
 Each line is one event: {"t": ISO time, "type": ..., fields}. The types are
 session_start, user, assistant, api_call, tool_call, tool_result, turn_end,
-model_switch, new_chat and session_end (xtbridge.Session writes them).
+model_switch, new_chat and session_end (dosbridge.Session writes them).
 Lines are flushed as they are written, so a crash loses nothing. Logging must never break a chat: a write that fails is
 reported once and the log goes quiet.
 """
@@ -14,7 +14,7 @@ import logging
 import os
 from datetime import datetime
 
-log = logging.getLogger('xtbridge')
+log = logging.getLogger('dosbridge')
 
 USAGE_KEYS = ('input', 'output', 'cache_read', 'cache_write')
 

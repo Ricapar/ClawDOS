@@ -3,8 +3,8 @@
  * readings must never be subtracted directly: use ticks_elapsed(). Time-outs
  * are then "ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(n)".
  */
-#ifndef CXT_TICKS_H
-#define CXT_TICKS_H
+#ifndef CLAWDOS_TICKS_H
+#define CLAWDOS_TICKS_H
 
 #include <i86.h>
 

@@ -4,8 +4,8 @@
  * Margins indent wrapped text, e.g. to hang it under a bullet. A mark lets an
  * editor rewind and redraw text it wrote (e.g. an input line after a backspace).
  */
-#ifndef CXT_CONSOLE_H
-#define CXT_CONSOLE_H
+#ifndef CLAWDOS_CONSOLE_H
+#define CLAWDOS_CONSOLE_H
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,11 +1,11 @@
-"""Replay a recorded session from the bridge's debug log (xtbridge.log).
+"""Replay a recorded session from the bridge's debug log (dosbridge.log).
 
-  python bridge/xtbridge.py --replay bridge/xtbridge.log [--connection N] [--speed 1]
+  python bridge/dosbridge.py --replay bridge/dosbridge.log [--connection N] [--speed 1]
 
-Any message from the XT then plays back the whole recorded conversation: each
+Any message from the DOS PC then plays back the whole recorded conversation: each
 user message as a line of its own, then the reply exactly as it was sent
-(TXT/NL lines and tool calls, which the XT really runs) with the original
-pauses between them. That reproduces on demand whatever the XT did with that
+(TXT/NL lines and tool calls, which the DOS PC really runs) with the original
+pauses between them. That reproduces on demand whatever the DOS PC did with that
 traffic, without an API key. --speed scales the pauses (0 = none).
 """
 
@@ -54,7 +54,7 @@ class TurnParser:
         return self.turns
 
     def feed(self, when, direction, rest):
-        """Take one log line: the time, '>>' (user), '>' (to the XT) or '<' (from it), and the text."""
+        """Take one log line: the time, '>>' (user), '>' (to the DOS PC) or '<' (from it), and the text."""
         if direction == '>>':
             self.items = []
             self.turns.append((rest, self.items))

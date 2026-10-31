@@ -1,5 +1,5 @@
 @ECHO OFF
-REM Development tools on the 8088 (python scripts/xttest.py image/tests/devtools.bat):
+REM Development tools on the 8088 (python scripts/test8088.py image/tests/devtools.bat):
 REM builds and runs a hello program with each tool in C:\TESTS\DEV, timing each
 REM step into C:\DEVTEST.LOG. Riskiest last: if a tool hangs, the log shows where.
 SET L=C:\DEVTEST.LOG

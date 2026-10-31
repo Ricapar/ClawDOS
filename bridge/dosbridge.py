@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""XTBridge: lets a DOS machine chat with Claude (or another LLM) over a plain
+"""DOS Bridge: lets a DOS machine chat with Claude (or another LLM) over a plain
 TCP connection.
 
-The XT can't do modern TLS, so this runs on a nearby modern machine (a PC, or a
-Raspberry Pi tucked inside the XT's case). It speaks a tiny line protocol in
-code page 437 to the XT (see docs/PROTOCOL.md) and HTTPS to the model's API.
+The DOS PC can't do modern TLS, so this runs on a nearby modern machine (a PC, or a
+Raspberry Pi tucked inside the DOS PC's case). It speaks a tiny line protocol in
+code page 437 to the DOS PC (see docs/PROTOCOL.md) and HTTPS to the model's API.
 
-  python bridge/xtbridge.py                         # Claude, port 8023
-  python bridge/xtbridge.py --provider openrouter   # any provider in providers.py
-  python bridge/xtbridge.py --provider zai --model glm-4.6
-  python bridge/xtbridge.py --mock                  # offline mock of Claude (no key)
-  python bridge/xtbridge.py --token SECRET          # require AUTH from clients
-  python bridge/xtbridge.py --replay bridge/xtbridge.log   # play a logged session back
+  python bridge/dosbridge.py                         # Claude, port 8023
+  python bridge/dosbridge.py --provider openrouter   # any provider in providers.py
+  python bridge/dosbridge.py --provider zai --model glm-4.6
+  python bridge/dosbridge.py --mock                  # offline mock of Claude (no key)
+  python bridge/dosbridge.py --token SECRET          # require AUTH from clients
+  python bridge/dosbridge.py --replay bridge/dosbridge.log   # play a logged session back
 
-From the XT, "/model" lists providers and "/model openrouter:some/model"
+From the DOS PC, "/model" lists providers and "/model openrouter:some/model"
 switches the current conversation. providers.py has the built-in providers;
 bridge/providers.toml adds your own. API keys come from the environment
 (ANTHROPIC_API_KEY or an `ant auth login` profile, OPENROUTER_API_KEY,
@@ -44,22 +44,22 @@ DEFAULT_PORT = 8023
 MAX_LINE = 4096          # longest line accepted from a client
 MAX_TXT = 500            # longest payload sent to a client
 TRACE_TXT = 120          # TXT/OUT lines are cut to this in the wire trace
-DEFAULT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xtbridge.log')
+DEFAULT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dosbridge.log')
 DEFAULT_CONVLOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
-log = logging.getLogger('xtbridge')
+log = logging.getLogger('dosbridge')
 sessions = set()         # connected clients, for spotting stale ones
 CONNECTIONS = itertools.count(1)   # numbers the clients as they are accepted
-PARK_SECONDS = 30 * 60   # how long a dropped XT's conversation waits for RESUME
-# The longest a tool call may take before the XT is presumed dead. The XT can't
+PARK_SECONDS = 30 * 60   # how long a dropped DOS PC's conversation waits for RESUME
+# The longest a tool call may take before the DOS PC is presumed dead. The DOS PC can't
 # talk while a program started by `run` executes (a compile can take minutes),
-# and a hung or power-cycled XT sends no FIN, so without this the call would
+# and a hung or power-cycled DOS PC sends no FIN, so without this the call would
 # wait forever and the conversation would never be parked.
 TOOL_TIMEOUT = 20 * 60
 
 
 class Conversation:
-    """What a reconnecting XT gets back with RESUME <token>: its chat (history,
+    """What a reconnecting DOS PC gets back with RESUME <token>: its chat (history,
     backend, model) and memory index. Held by a Session while connected, parked
     for PARK_SECONDS after its connection drops."""
 
@@ -107,7 +107,7 @@ def trace(peer, direction, raw):
 # --- protocol ----------------------------------------------------------------
 
 class Session:   # pylint: disable=too-many-instance-attributes  # one connection's state
-    """One XT connection: reads its commands and streams the replies back."""
+    """One DOS PC connection: reads its commands and streams the replies back."""
 
     def __init__(self, reader, writer, args, backends):
         self.reader = reader
@@ -118,11 +118,11 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         self.task = None
         self.clog = convlog.NoLog()  # the conversation log, opened once numbered
         self.turn = None             # usage and text of the reply in progress
-        self.memories = None         # the XT's memory index for this conversation, once listed
+        self.memories = None         # the DOS PC's memory index for this conversation, once listed
         self.authed = not args.token
         self.peer = writer.get_extra_info('peername')
         # asyncio turns Nagle off, so each streamed TXT fragment would be its own
-        # tiny packet: a burst of them overflows the XT's few receive buffers,
+        # tiny packet: a burst of them overflows the DOS PC's few receive buffers,
         # and the drops stall the link for tens of seconds while Windows backs
         # off retransmitting. With Nagle on they are coalesced into full packets.
         sock = writer.get_extra_info('socket')
@@ -133,14 +133,14 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
                 pass
         self.tools_sent = 0
         self.tool = None             # (id, future, OUT chunks) of the call in progress
-        self.xt_silent = False       # a tool call timed out: hang up once the turn is settled
+        self.peer_silent = False       # a tool call timed out: hang up once the turn is settled
         purge_parked()
         self.conv = Conversation()
         self.conv.session = self
 
     async def send(self, verb, payload=b''):
         """Send one protocol line."""
-        # Keep lines short for the XT's receive buffer; TXT can be split freely.
+        # Keep lines short for the DOS PC's receive buffer; TXT can be split freely.
         while verb == 'TXT' and len(payload) > MAX_TXT:
             trace(self.peer, '>', b'TXT ' + payload[:MAX_TXT])
             self.writer.write(b'TXT ' + payload[:MAX_TXT] + b'\n')
@@ -164,8 +164,8 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         why = 'closed by bridge'
         try:
             auth = ' AUTH' if self.args.token else ''
-            now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')   # the XT sets its clock
-            await self.send('HELLO', f'XTBRIDGE {PROTOCOL_VERSION}{auth} SESSION {self.conv.token} '
+            now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')   # the DOS PC sets its clock
+            await self.send('HELLO', f'DOSBRIDGE {PROTOCOL_VERSION}{auth} SESSION {self.conv.token} '
                                      f'TIME {now}'.encode())
             while True:
                 try:
@@ -182,14 +182,14 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
                     break
         except asyncio.IncompleteReadError as e:
             why = f'closed by client ({len(e.partial)} bytes of a partial line)' if e.partial else 'closed by client'
-        except OSError as e:         # resets, and Windows giving up on an XT that stopped ACKing
+        except OSError as e:         # resets, and Windows giving up on a DOS PC that stopped ACKing
             why = f'{type(e).__name__}: {e}'
         except Exception:  # pylint: disable=broad-exception-caught  # last resort: log it, don't kill the server
             why = 'bridge error'
             log.exception('%s session failed', self.peer)
         finally:
             if self.tool:
-                log.info('%s tool %s was still waiting for the XT', self.peer, self.tool[0])
+                log.info('%s tool %s was still waiting for the DOS PC', self.peer, self.tool[0])
             if self.task and not self.task.done():
                 self.task.cancel()
                 await asyncio.wait([self.task], timeout=2)   # so its turn_end is logged first
@@ -245,7 +245,7 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         return chat
 
     async def list_memories(self):
-        """Once per conversation, on a backend with a system prompt: list the XT's
+        """Once per conversation, on a backend with a system prompt: list the DOS PC's
         memories (an ordinary tool call) and add them to the prompt."""
         if self.memories is not None or not providers.uses_system_prompt(self.chat):
             return
@@ -278,8 +278,8 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
             return False
         if verb == 'PING':
             await self.send('PONG')
-        elif verb == 'LOG':          # diagnostics from the XT (link loss, clock); no reply
-            log.info('%s XT: %s', self.peer, from_cp437(rest))
+        elif verb == 'LOG':          # diagnostics from the DOS PC (link loss, clock); no reply
+            log.info('%s DOS: %s', self.peer, from_cp437(rest))
         elif verb == 'AUTH':
             self.authed = not self.args.token or from_cp437(rest) == self.args.token
             await self.send('OK' if self.authed else 'ERR', b'' if self.authed else b'bad token')
@@ -366,7 +366,7 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         return f'Switched to {self.backends.describe(self.chat)}{kept}.'
 
     def tool_done(self, tool_id, status):
-        """DONE <id> <status>: the XT finished the tool call in progress."""
+        """DONE <id> <status>: the DOS PC finished the tool call in progress."""
         if not self.tool or self.tool[0] != tool_id or status not in STATUSES:
             log.info('%s stray DONE %s %s ignored', self.peer, tool_id, status)
             return
@@ -374,14 +374,14 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         if not fut.done():
             fut.set_result(ToolResult(status, unescape(''.join(self.tool[2]))))
         if status == 'stopped' and self.task:
-            self.task.cancel()       # Esc on the XT ends the whole turn
+            self.task.cancel()       # Esc on the DOS PC ends the whole turn
 
     async def run_tool(self, call):
-        """Have the XT run one tool call; returns its ToolResult."""
+        """Have the DOS PC run one tool call; returns its ToolResult."""
         self.tools_sent += 1
         call.id = f't{self.tools_sent}'
-        silent = ToolResult('error', f'the XT did not answer within {TOOL_TIMEOUT // 60} minutes')
-        if self.xt_silent:           # an earlier call this turn already gave up on it
+        silent = ToolResult('error', f'the DOS PC did not answer within {TOOL_TIMEOUT // 60} minutes')
+        if self.peer_silent:           # an earlier call this turn already gave up on it
             return silent
         self.tool = (call.id, asyncio.get_running_loop().create_future(), [])
         self.clog.event('tool_call', id=call.id, name=call.name, args=call.args)
@@ -392,9 +392,9 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
             try:
                 result = await asyncio.wait_for(asyncio.shield(self.tool[1]), TOOL_TIMEOUT)
             except asyncio.TimeoutError:
-                log.info('%s tool %s %s: no answer in %d s, presuming the XT dead',
+                log.info('%s tool %s %s: no answer in %d s, presuming the DOS PC dead',
                          self.peer, call.id, call.name, TOOL_TIMEOUT)
-                self.xt_silent = True
+                self.peer_silent = True
                 result = silent
         finally:
             self.tool = None
@@ -405,14 +405,14 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         return result
 
     async def relay(self, reply):
-        """Stream the model's `reply` to the XT, running its tool calls; returns
+        """Stream the model's `reply` to the DOS PC, running its tool calls; returns
         the outcome ('ok', or 'cut_off' if the model ran out of tokens)."""
         await self.list_memories()
         line_open = False            # sent text that isn't followed by NL yet
         async for item in reply:
             if isinstance(item, ToolCall):
                 self.flush_text()
-                if line_open:    # the XT starts tool headers on a fresh line
+                if line_open:    # the DOS PC starts tool headers on a fresh line
                     await self.send('NL')
                     line_open = False
                 item.result = await self.run_tool(item)
@@ -457,7 +457,7 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
         except OSError as e:         # the link went; run() reports that
             outcome, detail = 'link_lost', str(e)
             log.info('%s reply abandoned: %s', self.peer, e)
-        except Exception as e:  # pylint: disable=broad-exception-caught  # report API trouble to the XT, don't drop the link
+        except Exception as e:  # pylint: disable=broad-exception-caught  # report API trouble to the DOS PC, don't drop the link
             outcome, detail = 'error', describe_error(e)
             log.exception('reply failed')
             await self.tell('ERR', to_cp437(describe_error(e)))
@@ -467,8 +467,8 @@ class Session:   # pylint: disable=too-many-instance-attributes  # one connectio
             self.clog.event('turn_end', outcome=outcome, detail=detail, rounds=turn['rounds'],
                             ms=int((time.monotonic() - turn['started']) * 1000), usage=turn['usage'])
             await reply.aclose()
-            if self.xt_silent:       # the turn is in the history; park it for a RESUME
-                log.info('%s hanging up on the silent XT', self.peer)
+            if self.peer_silent:       # the turn is in the history; park it for a RESUME
+                log.info('%s hanging up on the silent DOS PC', self.peer)
                 self.writer.close()
 
     async def tell(self, verb, payload=b''):
@@ -510,7 +510,7 @@ def anthropic_message(e):
 
 
 def describe_error(e):
-    """A short message for the XT's screen about an unexpected exception."""
+    """A short message for the DOS PC's screen about an unexpected exception."""
     return httpx_message(e) or anthropic_message(e) or f'{type(e).__name__}: {e}'[:200]
 
 
@@ -582,7 +582,7 @@ async def main():
     ap.add_argument('--convlog', default=DEFAULT_CONVLOG, metavar='DIR',
                     help='conversation log, one JSONL file per connection (default: bridge/logs; "-" for none)')
     ap.add_argument('--log', default=DEFAULT_LOG, metavar='FILE',
-                    help='full debug log with a wire trace (default: bridge/xtbridge.log; "-" for none)')
+                    help='full debug log with a wire trace (default: bridge/dosbridge.log; "-" for none)')
     ap.add_argument('-v', '--verbose', action='store_true', help='show the debug log on the console too')
     args = ap.parse_args()
     if args.replay and args.log == DEFAULT_LOG:   # don't append to what may be the replay's source
@@ -594,8 +594,8 @@ async def main():
     try:
         server = await start(args)
     except ConfigError as e:
-        raise SystemExit(f'xtbridge: {e}') from e
-    log.info('XTBridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
+        raise SystemExit(f'dosbridge: {e}') from e
+    log.info('DOS Bridge on %s:%d, backend: %s', args.host, args.port, args.backend_name)
     async with server:
         await server.serve_forever()
 

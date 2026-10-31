@@ -3,8 +3,8 @@
  * with targ*, writes its result for the model with tout_*, sets a one-line
  * summary for the transcript, and returns one of the TS_ statuses.
  */
-#ifndef CXT_TOOLAPI_H
-#define CXT_TOOLAPI_H
+#ifndef CLAWDOS_TOOLAPI_H
+#define CLAWDOS_TOOLAPI_H
 
 #ifdef __cplusplus
 extern "C" {

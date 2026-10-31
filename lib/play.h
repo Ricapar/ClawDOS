@@ -7,8 +7,8 @@
  * 0-84 (0 = rest), Ln length 1-64, Pn/Rn rest, Tn tempo 32-255, MN/ML/MS
  * normal/legato/staccato (MF and MB are accepted and ignored).
  */
-#ifndef CXT_PLAY_H
-#define CXT_PLAY_H
+#ifndef CLAWDOS_PLAY_H
+#define CLAWDOS_PLAY_H
 
 #ifdef __cplusplus
 extern "C" {

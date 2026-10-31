@@ -65,7 +65,7 @@ def parse_args():
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the serial or bridge log (repeatable)')
     ap.add_argument('--bridge', action='store_true',
-                    help=f'run the mock bridge (xtbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
+                    help=f'run the mock bridge (dosbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
     return ap.parse_args()
 
 
@@ -88,7 +88,7 @@ def dosbox_command(extra_sets):
 def mock_bridge(bridge_log):
     """Run the mock bridge, logging to bridge_log; it is killed when the block ends."""
     with open(bridge_log, 'wb') as f:
-        with subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'xtbridge.py'),
+        with subprocess.Popen([sys.executable, os.path.join(build.ROOT, 'bridge', 'dosbridge.py'),
                                '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT),
                                '--log', '-', '--convlog', '-', '-v'],
                               stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as bridge:

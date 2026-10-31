@@ -1,7 +1,7 @@
-"""Tools the model can use on the XT, and how a call travels over the wire.
+"""Tools the model can use on the DOS PC, and how a call travels over the wire.
 
 The schemas live here, on the bridge; CLAWDOS.EXE only has the executors. A
-call goes to the XT as
+call goes to the DOS PC as
 
   TOOL <id> <name>
   ARG <key> <chunk>        (repeated; chunks of one key are appended)
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from cp437 import to_cp437
 
 MAX_ROUNDS = 25          # tool rounds per user message
-MAX_PAYLOAD = 500        # longest line payload sent to the XT
+MAX_PAYLOAD = 500        # longest line payload sent to the DOS PC
 STATUSES = ('ok', 'error', 'denied', 'stopped')
 
 PLAY_HELP = (
@@ -31,7 +31,7 @@ PLAY_HELP = (
 # the user's OK, M memory: never asks), description, params {key: (description, required)}
 TOOLS = [
     {'name': 'sysinfo', 'cls': 'R',
-     'description': "Describe the XT: DOS version, total and free memory, EMS, drives with "
+     'description': "Describe the DOS PC: DOS version, total and free memory, EMS, drives with "
                     "free space, BIOS date, video adapter, date and time, IP address.",
      'params': {}},
     {'name': 'dir', 'cls': 'R',
@@ -97,7 +97,7 @@ TOOLS = [
      'params': {'command': ("The command line, at most 120 characters; or several, one per line",
                             True)}},
     {'name': 'poke', 'cls': 'W',
-     'description': "Write bytes to memory. Careful: wrong addresses can crash the XT.",
+     'description': "Write bytes to memory. Careful: wrong addresses can crash the DOS PC.",
      'params': {'addr': ("Address as hex seg:off, e.g. B800:0000", True),
                 'bytes': ("Hex byte values separated by spaces, e.g. \"41 1E 42 1E\"", True)}},
     {'name': 'port', 'cls': 'W',
@@ -165,7 +165,7 @@ or ports may be denied by the user; if so, don't retry, say what you would have 
 
 @dataclass
 class ToolResult:
-    """What the XT reported for a call: a status (see STATUSES) and its output."""
+    """What the DOS PC reported for a call: a status (see STATUSES) and its output."""
     status: str
     text: str
 
@@ -217,7 +217,7 @@ def openai_tools():
 
 
 def stringify(args):
-    """Model-supplied arguments as the strings the XT expects."""
+    """Model-supplied arguments as the strings the DOS PC expects."""
     out = {}
     for k, v in (args or {}).items():
         if v is None:
@@ -266,7 +266,7 @@ def chunks(escaped, room):
 
 
 def call_lines(call_id, call):
-    """The (verb, payload) lines that send `call` to the XT."""
+    """The (verb, payload) lines that send `call` to the DOS PC."""
     lines = [('TOOL', f'{call_id} {call.name}')]
     for key, value in call.args.items():
         room = MAX_PAYLOAD - len(key) - 1

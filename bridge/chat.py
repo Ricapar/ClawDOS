@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal terminal client for XTBridge (for testing from a modern machine).
+"""Minimal terminal client for DOS Bridge (for testing from a modern machine).
 
   python bridge/chat.py [host] [port] [--token T] [-m "one message"]
 """

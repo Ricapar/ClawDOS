@@ -1,6 +1,6 @@
 /* ClawDOS file tools: dir, read, write, delete, mkdir, rename. */
-#ifndef CXT_DOSFS_H
-#define CXT_DOSFS_H
+#ifndef CLAWDOS_DOSFS_H
+#define CLAWDOS_DOSFS_H
 
 #include "toolapi.h"
 

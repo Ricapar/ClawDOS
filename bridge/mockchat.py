@@ -1,6 +1,6 @@
-"""Mock Claude backend for XTBridge: no API key, no network, no cost.
+"""Mock Claude backend for DOS Bridge: no API key, no network, no cost.
 
-It behaves like the real backend as far as the XT can tell: a pause before the
+It behaves like the real backend as far as the DOS PC can tell: a pause before the
 first word, then text streamed in token-sized pieces, conversation memory, and
 the same failure modes (API errors, refusals, cut-off replies, dropped links).
 
@@ -19,8 +19,8 @@ from tools import ToolCall
 log = logging.getLogger('mockchat')
 
 
-# Raised by backends' reply() generators; xtbridge.py handles them. They live
-# here, not in xtbridge.py, so they are the same classes when xtbridge.py
+# Raised by backends' reply() generators; dosbridge.py handles them. They live
+# here, not in dosbridge.py, so they are the same classes when dosbridge.py
 # runs as __main__.
 
 class Refused(Exception):
@@ -50,9 +50,9 @@ SCENARIOS = {
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the bridge hangs up mid-reply',
     '!history': 'what the mock remembers of this conversation',
-    '!run': 'run the rest of the message as a DOS command on the XT: !run TCC PRIMES.C',
-    '!tool': 'call one XT tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
-    '!tooltour': 'call every XT tool in turn and check the results',
+    '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
+    '!tool': 'call one DOS tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
+    '!tooltour': 'call every DOS tool in turn and check the results',
     '!play': 'play a tune on the PC speaker',
 }
 
@@ -71,28 +71,28 @@ def tour_steps():
         ('dir', {'path': 'C:\\'}, 'ok', 'AUTOEXEC.BAT'),
         # an empty or missing floppy drive must fail, not prompt "Abort, Retry, Fail?"
         ('dir', {'path': 'A:\\'}, 'error', None),
-        ('write', {'path': 'C:\\CXTTOUR.TXT', 'text': TOUR_TEXT}, 'ok', None),
-        ('read', {'path': 'c:\\cxttour.txt'}, 'ok', 'Hello from the tool tour.'),
-        ('edit', {'path': 'C:\\CXTTOUR.TXT', 'old': 'Second line.', 'new': 'Second line, edited.\nThird.'},
+        ('write', {'path': 'C:\\DOSTOUR.TXT', 'text': TOUR_TEXT}, 'ok', None),
+        ('read', {'path': 'c:\\dostour.txt'}, 'ok', 'Hello from the tool tour.'),
+        ('edit', {'path': 'C:\\DOSTOUR.TXT', 'old': 'Second line.', 'new': 'Second line, edited.\nThird.'},
          'ok', '    3 Third.'),
-        ('read', {'path': 'C:\\CXTTOUR.TXT', 'start': '3'}, 'ok', '    3 Third.'),
-        ('edit', {'path': 'C:\\CXTTOUR.TXT', 'old': 'Not in the file', 'new': 'x'}, 'error', 'not found'),
-        ('search', {'text': 'EDITED', 'path': 'C:\\CXTTOUR.TXT C:\\NOPE\\*.C'}, 'ok',
+        ('read', {'path': 'C:\\DOSTOUR.TXT', 'start': '3'}, 'ok', '    3 Third.'),
+        ('edit', {'path': 'C:\\DOSTOUR.TXT', 'old': 'Not in the file', 'new': 'x'}, 'error', 'not found'),
+        ('search', {'text': 'EDITED', 'path': 'C:\\DOSTOUR.TXT C:\\NOPE\\*.C'}, 'ok',
          '    2: Second line, edited.'),
-        ('rename', {'from': 'C:\\CXTTOUR.TXT', 'to': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
-        ('mkdir', {'path': 'C:\\CXTTDIR'}, 'ok', None),
-        ('delete', {'path': 'C:\\CXTTOUR2.TXT'}, 'ok', None),
+        ('rename', {'from': 'C:\\DOSTOUR.TXT', 'to': 'C:\\DOSTOUR2.TXT'}, 'ok', None),
+        ('mkdir', {'path': 'C:\\DOSTDIR'}, 'ok', None),
+        ('delete', {'path': 'C:\\DOSTOUR2.TXT'}, 'ok', None),
         ('delete', {'path': 'C:\\*.BAT'}, 'error', None),
         ('peek', {'addr': '0040:0000', 'len': '16'}, 'ok', None),
-        ('poke', {'addr': '0000:04F0', 'bytes': '43 58 54'}, 'ok', None),
-        ('peek', {'addr': '0000:04F0', 'len': '3'}, 'ok', '43 58 54'),
+        ('poke', {'addr': '0000:04F0', 'bytes': '44 4F 53'}, 'ok', None),
+        ('peek', {'addr': '0000:04F0', 'len': '3'}, 'ok', '44 4F 53'),
         ('port', {'port': '61'}, 'ok', None),
-        ('textart', {'text': '~EClaude~C-XT'}, 'ok', None),
+        ('textart', {'text': '~EClaw~CDOS'}, 'ok', None),
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
         ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
-        ('memory_write', {'name': 'CXTTOUR', 'text': 'Tour memory\nSecond line.'}, 'ok', None),
-        ('memory_list', {}, 'ok', 'CXTTOUR'),
-        ('memory_read', {'name': 'cxttour'}, 'ok', 'Second line.'),
+        ('memory_write', {'name': 'DOSTOUR', 'text': 'Tour memory\nSecond line.'}, 'ok', None),
+        ('memory_list', {}, 'ok', 'DOSTOUR'),
+        ('memory_read', {'name': 'dostour'}, 'ok', 'Second line.'),
         ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
         # captured output, not the screen-text fallback
         ('run', {'command': 'VER'}, 'ok', lambda r: 'FreeCom' in r and '(screen text)' not in r),
@@ -146,10 +146,10 @@ SMALL_TALK = [
     (r'\b(hi|hello|hey|howdy|greetings)\b',
      "Hello from the mock bridge! I'm a stand-in for ClawDOS, so no API calls "
      "are being made. Everything about the connection is real though: your "
-     "XT sent that message over TCP, and this reply is streaming back a few "
+     "DOS PC sent that message over TCP, and this reply is streaming back a few "
      "characters at a time. Send !help to see the test commands."),
     (r'\b(who|what) are you\b',
-     "I'm the mock backend of XTBridge. I imitate the real model closely enough "
+     "I'm the mock backend of DOS Bridge. I imitate the real model closely enough "
      "to test CLAWDOS.EXE: replies stream in token-sized pieces after a short "
      "pause, I remember the conversation, and I can fail in all the ways "
      "the real API can. Start the bridge without --mock for the real thing."),
@@ -329,7 +329,7 @@ class MockChat:
 
     async def tooltour(self):
         """Call every tool in turn and end with a PASS or FAIL verdict."""
-        yield 'Touring the XT tools.\n'
+        yield 'Touring the DOS tools.\n'
         failure = None
         for i, (name, args, status, want) in enumerate(tour_steps(), 1):
             call = ToolCall(name, args)

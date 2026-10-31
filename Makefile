@@ -2,7 +2,7 @@
 # The scripts do the real work (build.py decides what to rebuild), so most
 # targets just run one. Works with the GNU Make 3.81 macOS ships.
 #
-#   make build BRIDGE=172.16.0.100:8023   set the XT's bridge address (remembered)
+#   make build BRIDGE=172.16.0.100:8023   set the DOS PC's bridge address (remembered)
 #   make boot TEST=image/tests/net.bat     one boot test in DOSBox-X
 #   make bridge ARGS="--prompt dos"        extra bridge flags
 
@@ -17,7 +17,7 @@ endif
 BOOTTEST := $(PYTHON) scripts/boottest.py --no-build
 
 .DEFAULT_GOAL := help
-.PHONY: help setup venv build compiledb clean test check boot boottests xttest \
+.PHONY: help setup venv build compiledb clean test check boot boottests test8088 \
         run dosbox shot bridge mock chat
 
 help:
@@ -68,12 +68,12 @@ boottests: build ## every DOSBox-X boot test
 	$(BOOTTEST) image/tests/memory.bat --bridge --expect "memory_write -> ok"
 	$(BOOTTEST) image/tests/clock.bat --bridge --expect "Clock set from the bridge"
 
-xttest: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
-	$(PYTHON) scripts/xttest.py $(or $(TEST),image/tests/devtools.bat)
+test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
+	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)
 
 # --- run ----------------------------------------------------------------------
 
-run: build ## boot the image in 86Box (an accurate XT)
+run: build ## boot the image in 86Box (an accurate 8088 PC)
 	$(PYTHON) scripts/run86box.py
 
 dosbox: build ## boot the image in DOSBox-X with networking (faster, less exact)
@@ -83,10 +83,10 @@ shot: ## screenshot 86Box to build/shot.png
 	$(PYTHON) scripts/shot.py
 
 bridge: $(VENV_PY) ## run the bridge to Claude (ARGS=... for more flags)
-	$(VENV_PY) bridge/xtbridge.py $(ARGS)
+	$(VENV_PY) bridge/dosbridge.py $(ARGS)
 
 mock: $(VENV_PY) ## run the bridge with the offline mock instead of Claude
-	$(VENV_PY) bridge/xtbridge.py --mock $(ARGS)
+	$(VENV_PY) bridge/dosbridge.py --mock $(ARGS)
 
 chat: $(VENV_PY) ## chat with a running bridge from this terminal
 	$(VENV_PY) bridge/chat.py $(ARGS)

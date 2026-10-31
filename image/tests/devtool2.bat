@@ -1,5 +1,5 @@
 @ECHO OFF
-REM Follow-ups to devtools.bat (python scripts/xttest.py image/tests/devtool2.bat):
+REM Follow-ups to devtools.bat (python scripts/test8088.py image/tests/devtool2.bat):
 REM BCC wants lowercase .c names; Turbo C tiny model .COM; GW-BASIC output via a file.
 SET L=C:\DEVTEST.LOG
 C:

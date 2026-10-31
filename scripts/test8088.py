@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run a test batch file on the accurate XT (86Box: 8088 at 4.77 MHz, CGA) and print its log.
+"""Run a test batch file on the accurate 8088 PC (86Box: 8088 at 4.77 MHz, CGA) and print its log.
 
-  python scripts/xttest.py image/tests/devtools.bat [--log DEVTEST.LOG] [--done DEVTEST-DONE]
+  python scripts/test8088.py image/tests/devtools.bat [--log DEVTEST.LOG] [--done DEVTEST-DONE]
                            [--timeout 900] [--no-build]
 
 The batch file runs as C:\\AUTOTEST.BAT (no networking) and should append its
@@ -25,7 +25,7 @@ import run86box
 import shot
 import build
 
-IMAGE = os.path.join(build.BUILD, 'xttest.img')
+IMAGE = os.path.join(build.BUILD, 'test8088.img')
 
 
 def read_log(name):
@@ -71,7 +71,7 @@ def main():
     build.build_image()  # leave a clean CLAWDOS.IMG behind
 
     if run86box.running():
-        sys.exit('xttest: 86Box is already running; close it first')
+        sys.exit('test8088: 86Box is already running; close it first')
     vm = os.path.join(build.BUILD, '86box')
     os.makedirs(vm, exist_ok=True)
     with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
@@ -92,7 +92,7 @@ def main():
     log = read_log(a.log) or log
     print(log if log is not None else f'(no {a.log} on the image)')
     found = bool(log) and a.done in log
-    print(f'xttest: {"PASS" if found else "FAILED (no " + a.done + " in the log)"} after ~{elapsed}s; '
+    print(f'test8088: {"PASS" if found else "FAILED (no " + a.done + " in the log)"} after ~{elapsed}s; '
           f'screenshot in build/shot.png')
     sys.exit(0 if found else 1)
 

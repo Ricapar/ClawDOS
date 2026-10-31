@@ -1,6 +1,6 @@
 @ECHO OFF
 REM Load a packet driver at INT 60h, then get an address via DHCP.
-REM Real XT: PM2000 (PicoMEM's NE2000-over-WiFi, auto-detected).
+REM Real PC: PM2000 (PicoMEM's NE2000-over-WiFi, auto-detected).
 REM Emulators: Crynwr NE2000 (DOSBox-X) or NE1000 (86Box) at I/O 340h, IRQ 3.
 REM Both cards use the same 8390 chip, so each Crynwr driver also "loads" on the
 REM other card and then silently drops every packet (different buffer size and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end tests of XTBridge's protocol against the mock backend.
+"""End-to-end tests of DOS Bridge's protocol against the mock backend.
 
   python bridge/test_bridge.py
 """
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position  # sys.path must be set before these imports
 import mockchat  # noqa: E402
 import providers  # noqa: E402
-import xtbridge  # noqa: E402
+import dosbridge  # noqa: E402
 import convlog  # noqa: E402
 import prompts  # noqa: E402
 import replay  # noqa: E402
@@ -29,7 +29,7 @@ from tools import ToolCall, ToolResult, escape, unescape  # noqa: E402
 
 
 class Client:
-    """Test side of an XT: reads and writes protocol lines on a stream pair."""
+    """Test side of a DOS PC: reads and writes protocol lines on a stream pair."""
     def __init__(self, reader, writer):
         self.reader, self.writer = reader, writer
 
@@ -38,7 +38,7 @@ class Client:
         raw = await asyncio.wait_for(self.reader.readline(), timeout)
         if not raw:
             raise EOFError
-        assert raw.endswith(b'\n') and len(raw) <= xtbridge.MAX_TXT + 6, raw[:80]
+        assert raw.endswith(b'\n') and len(raw) <= dosbridge.MAX_TXT + 6, raw[:80]
         verb, _, rest = raw.rstrip(b'\n').partition(b' ')
         return verb.decode(), rest
 
@@ -63,7 +63,7 @@ class Client:
 
 
 class ToolClient(Client):
-    """A fake XT that answers tool calls. respond(name, args) -> (status, text)."""
+    """A fake DOS PC that answers tool calls. respond(name, args) -> (status, text)."""
 
     memories = 'no memories yet'
     last_payload = ''
@@ -112,7 +112,7 @@ class ToolClient(Client):
 
 
 def tour_responder(bad_readback=False):
-    """Plausible XT answers for the mock's !tooltour."""
+    """Plausible DOS PC answers for the mock's !tooltour."""
     def respond(name, args):  # pylint: disable=too-many-return-statements,too-many-branches  # canned answers
         if name in mockchat.TOUR_EXPECT and mockchat.TOUR_EXPECT[name] == 'error':
             return 'error', f'unknown tool {name}'
@@ -132,13 +132,13 @@ def tour_responder(bad_readback=False):
         if name == 'delete' and '*' in args['path']:
             return 'error', 'no wildcards'
         if name == 'peek' and args['addr'] == '0000:04F0':
-            return 'ok', '0000:04F0  43 58 54  CXT'
+            return 'ok', '0000:04F0  44 4F 53  DOS'
         if name == 'edit':
             if 'Not in' in args['old']:
                 return 'error', 'old text not found'
-            return 'ok', 'edited C:\\CXTTOUR.TXT\n    2 Second line, edited.\n    3 Third.'
+            return 'ok', 'edited C:\\DOSTOUR.TXT\n    2 Second line, edited.\n    3 Third.'
         if name == 'search':
-            return 'ok', 'C:\\CXTTOUR.TXT\n    2: Second line, edited.'
+            return 'ok', 'C:\\DOSTOUR.TXT\n    2: Second line, edited.'
         if name == 'run' and '\n' in args['command']:
             return 'ok', ('> VER\nexit code 0\nFreeCom\n\n> DIR C:\\NOPE.XYZ\nexit code 1\n'
                           'File not found\n\nstopped: command 2 of 3 failed; not run:\n  REM never\n')
@@ -147,7 +147,7 @@ def tour_responder(bad_readback=False):
         if name == 'memory_write' and not args['name'].isalnum():
             return 'error', 'bad memory name'
         if name == 'memory_list':
-            return 'ok', 'CXTTOUR       27  Tour memory'
+            return 'ok', 'DOSTOUR       27  Tour memory'
         if name == 'memory_read':
             return 'ok', 'Tour memory\nSecond line.'
         return 'ok', 'done'
@@ -163,8 +163,8 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=self.speed,
                                      token=self.token, config=getattr(self, 'config', None),
                                      convlog=getattr(self, 'convlog', None))
-        xtbridge.conversations.clear()
-        self.server = await xtbridge.start(args)
+        dosbridge.conversations.clear()
+        self.server = await dosbridge.start(args)
         port = self.server.sockets[0].getsockname()[1]
         self.c = ToolClient(*await asyncio.open_connection('127.0.0.1', port))
         self.hello = await self.c.line()
@@ -180,7 +180,7 @@ class MockProtocol(BridgeTest):
     async def test_hello_info_ping(self):
         """HELLO carries the session and the time; INFO and PING answer."""
         self.assertEqual(self.hello[0], 'HELLO')
-        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 SESSION [0-9a-f]{8} '
+        self.assertRegex(self.hello[1], rb'^DOSBRIDGE 1 SESSION [0-9a-f]{8} '
                                         rb'TIME \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$')
         await self.c.send('INFO')
         verb, rest = await self.c.line()
@@ -309,21 +309,21 @@ class Tools(BridgeTest):
         text, _, _ = await self.c.ask_tools(r'!tool delete path=C:\X', lambda n, a: ('error', 'nope'))
         self.assertIn('-> error: nope', text)
 
-    async def test_silent_xt_times_out(self):
-        """A call the XT never answers ends as an error after TOOL_TIMEOUT; the bridge then hangs up."""
-        old, xtbridge.TOOL_TIMEOUT = xtbridge.TOOL_TIMEOUT, 0.3
-        self.addCleanup(setattr, xtbridge, 'TOOL_TIMEOUT', old)
+    async def test_silent_peer_times_out(self):
+        """A call the DOS PC never answers ends as an error after TOOL_TIMEOUT; the bridge then hangs up."""
+        old, dosbridge.TOOL_TIMEOUT = dosbridge.TOOL_TIMEOUT, 0.3
+        self.addCleanup(setattr, dosbridge, 'TOOL_TIMEOUT', old)
         await self.c.send('MSG !tool sysinfo')
         while (await self.c.line())[0] != 'CALL':
             pass
         out, verbs = [], []
-        with self.assertRaises(EOFError):            # the XT is presumed dead: connection closed
+        with self.assertRaises(EOFError):            # the DOS PC is presumed dead: connection closed
             while True:
                 verb, rest = await self.c.line()
                 verbs.append(verb)
                 if verb == 'TXT':
                     out.append(rest.decode('cp437'))
-        self.assertIn('sysinfo -> error: the XT did not answer within', ''.join(out))
+        self.assertIn('sysinfo -> error: the DOS PC did not answer within', ''.join(out))
         self.assertIn('END', verbs)                  # the model's turn was completed first
 
     async def test_stray_done_ignored(self):
@@ -368,7 +368,7 @@ class Auth(BridgeTest):
     async def test_auth(self):
         """Commands are refused until AUTH gives the right token."""
         self.assertEqual(self.hello[0], 'HELLO')
-        self.assertRegex(self.hello[1], rb'^XTBRIDGE 1 AUTH SESSION [0-9a-f]{8} TIME \S+$')
+        self.assertRegex(self.hello[1], rb'^DOSBRIDGE 1 AUTH SESSION [0-9a-f]{8} TIME \S+$')
         await self.c.send('MSG hi')
         self.assertEqual(await self.c.line(), ('ERR', b'AUTH required'))
         await self.c.send('AUTH wrong')
@@ -449,8 +449,8 @@ class FakeBackendTest(BridgeTest):
         self.config = os.path.join(self.tmp.name, 'providers.toml')
         with open(self.config, 'w', encoding='utf-8') as f:
             f.write(f'[fake]\ntype = "openai"\nname = "Fakey"\nbase_url = "http://127.0.0.1:{port}/v1"\n'
-                    f'model = "fake-1"\napi_key_env = "CXT_TEST_KEY"\nextra = {{ temperature = 0.5 }}\n')
-        os.environ['CXT_TEST_KEY'] = 'k123'
+                    f'model = "fake-1"\napi_key_env = "DOSBRIDGE_TEST_KEY"\nextra = {{ temperature = 0.5 }}\n')
+        os.environ['DOSBRIDGE_TEST_KEY'] = 'k123'
         await super().asyncSetUp()
 
     async def asyncTearDown(self):
@@ -497,12 +497,12 @@ class Providers(FakeBackendTest):
         """Bad provider names and missing API keys are reported."""
         text, _, _ = await self.c.ask('/model nope:x')
         self.assertIn('Unknown provider', text)
-        os.environ.pop('CXT_TEST_KEY')
+        os.environ.pop('DOSBRIDGE_TEST_KEY')
         text, _, _ = await self.c.ask('/model fake')
-        self.assertIn('set CXT_TEST_KEY', text)
+        self.assertIn('set DOSBRIDGE_TEST_KEY', text)
 
     async def test_openai_tool_call(self):
-        """OpenAI tool calls reach the XT and their results go back."""
+        """OpenAI tool calls reach the DOS PC and their results go back."""
         await self.c.ask('/model fake')
         text, calls, verb = await self.c.ask_tools('use tool', lambda n, a: ('ok', '1 @ECHO OFF'))
         self.assertEqual(verb, 'END')
@@ -544,17 +544,17 @@ class DotEnv(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, '.env')
             with open(path, 'w', encoding='utf-8') as f:
-                f.write('# comment\nCXT_ENV_A=plain\nexport CXT_ENV_B="quoted"\nCXT_ENV_C=from-file\njunk\n')
-            os.environ['CXT_ENV_C'] = 'from-env'
+                f.write('# comment\nDOSBRIDGE_ENV_A=plain\nexport DOSBRIDGE_ENV_B="quoted"\nDOSBRIDGE_ENV_C=from-file\njunk\n')
+            os.environ['DOSBRIDGE_ENV_C'] = 'from-env'
             try:
-                self.assertEqual(xtbridge.load_env(path), ['CXT_ENV_A', 'CXT_ENV_B'])
-                self.assertEqual(os.environ['CXT_ENV_A'], 'plain')
-                self.assertEqual(os.environ['CXT_ENV_B'], 'quoted')
-                self.assertEqual(os.environ['CXT_ENV_C'], 'from-env')
+                self.assertEqual(dosbridge.load_env(path), ['DOSBRIDGE_ENV_A', 'DOSBRIDGE_ENV_B'])
+                self.assertEqual(os.environ['DOSBRIDGE_ENV_A'], 'plain')
+                self.assertEqual(os.environ['DOSBRIDGE_ENV_B'], 'quoted')
+                self.assertEqual(os.environ['DOSBRIDGE_ENV_C'], 'from-env')
             finally:
-                for k in ('CXT_ENV_A', 'CXT_ENV_B', 'CXT_ENV_C'):
+                for k in ('DOSBRIDGE_ENV_A', 'DOSBRIDGE_ENV_B', 'DOSBRIDGE_ENV_C'):
                     os.environ.pop(k, None)
-        self.assertEqual(xtbridge.load_env(os.path.join(d, 'missing')), [])
+        self.assertEqual(dosbridge.load_env(os.path.join(d, 'missing')), [])
 
 
 class Replay(unittest.TestCase):
@@ -740,11 +740,11 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
         args = types.SimpleNamespace(host='127.0.0.1', port=0, mock=True, speed=0, token=None,
                                      config=None, prompt='nope', prompt_dir=self.dir)
         with self.assertRaises(providers.ConfigError):
-            await xtbridge.start(args)
+            await dosbridge.start(args)
 
 
 class Memories(FakeBackendTest):
-    """The bridge lists the XT's memories at the start of each conversation on a
+    """The bridge lists the DOS PC's memories at the start of each conversation on a
     backend with a system prompt, and adds them to it."""
 
     INDEX = 'TRAINS        41  Rich likes model trains'
@@ -755,7 +755,7 @@ class Memories(FakeBackendTest):
         return body['messages'][0]['content']
 
     async def test_first_message_lists_memories(self):
-        """The first message lists the XT's memories, and so does the first after NEW."""
+        """The first message lists the DOS PC's memories, and so does the first after NEW."""
         await self.c.ask('/model fake')
         seen = []
 
@@ -792,7 +792,7 @@ class Memories(FakeBackendTest):
 
 
 class Resume(BridgeTest):
-    """A reconnecting XT gets its conversation back (RESUME <session>)."""
+    """A reconnecting DOS PC gets its conversation back (RESUME <session>)."""
 
     async def connect(self):
         """Open a second connection; return (client, HELLO payload)."""
@@ -812,8 +812,8 @@ class Resume(BridgeTest):
         c.writer.close()
         for _ in range(50):                     # until the bridge has parked it
             await asyncio.sleep(0.02)
-            if not any(s.client is c.writer for s in xtbridge.sessions if hasattr(s, 'client')):
-                if all(conv.session is None for conv in xtbridge.conversations.values()):
+            if not any(s.client is c.writer for s in dosbridge.sessions if hasattr(s, 'client')):
+                if all(conv.session is None for conv in dosbridge.conversations.values()):
                     break
 
     async def test_hello_names_a_session(self):
@@ -842,13 +842,13 @@ class Resume(BridgeTest):
         token = self.session(self.hello[1].decode())
         await self.c.ask('remember me')
         await self.hang_up(self.c)
-        old = xtbridge.PARK_SECONDS
-        xtbridge.PARK_SECONDS = 0
+        old = dosbridge.PARK_SECONDS
+        dosbridge.PARK_SECONDS = 0
         try:
             await c2.send('RESUME ' + token)
             self.assertEqual(await c2.line(), ('ERR', b'unknown session'))
         finally:
-            xtbridge.PARK_SECONDS = old
+            dosbridge.PARK_SECONDS = old
         c2.writer.close()
 
     async def test_takes_over_a_stale_connection(self):

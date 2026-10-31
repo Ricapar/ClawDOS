@@ -1,4 +1,4 @@
-"""Unicode <-> code page 437 for the XT's screen."""
+"""Unicode <-> code page 437 for the DOS PC's screen."""
 
 import unicodedata
 

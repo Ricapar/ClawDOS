@@ -1,6 +1,6 @@
 /* ClawDOS sysinfo tool: a description of the machine for the model. */
-#ifndef CXT_SYSINFO_H
-#define CXT_SYSINFO_H
+#ifndef CLAWDOS_SYSINFO_H
+#define CLAWDOS_SYSINFO_H
 
 #include "toolapi.h"
 

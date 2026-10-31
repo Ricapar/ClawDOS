@@ -1,4 +1,4 @@
-# XTBridge providers. Copy to bridge/providers.toml (gitignored) and edit.
+# DOS Bridge providers. Copy to bridge/providers.toml (gitignored) and edit.
 # Each [table] adds a provider or overrides fields of a built-in one
 # (anthropic, openrouter, zai, openai, ollama, mock; see providers.py).
 # Never put API keys here: name the environment variable that holds the key.

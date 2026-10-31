@@ -1,4 +1,4 @@
-"""Chat backends for XTBridge: Claude's own API, any OpenAI-compatible API
+"""Chat backends for DOS Bridge: Claude's own API, any OpenAI-compatible API
 (OpenRouter, Z.ai, OpenAI, Ollama, LM Studio, ...), and the offline mock.
 
 Providers are named profiles. A few are built in; bridge/providers.toml (or
@@ -33,7 +33,7 @@ from replay import ReplayChat
 from tools import (MAX_ROUNDS, TOOLS_PROMPT, ToolCall, ToolResult, anthropic_tools, memory_prompt,
                    openai_tools, stringify, summary)
 
-log = logging.getLogger('xtbridge')
+log = logging.getLogger('dosbridge')
 
 ROUND_CAP_NOTE = 'Tool limit reached; answer now without tools.'
 
@@ -319,7 +319,7 @@ def tool_result(tool_use_id, result):
 
 
 class AnthropicChat:   # pylint: disable=too-few-public-methods  # duck-typed chat: reply() is the interface
-    """One conversation with Claude, including rounds of tool use on the XT.
+    """One conversation with Claude, including rounds of tool use on the DOS PC.
 
     reply() yields text chunks and ToolCalls; whoever iterates sets each call's
     result before asking for more. The history always stays valid for the API:

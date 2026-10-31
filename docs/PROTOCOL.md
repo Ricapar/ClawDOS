@@ -1,16 +1,16 @@
-# XTBridge protocol (version 1)
+# DOS Bridge protocol (version 1)
 
 Plain TCP, default port **8023**. Every message is one line ending in `\n`
 (a preceding `\r` is ignored). Text is **code page 437** bytes, so the DOS side
 can put bytes straight on screen. A line is `VERB` or `VERB payload`. Client lines
 may be up to 4096 bytes; server payloads are at most 500 bytes so a small
-receive buffer on the XT always holds a whole line.
+receive buffer on the DOS PC always holds a whole line.
 
 ## Server → client
 
 | Line | Meaning |
 |---|---|
-| `HELLO XTBRIDGE 1 [AUTH] SESSION <id> TIME <time>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`; `<time>` is the bridge's local time as `2026-10-28T14:03:07`, for a client without a clock of its own (CLAWDOS.EXE sets DOS's). Clients look for the words they know and skip the rest. |
+| `HELLO DOSBRIDGE 1 [AUTH] SESSION <id> TIME <time>` | Greeting on connect. ` AUTH` if the client must authenticate first; `<id>` names this connection's conversation for a later `RESUME`; `<time>` is the bridge's local time as `2026-10-28T14:03:07`, for a client without a clock of its own (CLAWDOS.EXE sets DOS's). Clients look for the words they know and skip the rest. |
 | `OK` | Command accepted (`AUTH`, `NEW`, `RESUME` as `OK resumed`). |
 | `INFO <text>` | Backend description (reply to `INFO`). |
 | `TXT <text>` | A piece of the reply. Never contains a newline; append it to the current line. |
@@ -39,7 +39,7 @@ lines, so clients need no special support; `INFO` reflects the new backend.
 
 ## Tool calls
 
-The model can use tools that run on the XT. The bridge holds their schemas
+The model can use tools that run on the DOS PC. The bridge holds their schemas
 (`bridge/tools.py`) and runs the tool loop with the model; the client only
 executes calls. While a reply is in progress the bridge may send a call:
 
@@ -65,7 +65,7 @@ the turn (`END stopped`) and tells the model the call was interrupted. At most
 25 rounds of tool calls happen per message. `OUT`/`DONE` with no call pending
 are ignored. A client that runs no tools answers every `CALL` with
 `DONE <id> error`. A call the client has not answered after 20 minutes (long
-enough for a compile under `run`, during which the XT cannot talk) is reported
+enough for a compile under `run`, during which the DOS PC cannot talk) is reported
 to the model as an error, and once that turn is settled the bridge closes the
 connection and parks the conversation for a `RESUME`.
 
@@ -81,7 +81,7 @@ S: TXT Your PATH is missing ...
 S: END
 ```
 
-The bridge keeps the conversation history, so the XT only ever holds what is on
+The bridge keeps the conversation history, so the DOS PC only ever holds what is on
 screen. Word wrapping is the client's job: the bridge doesn't know the screen
 width.
 

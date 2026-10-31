@@ -1,4 +1,4 @@
-# XT tool calls: design
+# DOS tool calls: design
 
 Date: 2026-10-21. Status: approved in brainstorming, awaiting spec review.
 
@@ -14,9 +14,9 @@ nothing destructive happening without consent while safe mode is on.
 
 ## Decisions
 
-- The tool loop lives in the bridge. The XT only executes calls and returns
+- The tool loop lives in the bridge. The DOS PC only executes calls and returns
   results; it keeps no tool history.
-- The bridge owns the tool schemas (names, descriptions, parameters). The XT
+- The bridge owns the tool schemas (names, descriptions, parameters). The DOS PC
   has a dispatch table and executors.
 - No backwards compatibility: no version or capability handshake. The bridge
   always offers every tool. `HELLO` is unchanged.
@@ -51,7 +51,7 @@ Client to server:
 Escaping, in `ARG` and `OUT`: `\n` is a newline, `\\` a backslash. Every
 argument is a string: the bridge writes numbers in decimal and booleans as
 `1`/`0`, and the schemas have no arrays or objects. Chunks keep server lines
-within 500 bytes. A tool's result is capped at 4 KB on the XT.
+within 500 bytes. A tool's result is capped at 4 KB on the DOS PC.
 
 Example:
 
@@ -69,7 +69,7 @@ S: END
 ```
 
 Calls run one at a time; parallel `tool_use` blocks are serialized by the
-bridge. On Esc during a call, the XT sends `DONE <id> stopped` then `STOP`.
+bridge. On Esc during a call, the DOS PC sends `DONE <id> stopped` then `STOP`.
 The bridge records a tool_result saying the user interrupted, keeping the
 history valid, and sends `END stopped`.
 
@@ -108,7 +108,7 @@ words ("file not found", "access denied", "disk full").
   `role: tool` messages), and the model is called again. Each user message is
   capped at 25 tool rounds. At the cap, a last call goes out with
   `tool_choice` none and a note asking the model to wrap up.
-- `xtbridge.py`: for a `ToolCall`, `Session.answer()` sends
+- `dosbridge.py`: for a `ToolCall`, `Session.answer()` sends
   `TOOL`/`ARG`/`CALL` and awaits a future. `Session.command()` handles
   `OUT` (append to the pending result) and `DONE` (resolve the future).
   `OUT`/`DONE` with no pending call are ignored and logged.
@@ -263,10 +263,10 @@ columns, and the output is capped at 40 lines.
   - The tool loop against fake Anthropic and OpenAI streams, covering a
     single call, parallel calls, deny, stop, the round cap, a disconnect,
     and an API error mid-loop.
-  - Mock scenarios end to end over a socket, with a scripted fake XT client.
+  - Mock scenarios end to end over a socket, with a scripted fake DOS PC client.
 - **Parser unit tests (`tests/unit/`):** `basdraw` and the PLAY parser are
   plain C with no hardware access, written against a recording backend. They
-  build into `CXTUNIT.EXE`, which `image/tests/units.bat` runs in DOSBox-X
+  build into `DOSUNIT.EXE`, which `image/tests/units.bat` runs in DOSBox-X
   with results on COM1. The installed Watcom has no Win32 libraries, and there
   is no other host C compiler.
 - **DOSBox-X end to end:** `image/tests/tools.bat` runs

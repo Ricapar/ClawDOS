@@ -3,8 +3,8 @@
  * in memory with CRLF line ends folded to LF (written back as they were), and
  * replaced through a temporary file, so a full disk never leaves half of it.
  */
-#ifndef CXT_EDIT_H
-#define CXT_EDIT_H
+#ifndef CLAWDOS_EDIT_H
+#define CLAWDOS_EDIT_H
 
 #include "toolapi.h"
 

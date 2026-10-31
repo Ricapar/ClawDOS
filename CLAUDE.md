@@ -18,21 +18,21 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1;
   `image/tests/net.bat` checks networking. `--bridge` runs the mock bridge alongside on port 18023, so tests use `10.0.2.2:18023` (log in build/bridge.log) and
   `--expect TEXT` fails unless TEXT is in the serial or bridge log: `image/tests/tools.bat --bridge --expect
-  "tool tour: PASS"` runs every XT tool; `image/tests/drop.bat --bridge --expect "connection #2"` checks a lost link; `image/tests/memory.bat --bridge --expect "memory_write -> ok"` checks memory tools never ask; `image/tests/clock.bat --bridge --expect "Clock set from the bridge"` checks the clock from the HELLO; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/cxtunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  "tool tour: PASS"` runs every DOS tool; `image/tests/drop.bat --bridge --expect "connection #2"` checks a lost link; `image/tests/memory.bat --bridge --expect "memory_write -> ok"` checks memory tools never ask; `image/tests/clock.bat --bridge --expect "Clock set from the bridge"` checks the clock from the HELLO; `image/tests/units.bat --expect UNITS-OK` runs tests/unit/dosunit.c. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
-- Real 8088 check: `python scripts/xttest.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
+- Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
-- Accurate XT: `python scripts/run86box.py`, then `python scripts/shot.py [--delay N]` and read build/shot.png
+- Accurate 8088 PC: `python scripts/run86box.py`, then `python scripts/shot.py [--delay N]` and read build/shot.png
   (macOS: the terminal needs Screen Recording permission; 86Box ignores SIGTERM, quit it with
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
-- Bridge: `python bridge/xtbridge.py [--mock]` (debug log with a wire trace in bridge/xtbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
+- Bridge: `python bridge/dosbridge.py [--mock]` (debug log with a wire trace in bridge/dosbridge.log, conversations as JSONL in bridge/logs/; `--prompt NAME`
   makes bridge/prompts/NAME.txt the system prompt, with the tools add-on appended); test client `python bridge/chat.py`; tests `python bridge/test_bridge.py`.
   `--mock` (bridge/mockchat.py) fakes Claude offline; in a chat, `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, ...).
   Tools: schemas in bridge/tools.py, executors dispatched by src/clawdos/tools.cpp; mock `!tool NAME k=v` calls one,
   `!tooltour` all. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits after the `-m` reply.
-  `--replay LOG` plays a logged session back to the XT (bridge/replay.py); CLAWDOS `-noscroll` turns off
+  `--replay LOG` plays a logged session back to the DOS PC (bridge/replay.py); CLAWDOS `-noscroll` turns off
   hardware scrolling.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
   the state they change `volatile`.
@@ -46,5 +46,5 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the br
 - Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
   The real IBM CGA does NOT wrap its display at the end of its 16 KB (86Box's does): the window must stay inside it.
   A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
-- Code linking mTCP (lib/xtbridge, CLAWDOS.EXE) is GPLv3.
+- Code linking mTCP (lib/dosbridge, CLAWDOS.EXE) is GPLv3.
 - Watcom: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).

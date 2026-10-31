@@ -1,4 +1,4 @@
-/* ClawDOS bridge client: see xtbridge.h. */
+/* ClawDOS bridge client: see dosbridge.h. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,19 +14,19 @@
 #include "tcp.h"
 #include "tcpsockm.h"
 
-#include "xtbridge.h"
+#include "dosbridge.h"
 
-/* How long one line may take to go out. WiFi stalls on the real XT last tens
+/* How long one line may take to go out. WiFi stalls on the real PC last tens
    of seconds and then recover; giving up sooner drops a link that would have
    carried on, and loses whatever tool result was being sent. */
 #define TIMEOUT_TICKS (30 * 18ul)
 
-volatile uint8_t XTBridge::breakPressed = 0;
+volatile uint8_t DOSBridge::breakPressed = 0;
 
-static void __interrupt __far ctrlBreakHandler(void) { XTBridge::breakPressed = 1; }
+static void __interrupt __far ctrlBreakHandler(void) { DOSBridge::breakPressed = 1; }
 static void __interrupt __far ctrlCHandler(void) { }
 
-int8_t XTBridge::startStack(void)
+int8_t DOSBridge::startStack(void)
 {
     if (Utils::parseEnv() != 0)
         return -1;
@@ -37,17 +37,17 @@ int8_t XTBridge::startStack(void)
     return 0;
 }
 
-void XTBridge::stopStack(void)
+void DOSBridge::stopStack(void)
 {
     Utils::endStack();
 }
 
-void XTBridge::localAddress(char *buf)
+void DOSBridge::localAddress(char *buf)
 {
     sprintf(buf, "%u.%u.%u.%u", MyIpAddr[0], MyIpAddr[1], MyIpAddr[2], MyIpAddr[3]);
 }
 
-int8_t XTBridge::configValue(const char *key, char *val, uint16_t len)
+int8_t DOSBridge::configValue(const char *key, char *val, uint16_t len)
 {
     int8_t rc;
 
@@ -59,9 +59,9 @@ int8_t XTBridge::configValue(const char *key, char *val, uint16_t len)
     return rc;
 }
 
-XTBridge::XTBridge() : sock(NULL), dead(0), rxLen(0), consumed(0), err("") { }
+DOSBridge::DOSBridge() : sock(NULL), dead(0), rxLen(0), consumed(0), err("") { }
 
-int8_t XTBridge::connect(const char *hostSpec, uint16_t port)
+int8_t DOSBridge::connect(const char *hostSpec, uint16_t port)
 {
     char host[80];
     IpAddr_t addr;
@@ -101,7 +101,7 @@ int8_t XTBridge::connect(const char *hostSpec, uint16_t port)
     sock->setRecvBuffer(4096);
     uint16_t localPort = 2048 + (uint16_t)(TIMER_GET_CURRENT() % 20000);
     if (sock->connect(localPort, addr, port, 10000)) {
-        err = "Can't connect to the bridge (is xtbridge.py running?)";
+        err = "Can't connect to the bridge (is dosbridge.py running?)";
         TcpSocketMgr::freeSocket(sock);
         sock = NULL;
         return -1;
@@ -111,7 +111,7 @@ int8_t XTBridge::connect(const char *hostSpec, uint16_t port)
     return 0;
 }
 
-void XTBridge::close(void)
+void DOSBridge::close(void)
 {
     if (sock) {
         sock->close();
@@ -121,7 +121,7 @@ void XTBridge::close(void)
 }
 
 /* If rx holds a complete line, split it into verb/payload and return 1. */
-int XTBridge::takeLine(void)
+int DOSBridge::takeLine(void)
 {
     char *nl = (char *)memchr(rx, '\n', rxLen);
 
@@ -146,7 +146,7 @@ int XTBridge::takeLine(void)
     return 1;
 }
 
-int XTBridge::poll(void)
+int DOSBridge::poll(void)
 {
     if (sock == NULL)
         return -1;
@@ -178,9 +178,9 @@ int XTBridge::poll(void)
     return 0;
 }
 
-int8_t XTBridge::send(const char *verb, const char *payload)
+int8_t DOSBridge::send(const char *verb, const char *payload)
 {
-    static char tx[XTBRIDGE_LINE_MAX + 16];
+    static char tx[DOSBRIDGE_LINE_MAX + 16];
     uint16_t len, off = 0;
 
     if (sock == NULL || dead)
@@ -189,8 +189,8 @@ int8_t XTBridge::send(const char *verb, const char *payload)
     memcpy(tx, verb, len);
     if (payload && *payload) {
         uint16_t plen = strlen(payload);
-        if (plen > XTBRIDGE_LINE_MAX - len - 2)
-            plen = XTBRIDGE_LINE_MAX - len - 2;
+        if (plen > DOSBRIDGE_LINE_MAX - len - 2)
+            plen = DOSBRIDGE_LINE_MAX - len - 2;
         tx[len++] = ' ';
         memcpy(tx + len, payload, plen);
         len += plen;
@@ -219,12 +219,12 @@ int8_t XTBridge::send(const char *verb, const char *payload)
     return 0;
 }
 
-void XTBridge::service(void)
+void DOSBridge::service(void)
 {
     Utils::processPackets();
 }
 
-void XTBridge::counters(Counters *c)
+void DOSBridge::counters(Counters *c)
 {
     c->sent = Packets_sent;
     c->received = Packets_received;

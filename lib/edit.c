@@ -235,7 +235,7 @@ static void tempPath(const char *path, char *out)
     const char *end = slash ? slash + 1 : colon ? colon + 1 : path;
     unsigned n = (unsigned)(end - path);
     memcpy(out, path, n);
-    strcpy(out + n, "CXTEDIT.$$$");
+    strcpy(out + n, "CLAWEDIT.$$$");
 }
 
 int tool_edit(ToolCtx *t)

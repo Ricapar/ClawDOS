@@ -44,7 +44,7 @@ PICOMEM/            picomem:*.EXE
 CLAWDOS/        build:hello.exe
 CLAWDOS/        build:clawdos.exe
 
-TESTS/                  build:cxtunit.exe
+TESTS/                  build:dosunit.exe
 TESTS/DEV/              repo:image/tests/dev/*
 
 # Development tools that run on the 8088 (docs/research/XT 8088 development tools.md;

@@ -169,7 +169,7 @@ def roms_86box():
 
 
 def devel():
-    """Development tools for the XT image (they run on the 8088; see
+    """Development tools for the DOS PC image (they run on the 8088; see
     docs/research/XT 8088 development tools.md)."""
     for p in DEVEL_PACKAGES:
         dest = t('devel', f'{p}.zip')

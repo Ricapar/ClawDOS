@@ -1,9 +1,9 @@
 /* ClawDOS EMS: one 16 KB page of LIM expanded memory (PicoMEM's PMEMM.EXE
- * provides it on the XT), for parking data outside conventional memory while
+ * provides it on the DOS PC), for parking data outside conventional memory while
  * a program the user or the model runs needs every byte of it.
  */
-#ifndef CXT_EMS_H
-#define CXT_EMS_H
+#ifndef CLAWDOS_EMS_H
+#define CLAWDOS_EMS_H
 
 #ifdef __cplusplus
 extern "C" {

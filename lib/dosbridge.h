@@ -1,23 +1,23 @@
-/* ClawDOS bridge client: talks the XTBridge line protocol (docs/PROTOCOL.md)
+/* ClawDOS bridge client: talks the DOS Bridge line protocol (docs/PROTOCOL.md)
  * over one mTCP socket. Built on mTCP, so programs using it are GPLv3.
  *
  * Typical use:
- *   XTBridge::startStack();                 // packet driver + mTCP
- *   XTBridge b; b.connect("10.0.2.2", 8023);
+ *   DOSBridge::startStack();                 // packet driver + mTCP
+ *   DOSBridge b; b.connect("10.0.2.2", 8023);
  *   b.send("MSG", "hello");
  *   loop { if (b.poll() > 0) handle(b.verb(), b.payload()); ... }
  */
-#ifndef CXT_XTBRIDGE_H
-#define CXT_XTBRIDGE_H
+#ifndef CLAWDOS_DOSBRIDGE_H
+#define CLAWDOS_DOSBRIDGE_H
 
 #include "types.h"
 
-#define XTBRIDGE_PORT     8023
-#define XTBRIDGE_LINE_MAX 1024
+#define DOSBRIDGE_PORT     8023
+#define DOSBRIDGE_LINE_MAX 1024
 
 class TcpSocket;
 
-class XTBridge {
+class DOSBridge {
   public:
     static volatile uint8_t breakPressed;      /* set by Ctrl-Break */
 
@@ -43,7 +43,7 @@ class XTBridge {
     /* Look up an app setting (e.g. "CLAWDOS_BRIDGE") in the mTCP config file. */
     static int8_t configValue(const char *key, char *val, uint16_t len);
 
-    XTBridge();
+    DOSBridge();
 
     /* Resolve and connect; host may be "name", "a.b.c.d" or "host:port".
        Blocks for up to ~10 s per step; returns 0 on success. errorText()
@@ -67,7 +67,7 @@ class XTBridge {
   private:
     TcpSocket *sock;
     uint8_t dead;                     /* poll() or a failed send found the link gone */
-    char  rx[XTBRIDGE_LINE_MAX];
+    char  rx[DOSBRIDGE_LINE_MAX];
     uint16_t rxLen;
     uint16_t consumed;
     char *lineVerb;
