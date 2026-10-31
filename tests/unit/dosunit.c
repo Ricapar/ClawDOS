@@ -12,6 +12,7 @@
 #include "screen.h"
 #include "console.h"
 #include "ticks.h"
+#include "utf8.h"
 
 static int passed, failed;
 
@@ -315,6 +316,35 @@ static void testSearch(void)
     CHECK("search partial then hit", search_match("aab", "ab", 0));
 }
 
+/* --- utf8 ------------------------------------------------------------------- */
+
+static void testUtf8(void)
+{
+    char out[64]; unsigned n;
+    n = utf8_to_cp437("caf\xC3\xA9 \xE2\x80\x94 \xE2\x80\x9Cok\xE2\x80\x9D", 18, out, sizeof out); out[n] = 0;
+    CHECK_STR("utf8 accents and quotes", out, "caf\x82 -- \"ok\"");
+    n = utf8_to_cp437("\xE2\x94\x80\xE2\x96\x88", 6, out, sizeof out); out[n] = 0;
+    CHECK_STR("utf8 box drawing", out, "\xC4\xDB");
+    n = utf8_to_cp437("\xC5\x81\xC3\xB8 \xF0\x9F\x98\x80", 9, out, sizeof out); out[n] = 0;
+    CHECK_STR("utf8 fallbacks", out, "Lo ?");
+    n = utf8_to_cp437("a\xE2\x80\x8B" "b\tc", 7, out, sizeof out); out[n] = 0;
+    CHECK_STR("utf8 zero width and tab", out, "ab    c");
+    n = utf8_to_cp437("\xC3", 1, out, sizeof out); out[n] = 0;
+    CHECK_STR("utf8 truncated sequence", out, "?");
+    n = utf8_to_cp437("abcdef", 6, out, 3);
+    CHECK("utf8 respects outmax", n == 3);
+    n = cp437_to_utf8(0x82, out); out[n] = 0;
+    CHECK_STR("cp437 e-acute", out, "\xC3\xA9");
+    n = cp437_to_utf8(0xC4, out); out[n] = 0;
+    CHECK_STR("cp437 box", out, "\xE2\x94\x80");
+    n = cp437_to_utf8('A', out); out[n] = 0;
+    CHECK_STR("cp437 ascii", out, "A");
+    n = cp437_to_utf8(0x07, out); out[n] = 0;
+    CHECK_STR("cp437 bullet glyph", out, "\xE2\x80\xA2");
+    n = cp437_to_utf8('\n', out);
+    CHECK("cp437 newline stays", n == 1 && out[0] == '\n');
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -325,6 +355,7 @@ int main(void)
     testConsole();
     testEdit();
     testSearch();
+    testUtf8();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
