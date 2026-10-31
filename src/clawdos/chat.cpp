@@ -369,10 +369,10 @@ void Chat::logRound(int round)
 {
     char line[200];
     unsigned long now = TICKS_NOW;
-    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld",
+    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
             prov->id, as.model[0] ? as.model : prov->model, round,
             firstText ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
-            as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite);
+            as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
     ui->log(line);
 }
 

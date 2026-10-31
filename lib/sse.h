@@ -18,6 +18,7 @@ typedef struct Sse {
     int field;              /* which field the current line is (private) */
     unsigned fieldPos;
     int overflow;           /* a data payload exceeded max; the event was dropped */
+    unsigned maxLen;        /* the longest data payload seen (diagnostics) */
     int dropping;
 } Sse;
 

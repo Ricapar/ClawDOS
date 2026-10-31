@@ -116,8 +116,9 @@ def tour_steps():
         ('memory_list', {}, 'ok', 'DOSTOUR'),
         ('memory_read', {'name': 'dostour'}, 'ok', 'Second line.'),
         ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
-        # captured output, not the screen-text fallback
-        ('run', {'command': 'VER'}, 'ok', lambda r: 'FreeCom' in r and '(screen text)' not in r),
+        # a program that reads standard input gets end-of-file, not a hang (FIND with
+        # no file reads stdin); the exit code is reported and the rest of the list skipped
+        ('run', {'command': 'FIND /C "x"\nVER'}, 'ok', lambda r: '> FIND' in r and 'exit code' in r),
         # a list of commands stops at the first that fails
         ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never'}, 'ok',
          lambda r: '> DIR C:\\NOPE.XYZ' in r and 'not run:\n  REM never' in r),

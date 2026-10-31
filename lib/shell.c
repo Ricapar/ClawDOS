@@ -12,6 +12,8 @@
 #include <string.h>
 #include <errno.h>
 #include <process.h>
+#include <fcntl.h>
+#include <io.h>
 #include <dos.h>
 #include <i86.h>
 #include <bios.h>
@@ -265,7 +267,7 @@ static int runOne(const char *cmd, char *why)
 {
     static char prog[80];
     const char *args, *comspec = getenv("COMSPEC");
-    int code;
+    int code, nul, savedIn = -1;
 
     if (comspec == NULL || !*comspec)
         comspec = "C:\\COMMAND.COM";
@@ -279,6 +281,14 @@ static int runOne(const char *cmd, char *why)
        mTCP's own shell-outs: the program can't be stopped with Ctrl-C unless
        it installs its own handler. */
     args = direct(cmd, prog);
+    /* The program inherits our handles. Nobody can type into it, so give it
+       NUL as standard input: a program that reads stdin (FIND with no file,
+       MORE, a prompt) gets end-of-file and exits instead of waiting forever. */
+    nul = open("NUL", O_RDONLY);
+    if (nul >= 0) {
+        savedIn = dup(0);
+        dup2(nul, 0);
+    }
     oldInt10 = _dos_getvect(0x10);
     _dos_setvect(0x10, int10Hook);
     if (args == NULL)
@@ -288,6 +298,13 @@ static int runOne(const char *cmd, char *why)
     else
         code = spawnl(P_WAIT, prog, prog, NULL);
     _dos_setvect(0x10, oldInt10);
+    if (nul >= 0) {
+        if (savedIn >= 0) {
+            dup2(savedIn, 0);
+            close(savedIn);
+        }
+        close(nul);
+    }
 
     if (code == -1) {
         snprintf(why, WHY_MAX, "could not start %s: %s", args ? prog : comspec, strerror(errno));

@@ -6,7 +6,8 @@
    "type": "object",
    "properties": {},
    "required": []
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "dir",
@@ -22,7 +23,8 @@
    "required": [
     "path"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "read",
@@ -54,7 +56,8 @@
    "required": [
     "path"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "search",
@@ -79,7 +82,8 @@
     "text",
     "path"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "peek",
@@ -99,11 +103,12 @@
    "required": [
     "addr"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "write",
-  "description": "Create or overwrite a text file (newlines are written as CRLF), or append to one. The user may be asked to approve.",
+  "description": "Create or overwrite a text file (newlines are written as CRLF), or append to one. The user may be asked to approve. The text may be at most 12000 bytes per call: write a longer file in pieces, the first with append=0 and the rest with append=1.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -124,7 +129,8 @@
     "path",
     "text"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "edit",
@@ -154,7 +160,8 @@
     "old",
     "new"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "delete",
@@ -170,7 +177,8 @@
    "required": [
     "path"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "mkdir",
@@ -186,7 +194,8 @@
    "required": [
     "path"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "rename",
@@ -207,11 +216,12 @@
     "from",
     "to"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "run",
-  "description": "Run DOS command lines (programs, .BAT files, internal commands like DIR, TYPE, DEL). The screen switches to DOS while they run; you get the output each printed (or the final screen text) and its exit code, which FreeCOM passes through from the program (e.g. 2 for DIR of a missing file). Put several commands on separate lines (up to 12) to run them in order: they stop at the first whose exit code isn't 0, e.g. compile two files and link in one call. There is no & or && chaining. Programs cannot use the network, there is no way to type into them, and Ctrl-C can't stop them, so avoid interactive or endless programs.",
+  "description": "Run DOS command lines (programs, .BAT files, internal commands like DIR, TYPE, DEL). The screen switches to DOS while they run; you get the output each printed (or the final screen text) and its exit code, which FreeCOM passes through from the program (e.g. 2 for DIR of a missing file). Put several commands on separate lines (up to 12) to run them in order: they stop at the first whose exit code isn't 0, e.g. compile two files and link in one call. There is no & or && chaining. Programs cannot use the network, their standard input is empty (a program that asks for input gets end-of-file), and Ctrl-C can't stop them, so avoid interactive or endless programs.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -223,7 +233,8 @@
    "required": [
     "command"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "poke",
@@ -244,7 +255,8 @@
     "addr",
     "bytes"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "port",
@@ -264,7 +276,8 @@
    "required": [
     "port"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "play",
@@ -280,7 +293,8 @@
    "required": [
     "music"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "textart",
@@ -296,7 +310,8 @@
    "required": [
     "text"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "memory_list",
@@ -305,7 +320,8 @@
    "type": "object",
    "properties": {},
    "required": []
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "memory_read",
@@ -321,7 +337,8 @@
    "required": [
     "name"
    ]
-  }
+  },
+  "eager_input_streaming": true
  },
  {
   "name": "memory_write",
@@ -342,6 +359,7 @@
     "name",
     "text"
    ]
-  }
+  },
+  "eager_input_streaming": true
  }
 ]

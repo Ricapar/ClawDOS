@@ -15,6 +15,7 @@ void sse_init(Sse *s, char *buf, unsigned max)
     s->fieldPos = 0;
     s->overflow = 0;
     s->dropping = 0;
+    s->maxLen = 0;
 }
 
 static char nameBuf[8];                       /* field name being read */
@@ -24,6 +25,8 @@ static void endLine(Sse *s, SseEventFn fn, void *ctx)
     if (s->field == F_START) {                /* blank line: dispatch */
         if (s->len && s->buf[s->len - 1] == '\n')   /* the separator after the last data line */
             s->len--;
+        if (s->len > s->maxLen)
+            s->maxLen = s->len;
         if (s->len && !s->dropping) {
             s->buf[s->len] = 0;
             s->event[s->evlen] = 0;
