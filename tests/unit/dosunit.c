@@ -15,6 +15,8 @@
 #include "utf8.h"
 #include "sink.h"
 #include "json.h"
+#include "chunked.h"
+#include "sse.h"
 
 static int passed, failed;
 
@@ -383,6 +385,81 @@ static void testJson(void)
     CHECK("json find in truncated doc", json_find(EV, 20, "delta.text", &v, &n) == JSON_NONE);
 }
 
+/* --- chunked ------------------------------------------------------------------ */
+
+static char collected[200]; static unsigned collectedLen;
+static int collectBytes(void *ctx, const char *p, unsigned n)
+{ (void)ctx; if (collectedLen + n < sizeof collected) { memcpy(collected + collectedLen, p, n); collectedLen += n; collected[collectedLen] = 0; } return 0; }
+
+static void testChunked(void)
+{
+    static const char body[] = "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n";
+    unsigned total = sizeof body - 1, split;
+    Chunked c;
+    int rc, allOk = 1;
+
+    chunked_init(&c);
+    collectedLen = 0; collected[0] = 0;
+    rc = chunked_feed(&c, body, total, collectBytes, NULL);
+    CHECK("chunked whole", rc == 1);
+    CHECK_STR("chunked whole text", collected, "hello world");
+    for (split = 1; split < total; split++) {
+        chunked_init(&c);
+        collectedLen = 0; collected[0] = 0;
+        rc = chunked_feed(&c, body, split, collectBytes, NULL);
+        if (rc != 0) { allOk = 0; break; }
+        rc = chunked_feed(&c, body + split, total - split, collectBytes, NULL);
+        if (rc != 1 || strcmp(collected, "hello world")) { allOk = 0; break; }
+    }
+    CHECK("chunked every split", allOk);
+    chunked_init(&c);
+    collectedLen = 0; collected[0] = 0;
+    rc = chunked_feed(&c, "5;ext=1\r\nhello\r\n0\r\n\r\n", 21, collectBytes, NULL);
+    CHECK("chunked extension", rc == 1 && !strcmp(collected, "hello"));
+    chunked_init(&c);
+    CHECK("chunked bad size", chunked_feed(&c, "zz\r\n", 4, collectBytes, NULL) == -1);
+}
+
+/* --- sse ---------------------------------------------------------------------- */
+
+static char events[300];
+static void onEvent(void *ctx, const char *ev, const char *data, unsigned n)
+{ (void)ctx; sprintf(events + strlen(events), "%s:%.*s|", ev, n, data); }
+
+static void testSse(void)
+{
+    static const char feed[] = "event: a\ndata: {\"x\":1}\n\n: ping\n\ndata: l1\ndata: l2\n\n";
+    static const char feedCrlf[] = "event: a\r\ndata: {\"x\":1}\r\n\r\ndata: l1\r\ndata: l2\r\n\r\n";
+    char buf[64];
+    char big[80];
+    unsigned i, total = sizeof feed - 1;
+    Sse s;
+    int rc;
+
+    sse_init(&s, buf, sizeof buf);
+    events[0] = 0;
+    rc = sse_feed(&s, feed, total, onEvent, NULL);
+    CHECK("sse whole", rc == 0);
+    CHECK_STR("sse whole events", events, "a:{\"x\":1}|:l1\nl2|");
+    sse_init(&s, buf, sizeof buf);
+    events[0] = 0;
+    for (i = 0; i < total; i++)
+        sse_feed(&s, feed + i, 1, onEvent, NULL);
+    CHECK_STR("sse byte by byte", events, "a:{\"x\":1}|:l1\nl2|");
+    sse_init(&s, buf, sizeof buf);
+    events[0] = 0;
+    sse_feed(&s, feedCrlf, sizeof feedCrlf - 1, onEvent, NULL);
+    CHECK_STR("sse crlf", events, "a:{\"x\":1}|:l1\nl2|");
+    sse_init(&s, buf, sizeof buf);
+    events[0] = 0;
+    memset(big, 'x', sizeof big);
+    rc = sse_feed(&s, "data: ", 6, onEvent, NULL);
+    rc |= sse_feed(&s, big, sizeof big, onEvent, NULL);         /* 80 > 64 */
+    CHECK("sse overflow reported", rc == -1 && s.overflow);
+    sse_feed(&s, "\n\ndata: ok\n\n", 12, onEvent, NULL);
+    CHECK_STR("sse after overflow", events, ":ok|");
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -395,6 +472,8 @@ int main(void)
     testSearch();
     testUtf8();
     testJson();
+    testChunked();
+    testSse();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
