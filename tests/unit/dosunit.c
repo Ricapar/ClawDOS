@@ -21,6 +21,7 @@
 #include "cfg.h"
 #include "history.h"
 #include "apireq.h"
+#include "apistream.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -693,6 +694,93 @@ static void testApiReq(void)
     free(p);
 }
 
+/* --- api stream --------------------------------------------------------------- */
+
+static char asText[200], asHist[600]; static int asThinking;
+static void asTextFn(void *c, const char *t, unsigned n) { (void)c; strncat(asText, t, n); }
+static void asThinkFn(void *c) { (void)c; asThinking++; }
+static int asHistFn(void *c, const char *p, unsigned n) { (void)c; strncat(asHist, p, n); return 0; }
+
+static int ev(ApiStream *a, const char *event, const char *data)
+{
+    return apistream_event(a, event, data, strlen(data));
+}
+
+static void asReset(ApiStream *a, char *inputBuf, unsigned max)
+{
+    asText[0] = asHist[0] = 0; asThinking = 0;
+    apistream_init(a, inputBuf, max);
+    a->text = asTextFn; a->thinking = asThinkFn; a->hist = asHistFn; a->ctx = NULL;
+}
+
+static void testApiStream(void)
+{
+    static char input[64];
+    ApiStream a;
+    int rc;
+
+    asReset(&a, input, sizeof input);
+    rc = ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-opus-5-5\","
+        "\"content\":[],\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":50,\"output_tokens\":1}}}");
+    rc |= ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me \"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"think.\"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"abc\"}}");
+    rc |= ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    rc |= ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi \\u00e9\"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"!\"}}");
+    rc |= ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
+    rc |= ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read\",\"input\":{}}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\"}}");
+    rc |= ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"C:\\\\\\\\A.TXT\\\"}\"}}");
+    rc |= ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":2}");
+    rc |= ev(&a, "ping", "{\"type\":\"ping\"}");
+    rc |= ev(&a, "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":7}}");
+    CHECK("stream events ok so far", rc == 0);
+    CHECK("stream message_stop", ev(&a, "message_stop", "{\"type\":\"message_stop\"}") == 1);
+    CHECK_STR("stream text", asText, "Hi \x82!");
+    CHECK("stream thinking twice", asThinking == 2);
+    CHECK_STR("stream history", asHist,
+        "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Let me think.\",\"signature\":\"abc\"},"
+        "{\"type\":\"text\",\"text\":\"Hi \\u00e9!\"},"
+        "{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read\",\"input\":{\"path\":\"C:\\\\A.TXT\"}}]}");
+    CHECK("stream tool", a.hasTool && !strcmp(a.toolId, "toolu_1") && !strcmp(a.toolName, "read"));
+    CHECK_STR("stream tool input", a.toolInput, "{\"path\":\"C:\\\\A.TXT\"}");
+    CHECK("stream stop reason", !strcmp(a.stopReason, "tool_use") && !strcmp(a.model, "claude-opus-5-5"));
+    CHECK("stream usage", a.inTok == 100 && a.outTok == 7 && a.cacheRead == 50 && a.cacheWrite == 0);
+
+    asReset(&a, input, sizeof input);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\ud83d\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\ude00\"}}");
+    ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    ev(&a, "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}");
+    ev(&a, "message_stop", "{\"type\":\"message_stop\"}");
+    CHECK_STR("stream split surrogate on screen", asText, "??");
+    CHECK("stream split surrogate in history", strstr(asHist, "\"text\":\"\\ud83d\\ude00\"") != NULL);
+    CHECK("stream no tool", !a.hasTool && !strcmp(a.stopReason, "end_turn"));
+
+    asReset(&a, input, sizeof input);
+    CHECK("stream error event", ev(&a, "error", "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}") == -1
+          && !strcmp(a.error, "Overloaded"));
+
+    asReset(&a, input, sizeof input);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    CHECK("stream unknown block", ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"fallback\"}}") == -1
+          && strstr(a.error, "fallback") != NULL);
+
+    asReset(&a, input, 16);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"write\",\"input\":{}}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"0123456789abcdef\\\"}\"}}");
+    ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    ev(&a, "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":2}}");
+    CHECK("stream input overflow", ev(&a, "message_stop", "{\"type\":\"message_stop\"}") == 1 && a.toolInputOverflow
+          && strstr(asHist, "\"input\":{\"text\":\"0123456789abcdef\"}}]}") != NULL);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -711,6 +799,7 @@ int main(void)
     testCfg();
     testHistory();
     testApiReq();
+    testApiStream();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
