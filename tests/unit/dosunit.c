@@ -19,6 +19,7 @@
 #include "sse.h"
 #include "httpp.h"
 #include "cfg.h"
+#include "history.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -563,6 +564,57 @@ static void testCfg(void)
     free(c);
 }
 
+/* --- history ------------------------------------------------------------------ */
+
+static const char *histText(void)
+{
+    static char buf[300];
+    Sink s;
+    sink_buffer(&s, buf, sizeof buf);
+    hist_copy(&s);
+    return buf;
+}
+
+static void testHistory(void)
+{
+    FILE *f;
+    remove("C:\\HISTTEST.JSN");
+    CHECK("hist open new", hist_open("C:\\HISTTEST.JSN") == 0);
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
+    hist_puts("{\"role\":\"assist");
+    CHECK("hist rollback message", hist_rollback_message() == 0);
+    CHECK_STR("hist after rollback", histText(), "{\"role\":\"user\",\"content\":\"a\"}");
+    hist_puts("{\"role\":\"assistant\",\"content\":[]}");
+    hist_message_done();
+    CHECK_STR("hist two messages", histText(),
+              "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]}");
+    CHECK("hist size", hist_size() == (long)strlen(histText()));
+    hist_turn_begin();
+    hist_puts("{\"role\":\"user\",\"content\":\"b\"}");
+    hist_message_done();
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"}\"}]}");
+    hist_message_done();
+    CHECK("hist turn messages", hist_turn_messages() == 2);
+    CHECK("hist rollback turn", hist_rollback_turn() == 0 && hist_turn_messages() == 0);
+    CHECK_STR("hist after turn rollback", histText(),
+              "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]}");
+    hist_close();
+    f = fopen("C:\\HISTTEST.JSN", "ab");
+    fputs(",\r\n{\"role\":\"us", f);
+    fclose(f);
+    CHECK("hist reopen", hist_open("C:\\HISTTEST.JSN") == 0);
+    CHECK_STR("hist reopen drops the half message", histText(),
+              "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]}");
+    hist_puts("{\"role\":\"user\",\"content\":\"c\"}");
+    hist_message_done();
+    CHECK_STR("hist append after reopen", histText(),
+              "{\"role\":\"user\",\"content\":\"a\"},\r\n{\"role\":\"assistant\",\"content\":[]},\r\n"
+              "{\"role\":\"user\",\"content\":\"c\"}");
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -579,6 +631,7 @@ int main(void)
     testSse();
     testHttpHead();
     testCfg();
+    testHistory();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
