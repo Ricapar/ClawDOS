@@ -380,9 +380,10 @@ def build_image(autotest=None):
     fs = fatimg.open_fs(img)
     fill_image(fs, manifest_entries(autotest))
 
-    # Point CLAWDOS.EXE (and future bridge apps) at the bridge.
+    # Point CLAWDOS.EXE at the bridge (the old path, until the native client lands).
     cfg = fs.read_file('NET/MTCP.CFG') + f'CLAWDOS_BRIDGE {settings()["bridge"]}\r\n'.encode()
     fs.write_file('NET/MTCP.CFG', cfg)
+    fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG')))
 
     out = os.path.join(BUILD, IMAGE_NAME)
     with open(out, 'wb') as f:
@@ -392,10 +393,36 @@ def build_image(autotest=None):
     return out
 
 
+def api_key():
+    """ANTHROPIC_API_KEY from the repo's .env (gitignored), or None."""
+    path = os.path.join(ROOT, '.env')
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            key, sep, value = line.strip().partition('=')
+            if sep and key.strip() == 'ANTHROPIC_API_KEY':
+                return value.strip().strip('"\'') or None
+    return None
+
+
+def clawdos_cfg(template):
+    """The template CLAWDOS.CFG with the [anthropic] tunnel address from the settings
+    and the API key from .env filled in (a build without a key still boots)."""
+    text = template.decode('cp437')
+    text = re.sub(r'^tunnel .*$', f'tunnel {settings()["tunnel"]}', text, count=1, flags=re.M)
+    key = api_key()
+    if key:
+        text = re.sub(r'^# key sk-ant-\.\.\..*$', f'key {key}', text, count=1, flags=re.M)
+    return text.encode('cp437')
+
+
 SETTINGS_FILE = os.path.join(BUILD, 'settings.json')
 DEFAULT_SETTINGS = {
-    # Where the DOS PC finds dosbridge.py. 10.0.2.2 is the host PC as seen from
-    # 86Box's SLiRP network; real hardware needs the bridge machine's LAN IP.
+    # Where the DOS PC finds the TLS tunnel (and, until it goes, the old bridge).
+    # 10.0.2.2 is the host PC as seen from the emulators' NAT network; real
+    # hardware needs the tunnel machine's LAN IP.
+    'tunnel': '10.0.2.2:8443',
     'bridge': '10.0.2.2:8023',
 }
 
@@ -419,14 +446,16 @@ def main():
     """Command line: set the bridge address, then build the boot code, the programs and the image."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
-    ap.add_argument('--bridge', help='host:port of the DOS Bridge (remembered for later builds)')
+    ap.add_argument('--tunnel', help='host:port of the TLS tunnel (remembered for later builds)')
+    ap.add_argument('--bridge', help='host:port of the old DOS Bridge (remembered for later builds)')
     ap.add_argument('--compiledb', action='store_true',
                     help='only write build/compile_commands.json for clangd (a full build writes it too)')
     a = ap.parse_args()
     if a.compiledb:
         print(write_compiledb())
         return
-    print(f'[settings] bridge = {settings(bridge=a.bridge)["bridge"]}')
+    s = settings(tunnel=a.tunnel, bridge=a.bridge)
+    print(f'[settings] tunnel = {s["tunnel"]}, key {"from .env" if api_key() else "not set"}')
     print('[boot]')
     build_boot()
     print('[apps]')
