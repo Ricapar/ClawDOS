@@ -716,7 +716,7 @@ class Prompts(unittest.IsolatedAsyncioTestCase):
         """The system prompt is the prompt file plus the tools add-on."""
         system = providers.system_prompt({'name': 'Claude', 'prompt_text': 'Be {name}-like.'})
         self.assertTrue(system.startswith('Be Claude-like.\n\n'))   # the file is the prompt...
-        self.assertIn('real IBM PC XT', system)                     # ...then the tools add-on
+        self.assertIn('real IBM PC 5160', system)                     # ...then the tools add-on
         self.assertNotIn('code page 437', system)                   # nothing else built in
         self.assertFalse(hasattr(providers, 'SYSTEM_PROMPT'))
         default = providers.system_prompt({'name': 'Claude'})        # no text given: default.txt
@@ -984,7 +984,7 @@ class AnthropicTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
         self.assertEqual(msgs[2]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1',
                                                'content': 'result of read', 'is_error': False}])
-        self.assertIn('real IBM PC XT', req['system'][0]['text'])
+        self.assertIn('real IBM PC 5160', req['system'][0]['text'])
         # caching: a breakpoint on the system prompt (tools + system), automatic for the rest
         self.assertEqual(req['system'][-1]['cache_control'], {'type': 'ephemeral'})
         self.assertEqual(req['cache_control'], {'type': 'ephemeral'})

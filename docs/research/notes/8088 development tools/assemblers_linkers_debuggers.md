@@ -1,4 +1,4 @@
-# Assemblers, linkers/librarians and debuggers that run ON an 8088 IBM PC XT
+# Assemblers, linkers/librarians and debuggers that run ON an 8088 IBM PC 5160
 
 Scope: the tool itself must execute on an 8088 @ 4.77 MHz, 640 KB, DOS 3.3+ (FreeDOS 1.4), driven by one
 non-interactive command line (~120 chars, stdout captured, no keyboard). Licence classes:
@@ -41,7 +41,7 @@ on 640 KB and very slow (~7 minutes for a 2000-line source on an estimated 4.77 
 ### Inferences
 - Licence at 0.98.39: NASM was relicensed from LGPL to 2-clause BSD in the 2.x era; 0.98.39 was LGPL
   (unverified / from memory — not fetched). Either way class (a).
-- Practical verdict: NASM is a poor fit on the XT. TinyASM (section 3) gives NASM syntax at a fraction of the size.
+- Practical verdict: NASM is a poor fit on the DOS PC. TinyASM (section 3) gives NASM syntax at a fraction of the size.
 
 ### Gaps
 - Exact filenames/sizes in the 8086host directory (ibiblio 503).
@@ -93,7 +93,7 @@ registered users may distribute programs made with it. D86 is in the same sharew
 
 ### Takeaway
 8088-hosted and free: Wolfware Asm (now MIT, ~42 s on the test), TinyASM (BSD-2, NASM syntax, explicitly runs on a real
-XT, slow), Arrowsoft ASM 2.00c (public domain/freeware, MASM 3.0 syntax, needs a linker such as VAL), JWASMR (Open
+8088 PC, slow), Arrowsoft ASM 2.00c (public domain/freeware, MASM 3.0 syntax, needs a linker such as VAL), JWASMR (Open
 Watcom licence, "runs on any x86", ~4–5 min, needs DOS 5-compatible). Excluded (386+): FASM, JWasm's DOS-extended
 builds, Pass32 (unverified). Commercial: MASM 1.0–5.1 run on 8088 (5.1 ~55 s on test); MASM 6.x is DOS-extended;
 TASM.EXE (real mode) in TASM 1.0–3.x/4.0 is believed 8088-capable (unverified).
@@ -139,14 +139,14 @@ TASM.EXE (real mode) in TASM 1.0–3.x/4.0 is believed 8088-capable (unverified)
   TASM32.EXE (Win32 PE) shipped with 5.0+ — [Wikipedia Turbo Assembler](https://en.wikipedia.org/wiki/Turbo_Assembler)
 
 ### Inferences
-- Best free MASM-syntax choice on the XT: JWASMR (modern, maintained) if DOS 5-compat (FreeDOS is) and source sizes stay
+- Best free MASM-syntax choice on the DOS PC: JWASMR (modern, maintained) if DOS 5-compat (FreeDOS is) and source sizes stay
   small; Wolfware Asm is ~6x faster though.
 - Best free NASM-syntax choice: TinyASM (single command line, .COM via `-f bin`, error exit code — good for an agent).
 - MASM 6.x: ML.EXE is DOS-extended (6.0 Phar Lap 286 / 6.1 386 extender) — (unverified / from memory; the install guides
   above should be read to confirm). Treat MASM 6.x as excluded; MASM 4.0/5.1 are the commercial 8088 sweet spot.
 - TASM 1.0–3.x TASM.EXE is widely believed to run on 8088 (unverified / from memory); TASMX (3.x) needs 286+ DPMI/
   extended memory; TASM 5's TASM32 needs Win32. If the user owns TASM 2.x, it's likely the most capable 8088 assembler
-  with MASM compatibility (and IDEAL mode) — confirm by running it on the XT.
+  with MASM compatibility (and IDEAL mode) — confirm by running it on the DOS PC.
 
 ### Gaps
 - CHASM (Whitman/David Whitman's Cheap Assembler) — no source fetched; licence/8088 status unconfirmed (it was a 1980s
@@ -190,7 +190,7 @@ TinyASM (`-f bin`), and NASM (`-f bin`). Commercial MS LINK (3.x–5.x) and TLIN
 FreeDOS DEBUG (Paul Vojta / Debug/X by Japheth) defaults to 8088, its 386-only features are optional, and it explicitly
 handles `DEBUG < SCRIPT` reaching EOF without `q`. Licence: "feel free to distribute and use it as you wish" (class a/b).
 lDebug (Fair License, "intended to run on any processor type down to the 8088/8086") adds script files (Y command) and
-robust EOF handling; it is the most capable scriptable debugger for the agent. DEBUGX is the DPMI build (no use on XT).
+robust EOF handling; it is the most capable scriptable debugger for the agent. DEBUGX is the DPMI build (no use on an 8088).
 D86, Insight, AFD are interactive full-screen tools — low value for a no-keyboard agent.
 
 ### Cited Findings
@@ -252,7 +252,7 @@ IA-16-GCC- (DJGPP-hosted) and DOjS-based is 386+ and excluded. Open Watcom's DOS
 |---|---|---|---|---|
 | A86 4.x | Yes (Portfolio/NTVDM evidence) | (b) shareware, register to keep using | Yes, .COM direct | ~5 s |
 | Wolfware Asm | Yes (NTVDM-8086 estimate) | (a) MIT | Yes | ~42 s |
-| TinyASM | Yes (author: real XT, 128K) | (a) BSD-2 | Yes, exit code | slow (no figure) |
+| TinyASM | Yes (author: real 8088 PC, 128K) | (a) BSD-2 | Yes, exit code | slow (no figure) |
 | JWASMR | Yes ("any x86", DOS 5) | (a) OWPL | Yes | ~4–5 min |
 | NASM 0.98.39 8086host | Barely (memory) | (a) | Yes | ~7 min |
 | Arrowsoft 2.00c + VAL | Yes (targets 8088, MASM 3 syntax) | (a)/(c) PD/freeware | Yes | n/a |

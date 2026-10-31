@@ -154,7 +154,7 @@ def memory_prompt(index):
     return MEMORY_PROMPT.format(index=index.strip() or '(none)')
 
 TOOLS_PROMPT = """\
-You also have tools that run on this real IBM PC XT itself (FreeDOS, 8088, CGA): \
+You also have tools that run on this real IBM PC 5160 itself (FreeDOS, 8088, CGA): \
 read, search, write and edit files, look at the system, run DOS commands, peek and poke memory \
 and ports, play music on the PC speaker, and print coloured text art. Use them \
 when they help or when asked to do something on the machine; each call takes a \

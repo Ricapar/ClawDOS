@@ -4,7 +4,7 @@ Date: 2026-10-21. Status: approved in brainstorming, awaiting spec review.
 
 ## Goal
 
-Let the model use tools that run on the IBM PC XT itself, through CLAWDOS.EXE:
+Let the model use tools that run on the IBM PC 5160 itself, through CLAWDOS.EXE:
 browse and edit files, inspect the system, run DOS programs, draw CGA
 graphics, play music on the PC speaker, and poke at hardware. The tool set is
 fixed and hard-coded. Success: a request like "draw me a sunset and play a

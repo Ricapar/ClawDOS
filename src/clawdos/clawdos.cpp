@@ -1,4 +1,4 @@
-/* CLAWDOS.EXE - chat with Claude from an IBM PC XT.
+/* CLAWDOS.EXE - chat with Claude from an IBM PC 5160.
  *
  * Connects to a DOS Bridge (bridge/dosbridge.py) over TCP, sends what you
  * type, and streams the reply onto a word-wrapped, hardware-scrolled CGA

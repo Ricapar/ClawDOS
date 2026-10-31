@@ -22,7 +22,7 @@ modern world. First flagship demo: a Claude chat client.
   Note: anything we link against mTCP's library is GPLv3.
 - **Packet driver:** PicoMEM's `PM2000 0x60` (NE2000 over WiFi, auto-detected);
   Crynwr NE1000/NE2000 at 340h in emulators.
-- **Emulators:** 86Box (cycle-accurate IBM XT + CGA + NE1000/NE2000 w/ SLiRP) for
+- **Emulators:** 86Box (cycle-accurate IBM PC 5160 + CGA + NE1000/NE2000 w/ SLiRP) for
   fidelity; DOSBox-X for fast iteration and headless test runs.
 
 ## Claude chat architecture
@@ -125,7 +125,7 @@ screen as it was, and the link restored.
    copy back. No reload, but every hooked vector (INT 10h capture, 1Bh/23h
    Ctrl-Break, the packet driver's receive upcall into mTCP) must be unhooked
    first and the packet driver released and re-acquired; the TCP connection
-   still dies while the receiver is gone. Needs EMS (none in 86Box's XT
+   still dies while the receiver is gone. Needs EMS (none in 86Box's IBM PC 5160
    unless an EMS board is emulated); a disk swap file would be the fallback.
 
 Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths

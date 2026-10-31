@@ -102,7 +102,7 @@ class Schemas(unittest.TestCase):
     def test_prompt_and_cap(self):
         """The tools prompt mentions the key facts; the round cap."""
         self.assertEqual(MAX_ROUNDS, 25)
-        for phrase in ('real IBM PC XT', 'PC speaker', 'may be denied'):
+        for phrase in ('real IBM PC 5160', 'PC speaker', 'may be denied'):
             self.assertIn(phrase, TOOLS_PROMPT)
 
 

@@ -1,11 +1,11 @@
-# Non-C/asm languages that run ON an IBM PC XT (8088, 640 KB, FreeDOS 1.4)
+# Non-C/asm languages that run ON an IBM PC 5160 (8088, 640 KB, FreeDOS 1.4)
 
 Scope note: about 18 tool calls. ibiblio.org (FreeDOS package repo) returned HTTP 503 on every fetch, so the FreeDOS 1.4 package list could not be checked. Coverage is uneven: GW-BASIC, Turbo Pascal, QuickBASIC, PowerBASIC, F-PC, XLISP, FST Modula-2, PD Prolog and Bywater BASIC were researched. Logo, Little Smalltalk, Icon, AWK, REXX, Turbo Prolog, muLISP/PC-LISP, Logitech Modula-2 and the other Forths were NOT researched (see Gaps). Anything marked "UNVERIFIED" is from the researcher's background knowledge, not a fetched source.
 
 ## GW-BASIC: an MIT-licensed, buildable binary; runs a .BAS from the command line; output redirection
 
 ### Takeaway
-Yes. TK Chia's project assembles Microsoft's 2020 MIT GW-BASIC source with JWasm/MASM and publishes binaries, the latest being 20261005. Those binaries are licence class (a), MIT, so we can ship them on our image. GW-BASIC's own documentation describes `GWBASIC PROG >OUT` redirection, under which PRINT output goes to the redirected file. It looks like a strong fit for the `run` tool, but 8088 and FreeDOS behaviour of the rebuild, and whether capture works, still need testing on the XT.
+Yes. TK Chia's project assembles Microsoft's 2020 MIT GW-BASIC source with JWasm/MASM and publishes binaries, the latest being 20261005. Those binaries are licence class (a), MIT, so we can ship them on our image. GW-BASIC's own documentation describes `GWBASIC PROG >OUT` redirection, under which PRINT output goes to the redirected file. It looks like a strong fit for the `run` tool, but 8088 and FreeDOS behaviour of the rebuild, and whether capture works, still need testing on the DOS PC.
 
 ### Cited Findings
 - Microsoft published the 8088 assembly source on GitHub under MIT on 2020-05-21. The repo is read-only, with "no build scripts, makefiles, or tools required to generate executable binaries, nor any pre-built binaries". — [Wikipedia: GW-BASIC](https://en.wikipedia.org/wiki/GW-BASIC); [InfoQ](https://www.infoq.com/news/2020/06/microsoft-gw-basic-open-source); [SD Times](https://sdtimes.com/msft/microsoft-open-sources-gw-basic-code/)
@@ -16,10 +16,10 @@ Yes. TK Chia's project assembles Microsoft's 2020 MIT GW-BASIC source with JWasm
 - Primary reference manual for the language: [Microsoft GW-BASIC Interpreter User's Reference 1986 (bitsavers mirror)](https://www.mirrorservice.org/sites/www.bitsavers.org/pdf/microsoft/gw-basic/410130013-320-R01-0686_Microsoft_GW-BASIC_Interpreter_Users_Reference_1986.pdf)
 
 ### Inferences
-- The 1983 source targets the 8088 (Microsoft describes it as 8088 assembly), so the TK Chia rebuild should run on the XT. This was not explicitly confirmed; see Gaps.
+- The 1983 source targets the 8088 (Microsoft describes it as 8088 assembly), so the TK Chia rebuild should run on the DOS PC. This was not explicitly confirmed; see Gaps.
 - Planned agent pattern: `GWBASIC PROG.BAS >OUT.TXT` with `SYSTEM` as the program's last line, then `TYPE OUT.TXT`. With output redirected, the screen-only statements (LOCATE, COLOR, SCREEN graphics) presumably don't reach the file.
 - GW-BASIC binaries pulled from MS-DOS OEM disks are class (c)/(d): Microsoft's MIT grant covers its released source, not the OEM binaries. The TK Chia build avoids that question.
-- BASICA: the user's XT has IBM Cassette BASIC in ROM, so their own IBM PC-DOS disk's BASICA.COM would work (class (d), their licensed copy). It offers nothing over GW-BASIC for this use. UNVERIFIED: BASICA needs the IBM ROM, and redirection behaviour is likely similar.
+- BASICA: the user's PC has IBM Cassette BASIC in ROM, so their own IBM PC-DOS disk's BASICA.COM would work (class (d), their licensed copy). It offers nothing over GW-BASIC for this use. UNVERIFIED: BASICA needs the IBM ROM, and redirection behaviour is likely similar.
 
 ### Gaps
 - 8088 operation and FreeDOS compatibility of the TK Chia build were not stated on the pages fetched (the GitHub README fetch returned 404).
@@ -65,9 +65,9 @@ Borland's free antique downloads (TP 1.0, 3.02, 5.5) are "personal use only", so
 - TP 7.0 User's Guide PDF (primary source, not read in detail). — [turbopascal.org](https://turbopascal.org/wp-content/uploads/Turbo_Pascal_Version_7.0_Users_Guide_1992.pdf)
 
 ### Inferences
-- Recommended order for the XT, if the user owns the disks: TP 5.5 or 6.0, or TP 7.0 using TURBO.EXE and TPC.EXE (not TPX or BP). A plausible pattern is `TPC PROG.PAS` then `PROG >OUT.TXT`. WriteLn goes through DOS stdout unless the program uses the CRT unit, which writes directly to video. UNVERIFIED, from background knowledge: CRT bypasses redirection unless you `Assign(Output,'')`.
+- Recommended order for the DOS PC, if the user owns the disks: TP 5.5 or 6.0, or TP 7.0 using TURBO.EXE and TPC.EXE (not TPX or BP). A plausible pattern is `TPC PROG.PAS` then `PROG >OUT.TXT`. WriteLn goes through DOS stdout unless the program uses the CRT unit, which writes directly to video. UNVERIFIED, from background knowledge: CRT bypasses redirection unless you `Assign(Output,'')`.
 - TP 3.02 is a COM-file IDE with no separate command-line compiler (UNVERIFIED), so it is hard to drive non-interactively.
-- UNVERIFIED: Free Pascal's i8086 target is a cross-compiler hosted on a 32/64-bit OS, so it can't run on the XT, though it could build XT programs on the PC.
+- UNVERIFIED: Free Pascal's i8086 target is a cross-compiler hosted on a 32/64-bit OS, so it can't run on the DOS PC, though it could build 8088 programs on the PC.
 
 ### Gaps
 - No primary source on the minimum CPU for TP 5.5 or 6.0, or on TPC memory needs (both believed to work on an 8088).
@@ -76,7 +76,7 @@ Borland's free antique downloads (TP 1.0, 3.02, 5.5) are "personal use only", so
 ## Forth, Lisp, Prolog, Modula-2
 
 ### Takeaway
-F-PC 3.6 is public domain and built for PC/XT/AT machines under DOS, so it is class (a). XLISP 2.1 and XLISP-PLUS ship DOS PC executables but are "non-commercial" only (class b/c). Betz's later XLISP 3.0 is MIT, but its 8088 suitability is unknown. FST Modula-2 4.0 is closed-source freeware (class b or c; redistribution terms not seen). A.D.A. PD Prolog 1.9x is a "public domain", "rather slow" DOS Prolog (class a/c).
+F-PC 3.6 is public domain and built for 8088 and 286 PCs under DOS, so it is class (a). XLISP 2.1 and XLISP-PLUS ship DOS PC executables but are "non-commercial" only (class b/c). Betz's later XLISP 3.0 is MIT, but its 8088 suitability is unknown. FST Modula-2 4.0 is closed-source freeware (class b or c; redistribution terms not seen). A.D.A. PD Prolog 1.9x is a "public domain", "rather slow" DOS Prolog (class a/c).
 
 ### Cited Findings
 - F-PC 3.6 (1994-12-18), whose README says it "is a public domain package". — [Internet Archive: FPC 3.6](https://archive.org/details/fpc-36)
@@ -90,7 +90,7 @@ F-PC 3.6 is public domain and built for PC/XT/AT machines under DOS, so it is cl
 - PD Prolog (Automata Design Associates, defunct): "a rather slow implementation of Prolog for MS-DOS systems". Version 1.90 (5-May-86) is archived, and a later 1.95D exists. — [CMU AI repository: pdprolog](http://www.cs.cmu.edu/afs/cs/project/ai-repository/ai/lang/prolog/impl/prolog/pdprolog/0.html)
 
 ### Inferences
-- Since PD Prolog dates from 1986 and F-PC targets the XT, both almost certainly run on an 8088. That is inference: PD Prolog's 8088 support was not explicitly confirmed.
+- Since PD Prolog dates from 1986 and F-PC targets the 8088, both almost certainly run on an 8088. That is inference: PD Prolog's 8088 support was not explicitly confirmed.
 - XLISP 2.x is portable C and was common on 8088 PCs in 1988, but the non-commercial clause means checking its bundled licence file before shipping it.
 - UNVERIFIED: F-PC can probably run a script and exit with something like `F-PC FLOAD PROG.SEQ BYE`, but this needs confirming in F-PC docs.
 

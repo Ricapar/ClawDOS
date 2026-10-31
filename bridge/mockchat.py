@@ -108,7 +108,7 @@ def tour_steps():
     return out
 
 LOREM = (
-    "The IBM Personal Computer XT, model 5160, arrived in March 1983. It kept "
+    "The IBM Personal Computer model 5160, arrived in March 1983. It kept "
     "the original PC's Intel 8088 at 4.77 MHz but added a 10 MB hard disk, "
     "eight expansion slots, and room for 640 KB of memory on later "
     "motherboards. Text on a CGA card lives at segment B800, two bytes per "
@@ -153,7 +153,7 @@ SMALL_TALK = [
      "to test CLAWDOS.EXE: replies stream in token-sized pieces after a short "
      "pause, I remember the conversation, and I can fail in all the ways "
      "the real API can. Start the bridge without --mock for the real thing."),
-    (r'\b(xt|8088|ibm|cga|pc)\b',
+    (r'\b(8088|ibm|cga|pc)\b',
      "Your machine is a classic: an Intel 8088 at 4.77 MHz with 640 KB of "
      "memory and a CGA card. That's about 0.33 MIPS, so every byte drawn on "
      "screen counts. Even so, it's keeping up with this stream just fine."),

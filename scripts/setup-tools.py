@@ -170,7 +170,7 @@ def roms_86box():
 
 def devel():
     """Development tools for the DOS PC image (they run on the 8088; see
-    docs/research/XT 8088 development tools.md)."""
+    docs/research/8088 development tools.md)."""
     for p in DEVEL_PACKAGES:
         dest = t('devel', f'{p}.zip')
         if os.path.exists(dest):

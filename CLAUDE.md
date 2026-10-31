@@ -1,6 +1,6 @@
 # ClawDOS
 
-DOS software for a real IBM PC XT (8088 @ 4.77 MHz, 640K, CGA, PicoMEM: disk images + NE2000 over WiFi).
+DOS software for a real IBM PC 5160 (8088 @ 4.77 MHz, 640K, CGA, PicoMEM: disk images + NE2000 over WiFi).
 README.md has the quick start; docs/ROADMAP.md the plan; docs/PROTOCOL.md the bridge protocol.
 
 ## Workflow

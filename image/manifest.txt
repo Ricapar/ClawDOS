@@ -47,7 +47,7 @@ CLAWDOS/        build:clawdos.exe
 TESTS/                  build:dosunit.exe
 TESTS/DEV/              repo:image/tests/dev/*
 
-# Development tools that run on the 8088 (docs/research/XT 8088 development tools.md;
+# Development tools that run on the 8088 (docs/research/8088 development tools.md;
 # fetched by scripts/setup-tools.ps1). Each tool's licence goes along in DEVEL/DOC.
 DEVEL/BIN/              devel:tinyasm.zip!DEVEL/TINYASM/TINYASM.EXE
 DEVEL/DOC/TINYASM/      devel:tinyasm.zip!DEVEL/TINYASM/LICENSE
