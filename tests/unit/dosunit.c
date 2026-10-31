@@ -20,6 +20,7 @@
 #include "httpp.h"
 #include "cfg.h"
 #include "history.h"
+#include "apireq.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -615,6 +616,83 @@ static void testHistory(void)
     remove("C:\\HISTTEST.JSN");
 }
 
+/* --- api request -------------------------------------------------------------- */
+
+static void writeFile(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "wb");
+    fputs(text, f);
+    fclose(f);
+}
+
+static void testApiReq(void)
+{
+    static char body[900], head[600];
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    ApiReq r;
+    Sink count, buf;
+    static const char want[] =
+        "{\"model\":\"claude-opus-5-5\",\"max_tokens\":16000,\"stream\":true,"
+        "\"output_config\":{\"effort\":\"low\"},\"cache_control\":{\"type\":\"ephemeral\"},"
+        "\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},"
+        "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none)\",\"cache_control\":{\"type\":\"ephemeral\"}}],"
+        "\"tools\":[{\"name\":\"t\"}],\"messages\":[";
+
+    writeFile("C:\\PTEST.TXT", "Hi {name}.\r\nMem:\r\n{memories}");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
+
+    memset(p, 0, sizeof *p);
+    strcpy(p->host, "api.anthropic.com"); strcpy(p->path, "/v1/messages"); strcpy(p->auth, "x-api-key");
+    strcpy(p->key, "sk-ant-abc"); strcpy(p->model, "claude-opus-5-5"); strcpy(p->effort, "low"); p->cache = 1;
+    r.p = p; r.promptPath = "C:\\PTEST.TXT"; r.toolsPath = "C:\\TTEST.JSN"; r.name = "Claude";
+    r.memories = ""; r.noTools = 0;
+
+    sink_count(&count);
+    CHECK("req count ok", api_body(&count, &r) == 0);
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("req write ok", api_body(&buf, &r) == 0);
+    CHECK("req count matches", count.count == strlen(body));
+    CHECK("req prefix", !strncmp(body, want, sizeof want - 1));
+    CHECK_STR("req tail", body + strlen(body) - 31, "{\"role\":\"user\",\"content\":\"a\"}]}");
+
+    p->effort[0] = 0;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("req no effort", strstr(body, "output_config") == NULL);
+    p->cache = 0;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("req no cache", strstr(body, "cache_control") == NULL);
+    r.noTools = 1;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("req tool_choice none", strstr(body, "\"tool_choice\":{\"type\":\"none\"}") != NULL);
+    r.toolsPath = "C:\\NOPE.JSN";
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("req missing file", api_body(&buf, &r) == -1);
+
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, 123);
+    CHECK("head request line", !strncmp(head, "POST /v1/messages HTTP/1.1\r\n", 28));
+    CHECK("head fields", strstr(head, "Host: api.anthropic.com\r\n") && strstr(head, "x-api-key: sk-ant-abc\r\n")
+          && strstr(head, "anthropic-version: 2023-06-01\r\n") && strstr(head, "Content-Length: 123\r\n")
+          && strstr(head, "Accept: text/event-stream\r\n") && strstr(head, "Connection: keep-alive\r\n")
+          && strstr(head, "Content-Type: application/json\r\n") && !strstr(head, "anthropic-beta")
+          && !strcmp(head + strlen(head) - 4, "\r\n\r\n"));
+    strcpy(p->auth, "bearer"); strcpy(p->key, "sk-or-x"); strcpy(p->betas, "b-2026");
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, 1);
+    CHECK("head bearer and betas", strstr(head, "Authorization: Bearer sk-or-x\r\n") && !strstr(head, "x-api-key")
+          && strstr(head, "anthropic-beta: b-2026\r\n"));
+    hist_close();
+    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
+    free(p);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -632,6 +710,7 @@ int main(void)
     testHttpHead();
     testCfg();
     testHistory();
+    testApiReq();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
