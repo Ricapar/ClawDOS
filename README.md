@@ -35,16 +35,16 @@ set and talks to the network through a standard packet driver, so in principle
 it runs on any PC-compatible running DOS with a network card and a CGA-compatible
 text display. It was built to target a 4.77 MHz IBM PC XT (5160).
 
-**CLAWDOS.EXE** is the harness: the AI coding agent-style interface, input handling,
-tool calls, and network communication to the bridge.
+**CLAWDOS.EXE** is the whole harness, and it runs on the 8088: it speaks the
+Claude Messages API itself (request bodies, the streamed JSON reply, the tool
+loop), keeps the conversation history on its own disk, holds the API key and
+runs the tools.
 
-The **bridge** is a shim between DOS and the LLM APIs. I didn't want to implement
-the full Anthropic/OpenAI API to run on the legacy hardware - mostly to avoid the overhead of having to 
-
-A 1980s CPU
-can't do modern TLS, so the bridge holds the API key, speaks HTTPS to the
-model, keeps the conversation history and relays tool calls to DOS and the
-results back. 
+The one thing a 1980s CPU can't do is TLS, so the only piece off the PC is a
+**dumb tunnel**: a program that accepts a plain TCP connection and copies the
+bytes into an HTTPS connection to `api.anthropic.com`. It knows nothing about
+the API. `tunnel/tunnel.py` is 100 lines of standard-library Python; `socat` or
+`stunnel` do the same job.
 
 ```mermaid
 flowchart LR
@@ -53,27 +53,28 @@ flowchart LR
         subgraph APP["CLAWDOS.EXE"]
             direction TB
             UI["Chat interface"]
+            LOOP["Agent loop<br/>Messages API requests, SSE + JSON,<br/>history on disk, API key"]
             TOOLS["Tool executors<br/>files, search, DOS commands,<br/>memory &amp; ports, speaker, text art"]
         end
-        SYS[("Disk, memory, I/O ports,<br/>PC speaker, DOS programs,<br/>ClawDOS's memories")]
+        SYS[("Disk, memory, I/O ports,<br/>PC speaker, DOS programs,<br/>ClawDOS's memories and chats")]
         NET["mTCP + packet driver"]
         TOOLS <--> SYS
         APP <--> NET
     end
 
-    subgraph SHIM["Bridge (PC or Raspberry Pi)"]
-        BRIDGE["dosbridge.py<br/>TLS, API key, history,<br/>relays tool calls"]
+    subgraph SHIM["TLS tunnel (PC or Raspberry Pi)"]
+        TUNNEL["tunnel.py / socat / stunnel<br/>copies bytes, nothing else"]
     end
 
-    API["LLM API<br/>(Anthropic or an OpenAI-compatible provider)"]
+    API["Claude Messages API<br/>(or any host that speaks it)"]
 
-    NET <-->|"plain TCP<br/>simple text protocol"| BRIDGE
-    BRIDGE <-->|"HTTPS"| API
+    NET <-->|"plain HTTP"| TUNNEL
+    TUNNEL <-->|"HTTPS"| API
 ```
 
 On the real PC the network card is a PicoMEM (an emulated NE2000 that talks WiFi);
-in an emulator it's an emulated NE1000/NE2000 with NAT networking. The wire
-format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+in an emulator it's an emulated NE1000/NE2000 with NAT networking. What CLAWDOS
+sends and expects is in [docs/API.md](docs/API.md).
 
 ## What you need
 
@@ -81,7 +82,7 @@ format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 |---|---|
 | **To try it** | A Mac (with Homebrew) or a Windows PC, with Python 3. Everything runs in an emulator. |
 | **For real hardware** | An 8088 IBM PC (or compatible) with CGA and a PicoMEM card: it provides the disk (an image on a microSD card) and WiFi (NE2000). |
-| **For the AI** | An API key (Anthropic by default), or run the bridge with `--mock` or against a local Ollama. |
+| **For the AI** | An Anthropic API key, or the offline mock API for a look around. Use a dedicated key with a spending limit: it sits on the DOS PC's disk and crosses your LAN in clear on its way to the tunnel. |
 
 ## Run it locally (emulator)
 
@@ -90,40 +91,36 @@ format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
    DOSBox-X and 86Box (with its ROMs) with Homebrew on a Mac or winget on
    Windows. (On Windows the commands below say `python`; on a Mac, `python3`.)
 2. **Build** the disk image: `python scripts/build.py` → `build/CLAWDOS.IMG`.
-3. **Start the bridge** in one terminal:
-   ```
-   python3 -m venv .venv
-   .venv/bin/pip install -r bridge/requirements.txt
-   .venv/bin/python bridge/dosbridge.py --mock
-   ```
-   (On Windows: `pip install -r bridge/requirements.txt` and
-   `python bridge/dosbridge.py --mock`.)
-   `--mock` answers like ClawDOS would, offline. For the real thing set
-   `ANTHROPIC_API_KEY` (in the environment, or in a `.env` file in the repo
-   root, or run `ant auth login`) and drop `--mock`.
+3. **Start the TLS tunnel** in one terminal: `python3 tunnel/tunnel.py`. It
+   listens on port 8443 and forwards to `api.anthropic.com:443`. Put your key in
+   a `.env` file in the repo root (`ANTHROPIC_API_KEY=sk-ant-...`) before the
+   build: it goes onto the image in `C:\CLAWDOS\CLAWDOS.CFG`.
+   No key? `python3 tunnel/mockapi.py` fakes the API offline on port 18023
+   (then type `CLAWDOS 10.0.2.2:18023` on the DOS PC and send `!help`).
 4. **Boot an emulated 8088 PC** in another: `python scripts/run86box.py` (8088,
    640K, CGA, with an NE1000 card and NAT networking). It boots, brings up the
    network and shows the `C:\>` prompt.
-5. **Type `CLAWDOS`**. In the emulator the
-   bridge is the host machine, `10.0.2.2:8023`, which the image is built to use.
+5. **Type `CLAWDOS`**. In the emulator the tunnel is the host machine,
+   `10.0.2.2:8443`, which the image is built to use.
 
 Prefer DOSBox-X? `python scripts/rundosbox.py` boots the same image with
 networking. It is faster but less exact (it emulates an 80186).
 
 ## Run it on a real PC
 
-1. **Build the image** with the address of the PC that will run the bridge:
+1. **Build the image** with the address of the PC that will run the tunnel:
    ```
-   python scripts/build.py --bridge 172.16.0.100:8023
+   python scripts/build.py --tunnel 172.16.0.100:8443
    ```
-   The address is remembered. On the DOS PC it lives in `C:\NET\MTCP.CFG` as
-   `CLAWDOS_BRIDGE`.
-2. **Run the bridge** on that PC (or a Raspberry Pi) as above, without `--mock`
-   for the real thing. The DOS PC connects in on TCP port 8023, so allow it
-   through the firewall. On a Mac, accept the "allow incoming network
-   connections" prompt when the bridge first starts. On Windows (admin PowerShell):
+   The address is remembered. On the DOS PC it is the `tunnel` line of
+   `C:\CLAWDOS\CLAWDOS.CFG`, next to the API key; edit the file there to change either.
+2. **Run the tunnel** on that PC (or a Raspberry Pi): `python3 tunnel/tunnel.py`,
+   or without our code, `socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443`.
+   The DOS PC connects in on TCP port 8443, so allow it through the firewall.
+   On a Mac, accept the "allow incoming network connections" prompt when the
+   tunnel first starts. On Windows (admin PowerShell):
    ```
-   New-NetFirewallRule -DisplayName DOSBridge -Direction Inbound -Protocol TCP -LocalPort 8023 -Action Allow
+   New-NetFirewallRule -DisplayName ClawDOSTunnel -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
    ```
 3. **Copy `CLAWDOS.IMG`** into the `HDD` folder on the PicoMEM's microSD card.
 4. **Configure the PicoMEM**: in its BIOS menu pick the image as HDD0 (Disk) and
@@ -136,18 +133,19 @@ networking. It is faster but less exact (it emulates an 80186).
 
 Enter sends. Esc stops a reply or clears the input. Arrows, Home, End and Del
 edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
-chat, F3 safe mode, F10 quit. `CLAWDOS host:port` overrides the bridge address;
-`-m text` sends a message at startup and `-i text` pre-fills the input box.
-Type `/model` to list model providers and switch, and `/theme claude` or
-`/theme opencode` to change colours (`CLAWDOS_THEME opencode` in `MTCP.CFG`
-sets the one it starts with).
+chat, F3 safe mode, F10 quit. `CLAWDOS host:port` replaces the tunnel address
+(plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
+a message at startup and `-i text` pre-fills the input box. Type `/model` to
+list the providers in `CLAWDOS.CFG` and switch, and `/theme claude` or
+`/theme opencode` to change colours (`theme opencode` in `CLAWDOS.CFG` sets
+the one it starts with).
 
 ## Reference
 
 ### Tools on DOS
 
-The bridge offers the model a fixed set of tools; CLAWDOS.EXE runs them and
-shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
+CLAWDOS.EXE offers the model a fixed set of tools (`C:\CLAWDOS\TOOLS.JSN`),
+runs them and shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 
 
 
@@ -158,7 +156,7 @@ quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
 or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
 
-With the mock bridge, `!tool NAME key=value ...` calls any tool (e.g.
+With the mock API, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and
 `!tooltour` exercises every tool.
 
@@ -189,60 +187,52 @@ what else runs on a DOS PC and what a licensed copy would add.
 
 ClawDOS keeps notes on the DOS PC itself, in `C:\MEMORY\NAME.TXT` (first line: a
 one-line summary; at most 4000 bytes each). At the start of every conversation
-the bridge runs `memory_list` on the DOS PC (you'll see a `Memories` line) and puts
-the list into the system prompt, so ClawDOS knows what it saved before and reads
-a memory in full when it's relevant. The memory tools never ask in safe mode.
-Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or ask ClawDOS to (that uses
-`delete`, which does ask). The mock and replay backends don't list memories.
+CLAWDOS lists them and puts the list into the system prompt, so ClawDOS knows
+what it saved before and reads a memory in full when it's relevant. The memory
+tools never ask in safe mode. Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or
+ask ClawDOS to (that uses `delete`, which does ask).
 
-### Other models
+### Other providers
 
-The bridge isn't tied to Claude. Besides Anthropic's API it speaks the
-OpenAI-compatible chat API that OpenRouter, Z.ai, OpenAI, Ollama, LM Studio and
-most others offer, so nothing changes on the DOS PC. Built-in providers:
-`anthropic` (default), `openrouter`, `zai`, `openai`, `ollama`, `mock`
-(keys in `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`).
-`--provider NAME --model MODEL` picks where new chats start. On the DOS PC, type
-`/model` to list providers and `/model openrouter:z-ai/glm-4.6` (or
-`/model zai`, or just `/model some-model` on the current provider) to switch
-mid-conversation; the history carries over. To add or change providers, copy
-`bridge/providers.example.toml` to `bridge/providers.toml` (format in
-`bridge/providers.py`). API keys only ever come from environment variables.
+Any host that speaks the Messages API works: add a `[section]` to
+`C:\CLAWDOS\CLAWDOS.CFG` (the template is `image/clawdos/CLAWDOS.CFG`) with its
+`host`, `path`, `model`, `key` and `auth bearer` if it wants a bearer token, give
+the tunnel a second port for it (`python3 tunnel/tunnel.py --map 8443=api.anthropic.com:443
+--map 8444=openrouter.ai:443`) and point the section's `tunnel` line at that
+port. On the DOS PC, `/model` lists the sections and `/model openrouter`,
+`/model openrouter:anthropic/claude-opus-5.5` or just `/model some-model` (on
+the current provider) switches mid-conversation; the history carries over.
+OpenAI-style `/chat/completions` hosts are not supported.
 
-### System prompts
+### The system prompt
 
-The system prompt comes from a file: `bridge/prompts/NAME.txt`, chosen with
-`--prompt NAME` (default: `default.txt`). The bridge appends its add-ons after
-it: how the DOS PC's tools work, and the index of the DOS PC's memories. Since
-the file is the whole prompt, it must tell the model about the screen (plain
-text, 80 columns, no Markdown): copy `default.txt` to start a new one. `{name}`
-becomes the assistant's name. Files are re-read at the start of every
-conversation, so an edit applies from the next chat (F2 on the DOS PC) without
-restarting the bridge.
+`C:\CLAWDOS\PROMPT.TXT` is the whole system prompt (template:
+`image/clawdos/PROMPT.TXT`). `{name}` becomes the assistant's name and
+`{memories}` the list of memories. It must tell the model about the screen
+(plain text, 80 columns, no Markdown). It is read for every request, so an edit
+on the DOS PC applies to the next message; ClawDOS can edit it itself.
 
-### Logs
+### Chats and logs
 
-The bridge keeps two logs, both gitignored:
-
-- `bridge/dosbridge.log`: a debug log with every protocol line (rotating; `--log FILE`).
-- `bridge/logs/YYYY-MM-DD/*.jsonl`: one file per DOS PC connection, one JSON event per
-  line: what you asked, Claude's replies, tool calls and results, and each API
-  call's model, stop reason and token usage (`--convlog DIR`, `-` for none). Load
-  it with `jq`, pandas or a few lines of Python.
+Every conversation is a file in `C:\CLAWDOS\CHATS\` (`MMDDnnn.JSN`): the
+messages exactly as the API sees them, which is also the log of what was said
+and done. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
+token, total, stop reason, tokens in/out, cache reads) and one per event worth
+knowing about (clock set, retries, lost links, errors).
 
 ## Project layout
 
 | Path | What |
 |---|---|
 | `src/clawdos/` | CLAWDOS.EXE |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), `dosbridge` (bridge protocol on mTCP), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
-| `tests/unit/` | DOSUNIT.EXE: unit tests for the hardware-free parsers, run in DOSBox-X |
-| `bridge/` | DOS Bridge server and a test client (`chat.py`) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
+| `tests/unit/` | DOSUNIT.EXE: unit tests for the hardware-free code (every parser above), run in DOSBox-X |
+| `tunnel/` | The TLS tunnel (`tunnel.py`) and the offline mock Messages API (`mockapi.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |
 | `image/` | What goes on the disk image (`manifest.txt`, CONFIG/AUTOEXEC, tests) |
 | `scripts/` | Build, image tool (`fatimg.py`), boot test, 86Box helpers, clangd shims for the Watcom dialect (`clangd/`) |
-| `docs/` | [Roadmap](docs/ROADMAP.md), [bridge protocol](docs/PROTOCOL.md), research and design notes |
+| `docs/` | [Roadmap](docs/ROADMAP.md), [what CLAWDOS sends to the API](docs/API.md), research and design notes |
 
 ## License
 
-Programs linking mTCP (CLAWDOS.EXE, anything using `lib/dosbridge`) are GPLv3.
+Programs linking mTCP (CLAWDOS.EXE, anything using `lib/net`) are GPLv3.

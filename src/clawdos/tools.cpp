@@ -1,9 +1,9 @@
 /* CLAWDOS.EXE tool calls: see tools.h.
  *
- * The bridge streams TOOL <id> <name>, ARG <key> <chunk>... and CALL. On CALL
- * we show the call in the transcript, ask first if it's a W (write) tool and
- * safe mode is on, run its executor, and send the result back as OUT chunks
- * and DONE <id> <status>. Executors live in lib/ (toolapi.h); the small
+ * The model's tool_use block arrives as a name and a JSON input object
+ * (chat.cpp). We show the call in the transcript, ask first if it's a W
+ * (write) tool and safe mode is on, run its executor, and hand the result back
+ * for the tool_result message. Executors live in lib/ (toolapi.h); the small
  * memory, port and text art tools live here.
  */
 
@@ -29,7 +29,6 @@
 #include "ui.h"
 #include "json.h"
 
-#define OUT_CHUNK 400                 /* raw bytes per OUT line (escaping can double it) */
 #define PEEK_MAX  256
 
 struct ToolDef {
@@ -44,10 +43,6 @@ struct ToolDef {
 
 static int safe = 1;
 static int unattended;
-static char callId[16];
-static char callName[16];
-static int argsOverflow;
-static int stopping;                  /* STOP sent; don't start anything new */
 
 
 /* --- the small tools ---------------------------------------------------------- */
@@ -244,17 +239,6 @@ void tools_init(int safeMode, int noUser)
     _harderr(criticalError);
 }
 
-void tools_stopping(int on) { stopping = on; }
-
-void tools_reset(void)
-{
-    callId[0] = 0;
-    callName[0] = 0;
-    targ_reset();
-    argsOverflow = 0;
-    stopping = 0;
-}
-
 int tools_safe(void) { return safe; }
 void tools_toggle_safe(void) { safe = !safe; }
 
@@ -311,38 +295,6 @@ static void runDetails(const char *cmds)
         ui_tool_detail(cmd);
         p += n;
     }
-}
-
-static void sendResult(const char *status, ToolCtx *t)
-{
-    static char line[OUT_CHUNK * 2 + 8];
-    const char *p = t->out;
-    unsigned left = t->len;
-    char done[40];
-
-    while (left > 0) {
-        unsigned n = left < OUT_CHUNK ? left : OUT_CHUNK, k = 0;
-        for (unsigned i = 0; i < n; i++) {
-            unsigned char c = (unsigned char)p[i];
-            if (c == '\\') {
-                line[k++] = '\\';
-                line[k++] = '\\';
-            } else if (c == '\n') {
-                line[k++] = '\\';
-                line[k++] = 'n';
-            } else {
-                line[k++] = c < 32 && c != '\t' ? '.' : (char)c;
-            }
-        }
-        line[k] = 0;
-        ui_send("OUT", line);
-        p += n;
-        left -= n;
-    }
-    if (t->truncated)
-        ui_send("OUT", "\\n...(truncated)");
-    sprintf(done, "%s %s", callId, status);
-    ui_send("DONE", done);
 }
 
 /* Show, approve and run the call named `name` whose arguments are in the store. */
@@ -407,7 +359,7 @@ static int execute(const char *name, int overflow, ToolCtx *t)
 }
 
 /* One member of the tool_use input: strings decoded, numbers as written,
-   booleans 1/0, null skipped (bridge/tools.py's stringify). */
+   booleans 1/0, null skipped. */
 static int setArg(void *ctx, const char *key, unsigned klen, const char *val, unsigned vlen, int type)
 {
     static char *decoded;
@@ -475,64 +427,4 @@ const char *tools_result_text(int status, const ToolCtx *t)
         sprintf(errText, "Error: %s", t->out);
         return errText;
     }
-}
-
-/* The old bridge path: a call whose arguments arrived as ARG lines. */
-static void runCall(void)
-{
-    static const char *const statusNames[] = { "ok", "error", "denied", "stopped" };
-    ToolCtx t;
-    int status;
-    char text[40];
-
-    if (tool_idle)                    /* ACK the call before a long tool keeps us busy */
-        tool_idle();
-    if (stopping) {                   /* sent before our STOP reached the bridge */
-        sprintf(text, "%s stopped", callId);
-        ui_send("DONE", text);
-        return;
-    }
-    status = execute(callName, argsOverflow, &t);
-    sendResult(statusNames[status], &t);
-    if (status == TS_STOPPED) {
-        ui_send("STOP", NULL);
-        stopping = 1;
-    }
-    ui_tool_done();
-}
-
-int tools_line(const char *verb, const char *payload)
-{
-    if (!strcmp(verb, "TOOL")) {
-        const char *sp = strchr(payload, ' ');
-        unsigned n = sp ? (unsigned)(sp - payload) : strlen(payload);
-        if (n >= sizeof(callId))
-            n = sizeof(callId) - 1;
-        memcpy(callId, payload, n);
-        callId[n] = 0;
-        strncpy(callName, sp ? sp + 1 : "", sizeof(callName) - 1);
-        callName[sizeof(callName) - 1] = 0;
-        targ_reset();
-        argsOverflow = 0;
-        return 1;
-    }
-    if (!strcmp(verb, "ARG")) {
-        char key[16];
-        const char *sp = strchr(payload, ' ');
-        unsigned n = sp ? (unsigned)(sp - payload) : strlen(payload);
-        if (n >= sizeof(key))
-            n = sizeof(key) - 1;
-        memcpy(key, payload, n);
-        key[n] = 0;
-        if (targ_append(key, sp ? sp + 1 : ""))
-            argsOverflow = 1;
-        return 1;
-    }
-    if (!strcmp(verb, "CALL")) {
-        if (callId[0])                /* not a call cut short by a lost link */
-            runCall();
-        callId[0] = 0;
-        return 1;
-    }
-    return 0;
 }

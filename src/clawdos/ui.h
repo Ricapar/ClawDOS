@@ -9,7 +9,6 @@ int  ui_ask(const char *question);                         /* 'y', 'n' or 27 (Es
 void ui_tool_busy(const char *verb);                       /* spinner verb while it runs */
 void ui_tool_done(void);
 void ui_redraw(void);                                      /* repaint the footer */
-int  ui_send(const char *verb, const char *payload);       /* to the bridge; 0 = ok */
 void ui_local_address(char *buf);                          /* our IP, "a.b.c.d" */
 
 #endif

@@ -1,6 +1,5 @@
 /* ClawDOS text encoding: the API speaks UTF-8, the screen and DOS files are
- * code page 437. Characters CP437 lacks are approximated the way the bridge's
- * cp437.py did (quotes, dashes, arrows, ticks, accented letters -> bare letter,
+ * code page 437. Characters CP437 lacks are approximated (quotes, dashes, arrows, ticks, accented letters -> bare letter,
  * anything else -> '?'), so Claude's text always lands on the CGA screen.
  */
 #ifndef CLAWDOS_UTF8_H

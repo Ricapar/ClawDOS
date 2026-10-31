@@ -11,13 +11,10 @@
 # The user's own (commercial) disk images, used by the image build
 /external/
 __pycache__/
-# Local bridge provider config (see bridge/providers.example.toml)
-/bridge/providers.toml
-# Local secrets (ANTHROPIC_API_KEY etc.; read by bridge/dosbridge.py)
+# Local secrets (ANTHROPIC_API_KEY, baked into the image's CLAWDOS.CFG by build.py)
 /.env
-# Bridge debug logs (dosbridge.log, replay.log, saved sessions)
-/bridge/*.log*
-# Conversation logs (JSONL, bridge/convlog.py)
-/bridge/logs/
-# Python virtualenv for the bridge (pip install -r bridge/requirements.txt)
+# Tunnel and mock logs
+/tunnel/*.log*
+# Leftovers from the bridge days: its virtualenv and its local conversation logs
 /.venv/
+/bridge/

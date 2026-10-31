@@ -30,9 +30,9 @@ DONE = b'CLAWDOS-TEST-DONE'
 # aliasing behaviour; 86Box (run86box.py) remains the accurate 8088 check.
 CPUTYPE = '80186'
 
-# The mock bridge gets its own port so a real bridge on 8023 can keep running
-# (and isn't reached, with its API key, by test traffic). Tests use 10.0.2.2:18023.
-TEST_BRIDGE_PORT = 18023
+# The mock API gets its own port so a real tunnel on 8443 can keep running (and
+# isn't reached by test traffic). Tests use 10.0.2.2:18023.
+TEST_API_PORT = 18023
 
 
 def dosbox():
@@ -63,11 +63,9 @@ def parse_args():
     ap.add_argument('--set', action='append', default=[], metavar='"SECTION KEY=VALUE"',
                     help='extra DOSBox-X -set options, e.g. "log misc=true"')
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
-                    help='TEXT must appear in the serial or bridge log (repeatable)')
-    ap.add_argument('--bridge', action='store_true',
-                    help=f'run the old mock bridge (dosbridge.py --mock) on port {TEST_BRIDGE_PORT} during the test')
+                    help='TEXT must appear in the serial or mock API log (repeatable)')
     ap.add_argument('--mock', action='store_true',
-                    help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_BRIDGE_PORT} during the test')
+                    help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_API_PORT} during the test')
     return ap.parse_args()
 
 
@@ -87,23 +85,18 @@ def dosbox_command(extra_sets):
 
 
 @contextlib.contextmanager
-def mock_bridge(bridge_log, api=False):
-    """Run the mock bridge (or, with api, the mock Messages API), logging to
-    bridge_log; it is killed when the block ends."""
-    if api:
-        cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
-               '--speed', '0', '--port', str(TEST_BRIDGE_PORT)]
-    else:
-        cmd = [sys.executable, os.path.join(build.ROOT, 'bridge', 'dosbridge.py'),
-               '--mock', '--speed', '0', '--port', str(TEST_BRIDGE_PORT), '--log', '-', '--convlog', '-', '-v']
-    with open(bridge_log, 'wb') as f:
-        with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as bridge:
+def mock_api(log_path):
+    """Run the mock Messages API (tunnel/mockapi.py), logging to log_path; it is killed when the block ends."""
+    cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
+           '--speed', '0', '--port', str(TEST_API_PORT)]
+    with open(log_path, 'wb') as f:
+        with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as mock:
             try:
                 time.sleep(0.5)
-                yield bridge
+                yield mock
             finally:
-                bridge.kill()
-                bridge.wait()
+                mock.kill()
+                mock.wait()
 
 
 def run_dosbox(cmd, serial, timeout):
@@ -136,16 +129,16 @@ def main():
     build.build_image()  # leave a clean CLAWDOS.IMG behind
 
     cmd = dosbox_command(a.set)
-    bridge_log = os.path.join(build.BUILD, 'bridge.log')
+    mock_log = os.path.join(build.BUILD, 'mock.log')
     serial = os.path.join(build.BUILD, 'serial.log')
-    with mock_bridge(bridge_log, a.mock) if (a.bridge or a.mock) else contextlib.nullcontext():
+    with mock_api(mock_log) if a.mock else contextlib.nullcontext():
         run_dosbox(cmd, serial, a.timeout)
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
-    if a.bridge or a.mock:
-        print('--- bridge log ---' if a.bridge else '--- mock API log ---')
-        sys.stdout.write(read_log(bridge_log).decode('utf-8', 'replace'))
-        log += read_log(bridge_log)
+    if a.mock:
+        print('--- mock API log ---')
+        sys.stdout.write(read_log(mock_log).decode('utf-8', 'replace'))
+        log += read_log(mock_log)
     if DONE not in log:
         print(f'boottest: FAILED (no {DONE.decode()} within {a.timeout}s)')
         sys.exit(1)

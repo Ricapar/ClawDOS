@@ -45,38 +45,6 @@ int targ_set(const char *key, const char *utf8, unsigned n)
     return 0;
 }
 
-int targ_append(const char *key, const char *chunk)
-{
-    if (store == NULL)
-        targ_reset();
-    if (store == NULL)
-        return -1;
-    if (lastKey >= 0 && !strcmp(store + lastKey, key)) {
-        used--;                        /* reopen the value: drop its NUL */
-    } else {
-        unsigned klen = strlen(key) + 1;
-        if (used + klen + 1 > TOOL_ARGS_MAX)
-            return -1;
-        lastKey = used;
-        memcpy(store + used, key, klen);
-        used += klen;
-    }
-    for (; *chunk; chunk++) {
-        char c = *chunk;
-        if (c == '\\' && chunk[1]) {
-            chunk++;
-            c = *chunk == 'n' ? '\n' : *chunk;
-        }
-        if (used + 1 >= TOOL_ARGS_MAX) {
-            store[used++] = 0;
-            return -1;
-        }
-        store[used++] = c;
-    }
-    store[used++] = 0;
-    return 0;
-}
-
 const char *targ(const char *key)
 {
     unsigned i = 0;

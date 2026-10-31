@@ -161,8 +161,8 @@ static void testMemoryList(void)
     tout_reset(&t);
     t.unattended = 1;
     targ_reset();
-    targ_append("name", "ABCDEFGH");
-    targ_append("text", "Unit test memory\nsecond line");
+    targ_set("name", "ABCDEFGH", 8);
+    targ_set("text", "Unit test memory\nsecond line", 28);
     CHECK("mem write long name", tool_memory_write(&t) == TS_OK);
 
     tout_reset(&t);

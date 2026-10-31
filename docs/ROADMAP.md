@@ -1,7 +1,8 @@
 # ClawDOS Roadmap
 
-A DOS-based foundation for building apps on a real IBM 5160 that bridge to the
-modern world. First flagship demo: a Claude chat client.
+A DOS-based foundation for building apps on a real IBM 5160 that reach the
+modern world. First flagship demo: a Claude chat client that is the whole
+harness, running on the 8088.
 
 ## Target hardware
 
@@ -28,18 +29,21 @@ modern world. First flagship demo: a Claude chat client.
 ## Claude chat architecture
 
 ```
- DOS PC (CLAWDOS.EXE)  --plain TCP, LAN-->  Bridge (Python, modern PC/Pi)  --HTTPS-->  Claude API
-  CGA text UI, input,                       holds API key, TLS, history,
-  scrollback, mTCP                          Unicode->CP437, streaming
+ DOS PC (CLAWDOS.EXE)                 --plain HTTP over TCP-->  TLS tunnel        --HTTPS-->  Claude API
+  CGA text UI, scrollback, mTCP,                               (tunnel.py, socat
+  Messages API requests, SSE + JSON,                            or stunnel: copies
+  history on disk, API key, tools                               bytes, nothing else)
 ```
 
-Why a bridge: the Claude API requires TLS 1.2+. An 8088 at 4.77 MHz could in
-principle do the handshake, but it would be extremely slow and need lots of
-RAM for certificates and crypto state. The bridge keeps the DOS PC side small and
-fast, and it is a reusable pattern for other "modern world" apps (weather,
-feeds, chat, etc.). Native TLS on the DOS PC stays on the list as a stretch goal.
-
-The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
+Why a tunnel: the Claude API requires TLS 1.2+. An 8088 at 4.77 MHz could in
+principle do the handshake, but it would take minutes and need lots of RAM for
+certificates and crypto state. Everything else, from building the request to
+parsing the streamed reply and keeping the history, the PC does itself
+(design: [superpowers/specs/2026-10-31-native-api-client-design.md](superpowers/specs/2026-10-31-native-api-client-design.md)).
+The tunnel has no knowledge of the API, so native TLS (BearSSL's i15 big-number
+code is written for 16-bit multipliers) or a tunnel inside the PicoMEM firmware
+could replace it later without touching CLAWDOS. What CLAWDOS sends and expects
+is in [API.md](API.md).
 
 ## Milestones
 
@@ -51,10 +55,11 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       (`scripts/boottest.py`) and on an 8088 PC in 86Box.
 - [x] **M2 - Networking (emulated)**: `NETUP.BAT` loads PM2000 on a PicoMEM, or
       Crynwr NE1000/NE2000 at 340h in emulators, then DHCP. Works in 86Box.
-- [x] **M3 - Bridge server**: `bridge/dosbridge.py` (Claude API, streaming,
-      refusal fallbacks, CP437) with an offline mock backend (`--mock`) for testing without an API key.
+- [x] **M3 - Bridge server** (retired October 2026): `bridge/dosbridge.py` spoke
+      the API for the DOS PC and relayed tool calls over a line protocol. Replaced
+      by M5.5; its offline mock lives on as `tunnel/mockapi.py`.
 - [x] **M4 - CLAWDOS.EXE**: streaming chat with word wrap, hardware scrolling,
-      scrollback, stop/new-chat. Verified against the mock bridge in 86Box.
+      scrollback, stop/new-chat. Verified against the mock in 86Box.
 - [x] **M4.5 - Tools**: Claude acts on the DOS PC through CLAWDOS.EXE: files, system
       info, DOS commands, memory and ports, PC speaker music (PLAY), text art;
       safe mode asks before changes (F3). The CGA drawing tool was dropped
@@ -62,31 +67,40 @@ The bridge protocol is in [PROTOCOL.md](PROTOCOL.md).
       Design in [superpowers/specs/2026-10-21-dos-tools-design.md](superpowers/specs/2026-10-21-dos-tools-design.md).
 - [x] **M5 - Real hardware**: boot CLAWDOS.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
+- [x] **M5.5 - Native API client**: CLAWDOS.EXE speaks the Messages API itself
+      through a dumb TLS tunnel (`tunnel/tunnel.py`, or socat/stunnel): request
+      writer, SSE and JSON parsing, thinking blocks echoed back, the tool loop,
+      the history as a file on the DOS PC, retries and lost-link recovery,
+      `/model` across providers that speak the API. The Python bridge is gone.
+      8088 timings (86Box): Enter to first token on a fresh conversation and
+      with ~100 KB of history: _to be measured_.
 - [ ] **M6 - Building on the DOS PC**: better tools for Claude writing programs on
       the DOS PC itself (Turbo C, assemblers), from what the CGA demo and WarGames
-      sessions of 2026-10-25/26 showed (bridge/logs/). Details below.
+      sessions of 2026-10-25/26 showed (the bridge's JSONL logs of that time). Details below.
   - [x] **M6.1 - Dev tools pack**: `edit` (replace text in a file instead of
         rewriting all of it: 49 whole-file writes of up to 5.4 KB happened),
         `search` (grep with line numbers inside CLAWDOS: FIND took 10-79 s a
         call), `run` with a list of commands that stops at the first failure
         (FreeCOM has no `&`/`&&`; each TCC call was its own tool call), and the
-        clock set from the bridge on connect (every file on the DOS PC is dated
+        clock set from the API's Date header (every file on the DOS PC was dated
         1980-01-01: SNTP at boot doesn't take on the real PC).
   - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
         640 KB instead of ~285 KB. See [M6.2](#m62-full-memory-run) below.
   - [ ] **M6.3 - Screenshots**: Claude sees what its programs draw. Capture
         the CGA's 16 KB at exit (and optionally every few seconds into EMS
-        pages during the run); the bridge renders PNGs and hands them to Claude
-        as images. The CGA's mode and palette registers are write-only, so the
-        bridge guesses from the BIOS data area unless the tool call says
-        (e.g. the mode 5 / 3D9h tricks WarGames uses). 13 demo runs came back
-        as "(screen text)"; fixes were "best guess, untested visually".
-  - [ ] **M6.4 - Project history**: the bridge commits every file Claude
-        writes to a git repo per DOS PC directory; `snapshot`/`restore` tools
-        replace hand-made copies (XCOPY C:\WG C:\WG3 took 43 s), and the code
-        can be browsed on the PC.
-- [ ] **M7 - Foundation**: grow `lib/` (input line editor, windows/menus, more
-      bridge services) and a launcher for ClawDOS apps.
+        pages during the run) and send them as images. With no bridge, the
+        PNG has to be made on the DOS PC (a 16 KB CGA frame is small) and go
+        into the request as a base64 image block. The CGA's mode and palette
+        registers are write-only, so the mode comes from the BIOS data area
+        unless the tool call says (e.g. the mode 5 / 3D9h tricks WarGames
+        uses). 13 demo runs came back as "(screen text)"; fixes were "best
+        guess, untested visually".
+  - [ ] **M6.4 - Project history**: `snapshot`/`restore` tools on the DOS PC
+        replace hand-made copies (XCOPY C:\WG C:\WG3 took 43 s); the
+        conversation files in C:\CLAWDOS\CHATS already record what was written.
+- [ ] **M7 - Foundation**: grow `lib/` (input line editor, windows/menus, the
+      HTTP client for other web APIs through the same tunnel) and a launcher for
+      ClawDOS apps.
 
 ## M6.2: full-memory run
 
@@ -112,7 +126,7 @@ screen as it was, and the link restored.
 
 1. **Exit and relaunch through a stub.** A tiny resident launcher (NASM,
    8086, a few KB; e.g. CLAW.COM, which the user starts instead of CLAWDOS)
-   runs CLAWDOS.EXE. For a big run CLAWDOS saves its state (session token,
+   runs CLAWDOS.EXE. For a big run CLAWDOS saves its state (conversation file,
    pending tool id, flags like `-unsafe`, the scrollback/screen, the input
    line), shuts mTCP down cleanly (releasing the packet driver) and exits
    with a code that tells the stub to run the command. The stub runs it with
@@ -131,13 +145,11 @@ screen as it was, and the link restored.
 Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths
 are already tested. The open questions either way:
 
-- **Bridge: a tool call that outlives its connection.** Today a disconnect
-  cancels the turn (bridge/dosbridge.py, `finally:` in the session loop) and
-  RESUME only restores history, so the pending tool call is lost. The DOS PC
-  needs to say it's going away for a tool (e.g. `AWAY <tool id>`), the bridge
-  keeps the turn waiting (for longer than a normal lost link; builds and demo
-  runs took up to 9 minutes), and after `RESUME` the DOS PC sends the tool result
-  and the turn carries on. PROTOCOL.md and the mock bridge get the same.
+- **A tool call that outlives the program.** With the history on disk this is
+  simpler than it was with the bridge: the conversation file already holds the
+  assistant message with the pending tool_use, so the relaunched CLAWDOS only
+  has to write the tool_result message and send the next request. The state to
+  save is the conversation file name, the pending tool id and the flags.
 - **When to go big.** Every run (simple, but DIR then costs a reconnect), a
   tool argument the model sets, or automatically for known heavy programs
   (TCC, TLINK, MAKE, batch files). DEVTOOLS.TXT must say which.
@@ -146,9 +158,9 @@ are already tested. The open questions either way:
 - **Safe mode:** the y/n prompt stays before the exit; Esc and the
   exit-code hold screen move into the stub.
 
-**Testing.** DOSBox-X with `--bridge`: a boottest that has Claude run stock
+**Testing.** DOSBox-X with `--mock`: a boottest that has Claude run stock
 PRIMES.C with `time.h` through plain `TCC` (auto-linked) and checks the
-resumed tool result in the bridge log; a mock `!tool` for a big run; a check
+resumed tool result in the mock's log; a mock `!tool` for a big run; a check
 that a program's free memory (e.g. `MEM`) is above the goal. Then the 86Box
 8088 (`scripts/test8088.py`) and the real PC, building WarGames with
 stock headers and MAKE.

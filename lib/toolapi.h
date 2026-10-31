@@ -1,7 +1,7 @@
-/* ClawDOS tool calls: what an executor sees. The bridge sends a call's
- * arguments as strings (targ_append collects them); an executor reads them
- * with targ*, writes its result for the model with tout_*, sets a one-line
- * summary for the transcript, and returns one of the TS_ statuses.
+/* ClawDOS tool calls: what an executor sees. A call's arguments are strings
+ * (targ_set stores them, converted to CP437); an executor reads them with
+ * targ*, writes its result for the model with tout_*, sets a one-line summary
+ * for the transcript, and returns one of the TS_ statuses.
  */
 #ifndef CLAWDOS_TOOLAPI_H
 #define CLAWDOS_TOOLAPI_H
@@ -19,7 +19,6 @@ enum { TS_OK, TS_ERROR, TS_DENIED, TS_STOPPED };
 void        targ_reset(void);
 /* Set key to the UTF-8 text (n bytes), converted to CP437. -1 if the store is full. */
 int         targ_set(const char *key, const char *utf8, unsigned n);
-int         targ_append(const char *key, const char *escaped_chunk); /* old wire path; -1 if full */
 const char *targ(const char *key);                 /* NULL if absent */
 long        targ_num(const char *key, long def);   /* decimal or 0x hex */
 int         targ_hex(const char *key, unsigned *out);                /* "3D9"; -1 if bad */

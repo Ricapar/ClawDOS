@@ -828,13 +828,6 @@ void ui_redraw(void)
     drawFooter();
 }
 
-int ui_send(const char *verb, const char *payload)
-{
-    (void)verb;                       /* the old bridge protocol: nothing to send to */
-    (void)payload;
-    return -1;
-}
-
 void ui_local_address(char *buf)
 {
     Net::localAddress(buf);

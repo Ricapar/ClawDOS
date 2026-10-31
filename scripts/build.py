@@ -2,8 +2,8 @@
 """Build ClawDOS: boot code, DOS apps, and the bootable hard disk image.
 
   python scripts/build.py              build everything -> build/CLAWDOS.IMG
-  python scripts/build.py --bridge 192.168.1.50:8023
-                                       set the bridge address (remembered)
+  python scripts/build.py --tunnel 192.168.1.50:8443
+                                       set the TLS tunnel's address (remembered)
   python scripts/build.py --autotest image/tests/smoke.bat
                                        also install C:\\AUTOTEST.BAT (run at boot
                                        instead of the normal startup)
@@ -48,7 +48,7 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.cpp', 'src/clawdos/chat.cpp', 'src/clawdos/tools.cpp', 'lib/screen.c',
-                               'lib/console.c', 'lib/dosbridge.cpp', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
+                               'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
@@ -380,9 +380,7 @@ def build_image(autotest=None):
     fs = fatimg.open_fs(img)
     fill_image(fs, manifest_entries(autotest))
 
-    # Point CLAWDOS.EXE at the bridge (the old path, until the native client lands).
-    cfg = fs.read_file('NET/MTCP.CFG') + f'CLAWDOS_BRIDGE {settings()["bridge"]}\r\n'.encode()
-    fs.write_file('NET/MTCP.CFG', cfg)
+    # Point CLAWDOS.EXE at the TLS tunnel and give it the API key.
     fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG')))
 
     out = os.path.join(BUILD, IMAGE_NAME)
@@ -419,11 +417,9 @@ def clawdos_cfg(template):
 
 SETTINGS_FILE = os.path.join(BUILD, 'settings.json')
 DEFAULT_SETTINGS = {
-    # Where the DOS PC finds the TLS tunnel (and, until it goes, the old bridge).
-    # 10.0.2.2 is the host PC as seen from the emulators' NAT network; real
-    # hardware needs the tunnel machine's LAN IP.
+    # Where the DOS PC finds the TLS tunnel. 10.0.2.2 is the host PC as seen
+    # from the emulators' NAT network; real hardware needs the tunnel machine's LAN IP.
     'tunnel': '10.0.2.2:8443',
-    'bridge': '10.0.2.2:8023',
 }
 
 
@@ -443,18 +439,17 @@ def settings(**changes):
 
 
 def main():
-    """Command line: set the bridge address, then build the boot code, the programs and the image."""
+    """Command line: set the tunnel address, then build the boot code, the programs and the image."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
     ap.add_argument('--tunnel', help='host:port of the TLS tunnel (remembered for later builds)')
-    ap.add_argument('--bridge', help='host:port of the old DOS Bridge (remembered for later builds)')
     ap.add_argument('--compiledb', action='store_true',
                     help='only write build/compile_commands.json for clangd (a full build writes it too)')
     a = ap.parse_args()
     if a.compiledb:
         print(write_compiledb())
         return
-    s = settings(tunnel=a.tunnel, bridge=a.bridge)
+    s = settings(tunnel=a.tunnel)
     print(f'[settings] tunnel = {s["tunnel"]}, key {"from .env" if api_key() else "not set"}')
     print('[boot]')
     build_boot()

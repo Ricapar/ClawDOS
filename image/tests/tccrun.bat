@@ -1,5 +1,5 @@
 @ECHO OFF
-REM Turbo C through CLAWDOS's run tool on the 8088 (start a mock bridge on port
+REM Turbo C through CLAWDOS's run tool on the 8088 (start the mock API on port
 REM 18023, then python scripts/test8088.py image/tests/tccrun.bat): TPRIMES.C ran
 REM out of memory this way on the real PC when run went through a second
 REM COMMAND.COM; started directly, TCC (and the TLINK it starts) must fit.

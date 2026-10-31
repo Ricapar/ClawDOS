@@ -45,7 +45,7 @@ static const char latinBase[192] = {
     85, 117, 85, 117, 87, 119, 89, 121, 89, 90, 122, 90, 122, 90, 122, 115,
 };
 
-/* Code points outside CP437 with a textual stand-in (bridge/cp437.py's table). */
+/* Code points outside CP437 with a textual stand-in. */
 struct Fallback { unsigned short cp; const char *text; };
 static const struct Fallback fallbacks[] = {
     { 0x2018, "'" }, { 0x2019, "'" }, { 0x201A, "'" }, { 0x201B, "'" },
