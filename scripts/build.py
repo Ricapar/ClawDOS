@@ -53,7 +53,7 @@ APPS = {
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c'],
                    'model': 'l', 'mtcp': 'src/clawdos/clawdos.cfg'},
     'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
-                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c'],
+                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c'],
                     'model': 'l'},
 }
 

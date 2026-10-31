@@ -13,6 +13,8 @@
 #include "console.h"
 #include "ticks.h"
 #include "utf8.h"
+#include "sink.h"
+#include "json.h"
 
 static int passed, failed;
 
@@ -345,6 +347,42 @@ static void testUtf8(void)
     CHECK("cp437 newline stays", n == 1 && out[0] == '\n');
 }
 
+/* --- json ------------------------------------------------------------------- */
+
+static const char EV[] = "{\"type\":\"content_block_delta\",\"index\":0,"
+    "\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi \\\"there\\\" \\u00e9\\n\"},\"n\":[1,{\"x\":2}],\"ok\":true}";
+static int eachCount; static char eachKeys[64];
+static int eachFn(void *c, const char *k, unsigned kl, const char *v, unsigned vl, int t)
+{ (void)c; (void)v; (void)vl; eachCount++; sprintf(eachKeys + strlen(eachKeys), "%.*s=%d ", kl, k, t); return 0; }
+
+static void testJson(void)
+{
+    const char *v; unsigned n; char out[64]; Sink s;
+    CHECK("json find string", json_find(EV, sizeof EV - 1, "delta.text", &v, &n) == JSON_STRING
+          && n == 21 && !memcmp(v, "Hi \\\"there\\\" \\u00e9\\n", 21));
+    CHECK("json find number", json_find(EV, sizeof EV - 1, "index", &v, &n) == JSON_NUMBER && n == 1 && *v == '0');
+    CHECK("json find true", json_find(EV, sizeof EV - 1, "ok", &v, &n) == JSON_TRUE);
+    CHECK("json find array", json_find(EV, sizeof EV - 1, "n", &v, &n) == JSON_ARRAY && n == 11);
+    CHECK("json find missing", json_find(EV, sizeof EV - 1, "delta.nope", &v, &n) == JSON_NONE);
+    CHECK("json find skips nested", json_find(EV, sizeof EV - 1, "x", &v, &n) == JSON_NONE);
+    n = json_unescape("Hi \\\"there\\\" \\u00e9\\n", 21, out, sizeof out); out[n] = 0;
+    CHECK_STR("json unescape", out, "Hi \"there\" \xC3\xA9\n");
+    n = json_unescape("\\ud83d\\ude00!", 13, out, sizeof out); out[n] = 0;
+    CHECK_STR("json unescape surrogate pair", out, "\xF0\x9F\x98\x80!");
+    n = json_unescape("a\\ud83d", 7, out, sizeof out); out[n] = 0;
+    CHECK_STR("json unescape lone surrogate", out, "a?");
+    n = json_unescape("\\/\\\\\\t", 6, out, sizeof out); out[n] = 0;
+    CHECK_STR("json unescape slash backslash tab", out, "/\\\t");
+    sink_buffer(&s, out, sizeof out);
+    json_escape_cp437(&s, "say \"hi\"\n\x82\xC4\x01", 12);
+    CHECK_STR("json escape cp437", out, "say \\\"hi\\\"\\n\xC3\xA9\xE2\x94\x80\xE2\x98\xBA");
+    CHECK("json escape count", s.count == 20);
+    eachCount = 0; eachKeys[0] = 0;
+    json_each(EV, sizeof EV - 1, eachFn, NULL);
+    CHECK_STR("json each keys", eachKeys, "type=1 index=2 delta=3 n=4 ok=5 ");
+    CHECK("json find in truncated doc", json_find(EV, 20, "delta.text", &v, &n) == JSON_NONE);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -356,6 +394,7 @@ int main(void)
     testEdit();
     testSearch();
     testUtf8();
+    testJson();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
