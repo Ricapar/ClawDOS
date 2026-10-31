@@ -7,9 +7,10 @@
 #include <ctype.h>
 #include <bios.h>
 #include "toolapi.h"
+#include "utf8.h"
 
-/* "key\0value\0key\0value\0..." */
-static char store[TOOL_ARGS_MAX];
+/* "key\0value\0key\0value\0...", in a far buffer (16 KB is too much for DGROUP) */
+static char *store;
 static unsigned used;
 static int lastKey = -1;            /* offset of the newest key */
 
@@ -17,12 +18,39 @@ static char outBuf[TOOL_OUT_MAX + 1];
 
 void targ_reset(void)
 {
+    if (store == NULL)
+        store = (char *)malloc(TOOL_ARGS_MAX);
     used = 0;
     lastKey = -1;
 }
 
+int targ_set(const char *key, const char *utf8, unsigned n)
+{
+    unsigned klen = strlen(key) + 1, room, got;
+
+    if (store == NULL)
+        targ_reset();
+    if (store == NULL || used + klen + 1 > TOOL_ARGS_MAX)
+        return -1;
+    memcpy(store + used, key, klen);
+    room = TOOL_ARGS_MAX - (used + klen) - 1;
+    got = utf8_to_cp437(utf8, n, store + used + klen, room);
+    if (got >= room) {                 /* did not fit: forget this key */
+        store[used] = 0;
+        return -1;
+    }
+    lastKey = used;
+    used += klen + got;
+    store[used++] = 0;
+    return 0;
+}
+
 int targ_append(const char *key, const char *chunk)
 {
+    if (store == NULL)
+        targ_reset();
+    if (store == NULL)
+        return -1;
     if (lastKey >= 0 && !strcmp(store + lastKey, key)) {
         used--;                        /* reopen the value: drop its NUL */
     } else {

@@ -781,6 +781,29 @@ static void testApiStream(void)
           && strstr(asHist, "\"input\":{\"text\":\"0123456789abcdef\"}}]}") != NULL);
 }
 
+/* --- tool arguments ----------------------------------------------------------- */
+
+static void testToolArgs(void)
+{
+    static char big[1100];
+    int i, rc = 0;
+    targ_reset();
+    CHECK("targ_set ok", targ_set("t", "\xC3\xA9", 2) == 0);
+    CHECK_STR("targ_set converts to cp437", targ("t"), "\x82");
+    CHECK("targ_set path", targ_set("path", "C:\\A.TXT", 8) == 0);
+    CHECK_STR("targ_set path round trip", targ("path"), "C:\\A.TXT");
+    memset(big, 'x', sizeof big - 1);
+    big[sizeof big - 1] = 0;
+    for (i = 0; i < 20 && rc == 0; i++) {
+        char key[8];
+        sprintf(key, "k%d", i);
+        rc = targ_set(key, big, sizeof big - 1);
+    }
+    CHECK("targ_set fills past 16 KB", rc == -1 && i < 20 && i > 12);
+    targ_reset();
+    CHECK("targ_set after reset", targ_set("a", "1", 1) == 0 && !strcmp(targ("a"), "1") && targ("path") == NULL);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -800,6 +823,7 @@ int main(void)
     testHistory();
     testApiReq();
     testApiStream();
+    testToolArgs();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

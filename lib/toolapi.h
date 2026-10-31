@@ -13,11 +13,13 @@ extern "C" {
 enum { TS_OK, TS_ERROR, TS_DENIED, TS_STOPPED };
 
 #define TOOL_OUT_MAX  4096
-#define TOOL_ARGS_MAX 6144
+#define TOOL_ARGS_MAX 16384u
 
-/* Arguments of the current call. Chunks of the same key are appended. */
+/* Arguments of the current call, kept in a far buffer of TOOL_ARGS_MAX bytes. */
 void        targ_reset(void);
-int         targ_append(const char *key, const char *escaped_chunk); /* -1 if full */
+/* Set key to the UTF-8 text (n bytes), converted to CP437. -1 if the store is full. */
+int         targ_set(const char *key, const char *utf8, unsigned n);
+int         targ_append(const char *key, const char *escaped_chunk); /* old wire path; -1 if full */
 const char *targ(const char *key);                 /* NULL if absent */
 long        targ_num(const char *key, long def);   /* decimal or 0x hex */
 int         targ_hex(const char *key, unsigned *out);                /* "3D9"; -1 if bad */

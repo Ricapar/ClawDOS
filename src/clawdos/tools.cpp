@@ -27,6 +27,7 @@
 #include "console.h"
 #include "tools.h"
 #include "ui.h"
+#include "json.h"
 
 #define OUT_CHUNK 400                 /* raw bytes per OUT line (escaping can double it) */
 #define PEEK_MAX  256
@@ -344,28 +345,20 @@ static void sendResult(const char *status, ToolCtx *t)
     ui_send("DONE", done);
 }
 
-static void runCall(void)
+/* Show, approve and run the call named `name` whose arguments are in the store. */
+static int execute(const char *name, int overflow, ToolCtx *t)
 {
-    static const char *const statusNames[] = { "ok", "error", "denied", "stopped" };
-    const ToolDef *d = findTool(callName);
+    const ToolDef *d = findTool(name);
     const char *arg;
     char text[100];
-    ToolCtx t;
     int status = -1;
 
-    if (tool_idle)                    /* ACK the call before a long tool keeps us busy */
-        tool_idle();
-    tout_reset(&t);
-    t.unattended = unattended;
-    if (stopping) {                   /* sent before our STOP reached the bridge */
-        sprintf(text, "%s stopped", callId);
-        ui_send("DONE", text);
-        return;
-    }
+    tout_reset(t);
+    t->unattended = unattended;
     if (d == NULL) {
-        ui_tool_header(callName, "");
-        sprintf(text, "unknown tool %.20s", callName);
-        status = tool_fail(&t, text);
+        ui_tool_header(name, "");
+        sprintf(text, "unknown tool %.20s", name);
+        status = tool_fail(t, text);
     } else {
         static char first[SHELL_CMD_MAX + 16];
         unsigned cmds = 0;
@@ -379,8 +372,8 @@ static void runCall(void)
         ui_tool_header(d->title, arg ? arg : "");
         if (cmds > 1)
             runDetails(targ("command"));
-        if (argsOverflow) {
-            status = tool_fail(&t, "arguments too long");
+        if (overflow) {
+            status = tool_fail(t, "arguments too long");
         } else if (d->cls == 'W' && safe) {
             int key;
             if (!strcmp(d->name, "write")) {
@@ -399,7 +392,7 @@ static void runCall(void)
         }
         if (status < 0) {
             ui_tool_busy(d->busy);
-            status = d->fn(&t);
+            status = d->fn(t);
         }
     }
 
@@ -408,8 +401,98 @@ static void runCall(void)
     else if (status == TS_STOPPED)
         ui_tool_note("Interrupted by user", 1);
     else
-        ui_tool_note(t.summary[0] ? t.summary : (status == TS_OK ? "done" : "failed"),
+        ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
+    return status;
+}
+
+/* One member of the tool_use input: strings decoded, numbers as written,
+   booleans 1/0, null skipped (bridge/tools.py's stringify). */
+static int setArg(void *ctx, const char *key, unsigned klen, const char *val, unsigned vlen, int type)
+{
+    static char *decoded;
+    char k[16];
+    int *overflow = (int *)ctx;
+    unsigned n;
+
+    if (klen >= sizeof k)
+        klen = sizeof k - 1;
+    memcpy(k, key, klen);
+    k[klen] = 0;
+    if (type == JSON_NULL)
+        return 0;
+    if (type == JSON_TRUE || type == JSON_FALSE)
+        return targ_set(k, type == JSON_TRUE ? "1" : "0", 1) ? (*overflow = 1, 1) : 0;
+    if (type != JSON_STRING)
+        return targ_set(k, val, vlen) ? (*overflow = 1, 1) : 0;
+    if (decoded == NULL)
+        decoded = (char *)malloc(TOOL_ARGS_MAX);
+    if (decoded == NULL) {
+        *overflow = 1;
+        return 1;
+    }
+    n = json_unescape(val, vlen, decoded, TOOL_ARGS_MAX);
+    if (targ_set(k, decoded, n)) {
+        *overflow = 1;
+        return 1;
+    }
+    return 0;
+}
+
+int tools_call(const char *name, const char *input, unsigned len, ToolCtx *t)
+{
+    int overflow = 0;
+
+    if (tool_idle)                    /* keep the connection alive before a long tool */
+        tool_idle();
+    targ_reset();
+    if (len && json_each(input, len, setArg, &overflow) < 0 && !overflow) {
+        tout_reset(t);
+        ui_tool_header(name, "");
+        ui_tool_done();
+        return tool_fail(t, "arguments are not valid JSON");
+    }
+    int status = execute(name, overflow, t);
+    ui_tool_done();
+    return status;
+}
+
+const char *tools_result_text(int status, const ToolCtx *t)
+{
+    static char *errText;
+    switch (status) {
+    case TS_OK:
+        return t->out;
+    case TS_DENIED:
+        return "The user denied this tool call.";
+    case TS_STOPPED:
+        return "Interrupted by the user.";
+    default:
+        if (errText == NULL)
+            errText = (char *)malloc(TOOL_OUT_MAX + 8);
+        if (errText == NULL)
+            return "Error";
+        sprintf(errText, "Error: %s", t->out);
+        return errText;
+    }
+}
+
+/* The old bridge path: a call whose arguments arrived as ARG lines. */
+static void runCall(void)
+{
+    static const char *const statusNames[] = { "ok", "error", "denied", "stopped" };
+    ToolCtx t;
+    int status;
+    char text[40];
+
+    if (tool_idle)                    /* ACK the call before a long tool keeps us busy */
+        tool_idle();
+    if (stopping) {                   /* sent before our STOP reached the bridge */
+        sprintf(text, "%s stopped", callId);
+        ui_send("DONE", text);
+        return;
+    }
+    status = execute(callName, argsOverflow, &t);
     sendResult(statusNames[status], &t);
     if (status == TS_STOPPED) {
         ui_send("STOP", NULL);
