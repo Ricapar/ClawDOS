@@ -16,6 +16,7 @@
 #include "memory.h"
 #include "tools.h"
 #include "utf8.h"
+#include "convo.h"
 
 #define SSE_MAX        16384u
 #define TOOL_INPUT_MAX 16384u
@@ -30,10 +31,10 @@
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
-               rxBuf(NULL), err(""), mergeNext(0), assistantInTurn(0), reasked(0), clockSet(0), streamRc(0),
-               reqStart(0), firstText(0)
+               rxBuf(NULL), err(""), reasked(0), clockSet(0), streamRc(0), reqStart(0), firstText(0)
 {
-    addr[0] = path[0] = desc[0] = pendingTool[0] = 0;
+    addr[0] = path[0] = desc[0] = 0;
+    convo_init(&convo);
 }
 
 int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
@@ -156,8 +157,7 @@ int8_t Chat::newConversation(void)
         err = errBuf;
         return -1;
     }
-    mergeNext = 0;
-    pendingTool[0] = 0;
+    convo_init(&convo);
     loadMemories();
     return 0;
 }
@@ -172,64 +172,6 @@ void Chat::loadMemories(void)
         unsigned n = t.len < MEMORIES_MAX - 1 ? t.len : MEMORIES_MAX - 1;
         memcpy(memories, t.out, n);
         memories[n] = 0;
-    }
-}
-
-int Chat::histPut(Sink *s, const char *p, unsigned n)
-{
-    (void)s;
-    return hist_write(p, n);
-}
-
-void Chat::writeUserText(const char *text)
-{
-    Sink s;
-    s.put = histPut;
-    s.ctx = NULL;
-    s.count = 0;
-    if (mergeNext) {
-        hist_reopen_last(2);              /* the "]}" of the tool results message */
-        hist_puts(",{\"type\":\"text\",\"text\":\"");
-    } else {
-        hist_puts("{\"role\":\"user\",\"content\":\"");
-    }
-    json_escape_cp437(&s, text, strlen(text));
-    hist_puts(mergeNext ? "\"}]}" : "\"}");
-    hist_message_done();
-    mergeNext = 0;
-}
-
-void Chat::writeResult(const char *id, const char *text, int isError, const char *note)
-{
-    Sink s;
-    s.put = histPut;
-    s.ctx = NULL;
-    s.count = 0;
-    hist_puts("{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"");
-    hist_puts(id);
-    hist_puts("\",\"content\":\"");
-    json_escape_cp437(&s, text, strlen(text));
-    hist_puts(isError ? "\",\"is_error\":true}" : "\",\"is_error\":false}");
-    if (note) {
-        hist_puts(",{\"type\":\"text\",\"text\":\"");
-        json_escape_cp437(&s, note, strlen(note));
-        hist_puts("\"}");
-    }
-    hist_puts("]}");
-    hist_message_done();
-    pendingTool[0] = 0;
-}
-
-/* After a turn ends early: leave the file valid for the next request. */
-void Chat::settle(void)
-{
-    if (assistantInTurn == 0) {
-        hist_rollback_turn();
-        return;
-    }
-    if (pendingTool[0]) {
-        writeResult(pendingTool, "Interrupted by the user.", 1, NULL);
-        mergeNext = 1;
     }
 }
 
@@ -287,11 +229,11 @@ int Chat::waitRead(char *buf, unsigned max)
     unsigned long start = TICKS_NOW;
     for (;;) {
         int n = http.read(buf, max, 1);
-        if (n != -2)
-            return n;
-        ui->idle();
+        ui->idle();                       /* keys and the spinner, whether or not bytes came */
         if (ui->escPressed())
             return -3;
+        if (n != -2)
+            return n;
         if (ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(READ_TIMEOUT))
             return -2;
     }
@@ -302,11 +244,11 @@ int8_t Chat::waitHead(HttpHead *h)
     unsigned long start = TICKS_NOW;
     for (;;) {
         int8_t rc = http.readHead(h, 1);
-        if (rc != -2)
-            return rc;
         ui->idle();
         if (ui->escPressed())
             return 1;
+        if (rc != -2)
+            return rc;
         if (ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(READ_TIMEOUT))
             return -2;
     }
@@ -470,6 +412,8 @@ int8_t Chat::request(int noTools)
             return -1;
         }
         fresh = 0;
+        if (http.isOpen() && !http.alive())
+            http.close();                 /* an idle keep-alive the far end gave up on */
         if (!http.isOpen()) {
             if (connect()) {
                 warn(err);
@@ -538,57 +482,50 @@ int8_t Chat::turn(const char *text)
 {
     int round;
 
-    hist_turn_begin();
-    assistantInTurn = 0;
+    convo_turn_begin(&convo);
     reasked = 0;
-    writeUserText(text);
+    if (convo_user_text(&convo, text)) {
+        warn("Cannot write the conversation file.");
+        convo_rollback_turn(&convo);
+        return -1;
+    }
     for (round = 0; ; round++) {
         ToolCtx t;
         int status;
         int8_t rc = request(round >= MAX_ROUNDS);
         if (rc != 0) {
-            settle();
+            convo_settle(&convo);
             return rc;
         }
-        hist_message_done();
-        assistantInTurn++;
+        convo_assistant_done(&convo);
         logRound(round);
-        if (as.hasTool)
-            strncpy(pendingTool, as.toolId, sizeof pendingTool - 1);
         if (!strcmp(as.stopReason, "refusal")) {
             warn("The model declined to answer that.");
-            hist_rollback_turn();
-            pendingTool[0] = 0;
+            convo_rollback_turn(&convo);
             return -1;
         }
         if (!strcmp(as.stopReason, "max_tokens"))
             warn("[reply cut off: too long]");
         if (strcmp(as.stopReason, "tool_use")) {
-            if (as.hasTool) {             /* a call cut off before it was complete */
-                writeResult(as.toolId, "Error: reply cut off before the call was complete", 1, NULL);
-                mergeNext = 1;
-            }
+            if (as.hasTool)               /* a call cut off before it was complete */
+                convo_tool_result(&convo, as.toolId, "Error: reply cut off before the call was complete", 1, NULL);
             return 0;
         }
         if (!as.hasTool)
             return 0;
         tout_reset(&t);
         if (as.toolInputOverflow) {
-            ui->note("Tool call arguments too long; not run.", 1);
+            warn("Tool call arguments too long; not run.");
             tout_puts(&t, "arguments too long");
             status = TS_ERROR;
         } else {
             status = ui->tool(as.toolName, as.toolInput, as.toolInputLen, &t);
         }
-        writeResult(as.toolId, tools_result_text(status, &t), status != TS_OK,
-                    round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
-        if (status == TS_STOPPED) {
-            mergeNext = 1;
+        convo_tool_result(&convo, as.toolId, tools_result_text(status, &t), status != TS_OK,
+                          round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
+        if (status == TS_STOPPED)
             return 1;
-        }
-        if (round >= MAX_ROUNDS) {        /* the model kept calling tools after the cap */
-            mergeNext = 1;
+        if (round >= MAX_ROUNDS)          /* the model kept calling tools after the cap */
             return 0;
-        }
     }
 }

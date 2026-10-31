@@ -31,6 +31,11 @@ int8_t Http::open(const char *hostport)
     return conn.connect(hostport, 8443);
 }
 
+int Http::alive(void)
+{
+    return conn.isConnected() && !conn.farEndClosed();
+}
+
 void Http::close(void)
 {
     conn.close();

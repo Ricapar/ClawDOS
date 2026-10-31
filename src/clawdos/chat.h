@@ -11,6 +11,7 @@
 #include "http.h"
 #include "apistream.h"
 #include "sse.h"
+#include "convo.h"
 
 struct ChatUi {
     void (*text)(const char *cp437, unsigned n);   /* visible reply text */
@@ -37,7 +38,7 @@ class Chat {
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
        -1 failed (a note has been shown). */
     int8_t turn(const char *cp437Text);
-    int    answered(void) { return assistantInTurn > 0; }
+    int    answered(void) { return convo.assistantInTurn > 0; }
 
     int8_t switchProvider(const char *id, const char *model);   /* /model */
     const char *describe(void);            /* "anthropic: claude-opus-5-5" */
@@ -66,12 +67,10 @@ class Chat {
     char desc[80];
     char errBuf[160];
     const char *err;
-    int mergeNext;                         /* the last message is the user's: the next text joins it */
-    int assistantInTurn;
+    Convo convo;                           /* the messages and the rules that keep the file valid */
     int reasked;                           /* re-sent after a lost link this turn */
     int clockSet;
     int streamRc;
-    char pendingTool[64];                  /* a tool_use not yet answered */
     unsigned long reqStart, firstText;
 
     int8_t connect(void);
@@ -81,9 +80,6 @@ class Chat {
     int8_t waitHead(HttpHead *h);                 /* 0, -1, -2, -3 malformed, 1 Esc */
     void   drain(void);
     void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
-    void   writeUserText(const char *text);
-    void   writeResult(const char *id, const char *text, int isError, const char *note);
-    void   settle(void);
     void   setClock(const char *date);
     void   logRound(int round);
     void   loadMemories(void);
@@ -94,7 +90,6 @@ class Chat {
     static void onThinking(void *ctx);
     static int  onHist(void *ctx, const char *p, unsigned n);
     static void onEvent(void *ctx, const char *event, const char *data, unsigned n);
-    static int  histPut(Sink *s, const char *p, unsigned n);
 };
 
 #endif

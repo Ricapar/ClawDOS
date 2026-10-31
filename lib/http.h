@@ -13,7 +13,7 @@
 #include "chunked.h"
 #include "cfg.h"
 
-#define HTTP_HEAD_MAX 2048
+#define HTTP_HEAD_MAX 4096        /* the API sends ~1.5 KB of rate-limit and CDN headers */
 #define HTTP_RX_MAX   2048
 
 class Http {
@@ -32,6 +32,9 @@ class Http {
        0 ok, -1 link lost, -2 timeout, -3 malformed. */
     int8_t readHead(HttpHead *h, int secs);
     int    headStarted(void) { return headLen > 0; }   /* any byte of the response yet? */
+    /* Whether an idle connection is still usable: false once the far end has
+       closed it (an idle keep-alive the API or the tunnel gave up on). */
+    int    alive(void);
     /* Decoded body bytes: >0 bytes, 0 body finished, -1 link lost, -2 timeout. */
     int    read(char *buf, unsigned max, int secs);
     int    bodyDone(void) { return done; }

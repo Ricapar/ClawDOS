@@ -159,6 +159,14 @@ int NetConn::send(const char *p, unsigned n)
     return 0;
 }
 
+int NetConn::farEndClosed(void)
+{
+    if (sock == NULL || dead)
+        return 1;
+    Utils::processPackets();
+    return sock->isRemoteClosed();
+}
+
 int NetConn::recv(char *buf, unsigned max)
 {
     if (sock == NULL || dead)

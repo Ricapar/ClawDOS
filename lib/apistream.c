@@ -61,17 +61,39 @@ void apistream_init(ApiStream *a, char *toolInputBuf, unsigned max)
         cp = (char *)malloc(SCRATCH);
 }
 
-/* Where to cut a raw (escaped) string so that no escape or surrogate pair is split. */
+/* How many raw bytes the token at raw[i] spans: an escape (6 for \uXXXX, 12
+   for a surrogate pair, 2 otherwise), a UTF-8 sequence (1-4) or one byte. */
+static unsigned tokenLen(const char *raw, unsigned len, unsigned i)
+{
+    unsigned char c = (unsigned char)raw[i];
+    if (c == '\\') {
+        if (i + 1 < len && raw[i + 1] == 'u') {
+            if (i + 5 < len && (raw[i + 2] == 'd' || raw[i + 2] == 'D')
+                && strchr("89abAB", raw[i + 3]) && i + 7 < len && raw[i + 6] == '\\' && raw[i + 7] == 'u')
+                return 12;                      /* high surrogate + its low half */
+            return 6;
+        }
+        return 2;
+    }
+    if (c >= 0xF0) return 4;
+    if (c >= 0xE0) return 3;
+    if (c >= 0xC0) return 2;
+    return 1;
+}
+
+/* Where to cut a raw (escaped) string so that no token straddles the cut:
+   the end of the last whole token at or before `want`. */
 static unsigned safeCut(const char *raw, unsigned len, unsigned want)
 {
-    unsigned i, from;
+    unsigned i = 0;
     if (len <= want)
         return len;
-    from = want > 12 ? want - 12 : 0;
-    for (i = from; i < want; i++)
-        if (raw[i] == '\\')
-            return i > from ? i : from;
-    return want;
+    for (;;) {
+        unsigned n = tokenLen(raw, len, i);
+        if (i + n > want)
+            return i ? i : n;                   /* a single token longer than want: take it whole */
+        i += n;
+    }
 }
 
 /* A text delta: raw escaped JSON to the history, decoded CP437 to the screen. */
@@ -83,8 +105,6 @@ static int textDelta(ApiStream *a, const char *raw, unsigned len)
         return 0;
     while (len) {
         unsigned take = safeCut(raw, len, SCRATCH / 2), n8, nc;
-        if (take == 0)
-            take = len;
         n8 = json_unescape(raw, take, raw8, SCRATCH);
         nc = utf8_to_cp437(raw8, n8, cp, SCRATCH);
         a->text(a->ctx, cp, nc);
@@ -99,8 +119,6 @@ static int inputDelta(ApiStream *a, const char *raw, unsigned len)
 {
     while (len) {
         unsigned take = safeCut(raw, len, SCRATCH / 2), n8;
-        if (take == 0)
-            take = len;
         n8 = json_unescape(raw, take, raw8, SCRATCH);
         if (emitHist(a, raw8, n8))
             return -1;

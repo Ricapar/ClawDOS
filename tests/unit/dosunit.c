@@ -22,6 +22,8 @@
 #include "history.h"
 #include "apireq.h"
 #include "apistream.h"
+#include "convo.h"
+#include "dosfs.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -570,7 +572,7 @@ static void testCfg(void)
 
 static const char *histText(void)
 {
-    static char buf[300];
+    static char buf[1200];
     Sink s;
     sink_buffer(&s, buf, sizeof buf);
     hist_copy(&s);
@@ -705,7 +707,7 @@ static void testApiReq(void)
 
 /* --- api stream --------------------------------------------------------------- */
 
-static char asText[200], asHist[600]; static int asThinking;
+static char asText[800], asHist[3000]; static int asThinking;
 static void asTextFn(void *c, const char *t, unsigned n) { (void)c; strncat(asText, t, n); }
 static void asThinkFn(void *c) { (void)c; asThinking++; }
 static int asHistFn(void *c, const char *p, unsigned n) { (void)c; strncat(asHist, p, n); return 0; }
@@ -813,6 +815,115 @@ static void testToolArgs(void)
     CHECK("targ_set after reset", targ_set("a", "1", 1) == 0 && !strcmp(targ("a"), "1") && targ("path") == NULL);
 }
 
+/* --- long deltas cut safely ------------------------------------------------------ */
+
+static void longDelta(ApiStream *a, const char *prefix, unsigned prefixLen, const char *tail)
+{
+    static char data[1200];
+    unsigned i;
+    strcpy(data, "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"");
+    for (i = 0; i < prefixLen; i++)
+        strncat(data, prefix, 1);
+    strcat(data, tail);
+    strcat(data, "\"}}");
+    ev(a, "content_block_delta", data);
+}
+
+static void testLongDeltas(void)
+{
+    static char input[700];
+    static char want[800];
+    ApiStream a;
+
+    asReset(&a, input, sizeof input);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    longDelta(&a, "a", 511, "\\\\b");                 /* the \\ escape straddles byte 512 */
+    memset(want, 'a', 511); strcpy(want + 511, "\\b");
+    CHECK_STR("long delta: escape at the cut", asText, want);
+    asText[0] = asHist[0] = 0;
+    longDelta(&a, "a", 508, "\\ud83d\\ude00!");      /* the pair straddles the cut */
+    memset(want, 'a', 508); strcpy(want + 508, "?!");
+    CHECK_STR("long delta: surrogate pair at the cut", asText, want);
+    asText[0] = asHist[0] = 0;
+    longDelta(&a, "a", 511, "\xC3\xA9!");             /* raw UTF-8 at the cut */
+    memset(want, 'a', 511); strcpy(want + 511, "\x82!");
+    CHECK_STR("long delta: utf-8 at the cut", asText, want);
+    ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+
+    asReset(&a, input, sizeof input);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"write\",\"input\":{}}}");
+    {
+        static char data[1300];
+        unsigned i;
+        /* partial_json: {"path":"C:\\A.TXT","text":"aaaa...a"} with the \\ of the path at the cut */
+        strcpy(data, "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"");
+        for (i = 0; i < 494; i++)
+            strcat(data, "a");
+        strcat(data, "\\\",\\\"path\\\":\\\"C:\\\\\\\\A.TXT\\\"}\"}}");
+        ev(&a, "content_block_delta", data);
+    }
+    ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    memset(want, 'a', 494); want[494] = 0;
+    CHECK("long input: valid JSON after the cut", strstr(a.toolInput, "\"path\":\"C:\\\\A.TXT\"}") != NULL
+          && strstr(asHist, "\"path\":\"C:\\\\A.TXT\"}}") != NULL);
+}
+
+/* --- conversation messages ---------------------------------------------------- */
+
+static int countOf(const char *hay, const char *needle)
+{
+    int n = 0;
+    while ((hay = strstr(hay, needle)) != NULL) { n++; hay += strlen(needle); }
+    return n;
+}
+
+static void testConvo(void)
+{
+    Convo c;
+    const char *t;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    convo_init(&c);
+    convo_turn_begin(&c);
+    convo_user_text(&c, "first");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read\",\"input\":{}}]}");
+    convo_assistant_done(&c);
+    convo_tool_result(&c, "t1", "    1 hi\n", 0, NULL);
+    convo_settle(&c);                    /* the next request failed: the turn ends here */
+    CHECK("convo: results last means merge", c.mergeNext == 1);
+    convo_turn_begin(&c);
+    convo_user_text(&c, "second");
+    t = histText();
+    CHECK("convo: roles alternate after merge", countOf(t, "\"role\":\"user\"") == 2 && countOf(t, "\"role\":\"assistant\"") == 1);
+    CHECK("convo: text joined the results", strstr(t, "\"is_error\":false},{\"type\":\"text\",\"text\":\"second\"}]}") != NULL);
+    convo_rollback_turn(&c);             /* nothing answered: back to before "second" */
+    t = histText();
+    CHECK("convo: rollback restores results message", c.mergeNext == 1 && !strcmp(t + strlen(t) - 2, "]}")
+          && strstr(t, "second") == NULL && countOf(t, "\"role\":\"user\"") == 2);
+    convo_turn_begin(&c);
+    convo_user_text(&c, "third");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}");
+    convo_assistant_done(&c);
+    CHECK("convo: plain reply clears merge", c.mergeNext == 0 && convo_settle(&c) == 0);
+    convo_tool_result(&c, "t9", "x", 1, "Tool limit reached; answer now without tools.");
+    CHECK("convo: result with note", strstr(histText(), "\"is_error\":true},{\"type\":\"text\",\"text\":\"Tool limit reached") != NULL);
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
+static void testHistoryCommit(void)
+{
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
+    CHECK("hist: message_done commits to the directory", fs_size("C:\\HISTTEST.JSN") == hist_size());
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -833,6 +944,9 @@ int main(void)
     testApiReq();
     testApiStream();
     testToolArgs();
+    testLongDeltas();
+    testConvo();
+    testHistoryCommit();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

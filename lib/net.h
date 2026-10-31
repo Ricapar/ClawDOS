@@ -48,6 +48,8 @@ class NetConn {
     /* Bytes received (>0), 0 nothing yet, -1 the link is gone (see remoteClosed()). */
     int    recv(char *buf, unsigned max);
     int    remoteClosed(void) { return closedByPeer; }
+    /* Service the stack and report whether the far end has sent its FIN. */
+    int    farEndClosed(void);
 
     const char *errorText(void) { return err; }
 

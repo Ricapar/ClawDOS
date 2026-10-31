@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+#include <dos.h>
 #include "history.h"
 
 #define COPY_BUF 512
@@ -106,11 +107,22 @@ int hist_puts(const char *z)
     return hist_write(z, strlen(z));
 }
 
+/* INT 21h AH=68h: flush the file's buffers and directory entry, so the bytes
+   survive a crash or power cut (DOS only updates the size on close otherwise). */
+static void commit(void)
+{
+    union REGS r;
+    r.h.ah = 0x68;
+    r.x.bx = (unsigned)fd;
+    intdos(&r, &r);
+}
+
 int hist_message_done(void)
 {
     boundary = end;
     needSep = end > 0;
     turnMessages++;
+    commit();
     return 0;
 }
 
