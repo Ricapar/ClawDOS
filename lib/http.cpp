@@ -6,7 +6,8 @@
 #include "apireq.h"
 #include "ticks.h"
 
-Http::Http() : rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), left(0), done(1), out(NULL), outLen(0), outMax(0)
+Http::Http() : idle(NULL), rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), left(0), done(1), out(NULL),
+               outLen(0), outMax(0), lastIdle(0)
 {
     sk.put = sockPut;
     sk.ctx = this;
@@ -14,10 +15,20 @@ Http::Http() : rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), left(0),
     memset(&head, 0, sizeof head);
 }
 
+void Http::tick(void)
+{
+    if (idle && ticks_elapsed(TICKS_NOW, lastIdle) >= 2) {
+        lastIdle = TICKS_NOW;
+        idle();
+    }
+}
+
 int Http::sockPut(Sink *s, const char *p, unsigned n)
 {
     Http *h = (Http *)s->ctx;
-    return h->conn.send(p, n);
+    int rc = h->conn.send(p, n);
+    h->tick();
+    return rc;
 }
 
 int8_t Http::open(const char *hostport)
@@ -68,6 +79,7 @@ int Http::fill(int secs)
             rxLen += n;
             return n;
         }
+        tick();
         if (ticks_elapsed(TICKS_NOW, start) >= SECS_TO_TICKS(secs))
             return 0;
     }

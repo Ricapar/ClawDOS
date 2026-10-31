@@ -42,6 +42,10 @@ class Http {
     void   service(void) { Net::service(); }
     const char *errorText(void) { return conn.errorText(); }
 
+    /* Called every couple of ticks while waiting for the network and after
+       every piece sent, so the caller can animate a spinner and read keys. */
+    void (*idle)(void);
+
   private:
     NetConn conn;
     Sink sk;
@@ -56,7 +60,9 @@ class Http {
     char *out;                    /* where chunked payload goes during read() */
     unsigned outLen, outMax;
 
+    unsigned long lastIdle;
     int fill(int secs);           /* more raw bytes; >0, 0 timeout, -1 gone */
+    void tick(void);              /* call idle if 2 ticks have passed */
     static int sockPut(Sink *s, const char *p, unsigned n);
     static int chunkOut(void *ctx, const char *p, unsigned n);
 };

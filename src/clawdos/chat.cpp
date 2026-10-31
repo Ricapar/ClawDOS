@@ -69,6 +69,7 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         return -1;
     }
     memories[0] = 0;
+    http.idle = ui->idle;
     if (newConversation())
         return -1;
     if (connect())
