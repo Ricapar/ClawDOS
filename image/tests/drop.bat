@@ -1,10 +1,10 @@
 @ECHO OFF
-REM A lost link (scripts/boottest.py image/tests/drop.bat --bridge --expect
-REM "resumed conversation" --expect "DOS: Link lost"): the mock bridge's !drop
-REM hangs up mid-reply. With -q, CLAWDOS reconnects once, resuming its
-REM conversation and reporting the loss, then exits with an error.
+REM A lost link (scripts/boottest.py image/tests/drop.bat --mock --expect
+REM "connection #2"): the mock API's !drop hangs up mid-reply. CLAWDOS drops the
+REM half reply, reconnects and asks again, once; the second answer completes.
 ECHO CLAWDOS-DROP-TEST > COM1
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -q -m "!drop"
 ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1
+TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1
 ECHO CLAWDOS-TEST-DONE > COM1

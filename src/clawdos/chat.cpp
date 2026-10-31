@@ -74,7 +74,7 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         return -1;
     if (!prov->key[0]) {
         sprintf(errBuf, "No API key for [%s]: add a key line to " CFG_PATH ".", prov->id);
-        ui->note(errBuf, 1);
+        warn(errBuf);
     }
     return 0;
 }
@@ -231,6 +231,13 @@ void Chat::settle(void)
         writeResult(pendingTool, "Interrupted by the user.", 1, NULL);
         mergeNext = 1;
     }
+}
+
+/* An error note: on the screen and in CLAWDOS.LOG (the boot tests read the log). */
+void Chat::warn(const char *text)
+{
+    ui->note(text, 1);
+    ui->log(text);
 }
 
 /* --- streaming callbacks ------------------------------------------------------- */
@@ -418,7 +425,7 @@ int8_t Chat::stream(void)
             }
             if (streamRc < 0) {
                 hist_rollback_message();
-                ui->note(as.error, 1);
+                warn(as.error);
                 drain();
                 return -1;
             }
@@ -430,7 +437,7 @@ int8_t Chat::stream(void)
             return 1;
         if (!reasked) {                  /* lost mid-reply: ask once more */
             reasked = 1;
-            ui->note("[link lost, asking again]", 1);
+            warn("[link lost, asking again]");
             return 2;
         }
         ui->note(n == -2 ? "The API stopped answering." : "The link was lost again; giving up on this reply.", 1);
@@ -459,13 +466,13 @@ int8_t Chat::request(int noTools)
 
         sink_count(&count);
         if (api_body(&count, &r) != 0) {
-            ui->note("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".", 1);
+            warn("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".");
             return -1;
         }
         fresh = 0;
         if (!http.isOpen()) {
             if (connect()) {
-                ui->note(err, 1);
+                warn(err);
                 return -1;
             }
             fresh = 1;
@@ -486,8 +493,8 @@ int8_t Chat::request(int noTools)
             if (stale)                    /* an idle keep-alive connection the far end had dropped */
                 continue;
             if (++attempt > 2) {
-                ui->note(rc == -2 ? "No answer from the API." : rc == -3 ? "The API sent a bad response."
-                                                                       : "The connection failed.", 1);
+                warn(rc == -2 ? "No answer from the API." : rc == -3 ? "The API sent a bad response."
+                                                                       : "The connection failed.");
                 return -1;
             }
             ui->note(attempt == 1 ? "No reply; trying again in 2 s" : "Still nothing; trying again in 8 s", 1);
@@ -510,17 +517,17 @@ int8_t Chat::request(int noTools)
         if (h.status == 429 || h.status >= 500) {
             int wait = h.retryAfter ? h.retryAfter : (attempt == 0 ? 2 : 8);
             if (++attempt > 2) {
-                ui->note(msg, 1);
+                warn(msg);
                 return -1;
             }
             sprintf(msg + strlen(msg), "; trying again in %d s", wait);
-            ui->note(msg, 1);
+            warn(msg);
             pause(wait);
             if (ui->escPressed())
                 return 1;
             continue;
         }
-        ui->note(msg, 1);
+        warn(msg);
         return -1;
     }
 }
@@ -549,13 +556,13 @@ int8_t Chat::turn(const char *text)
         if (as.hasTool)
             strncpy(pendingTool, as.toolId, sizeof pendingTool - 1);
         if (!strcmp(as.stopReason, "refusal")) {
-            ui->note("The model declined to answer that.", 1);
+            warn("The model declined to answer that.");
             hist_rollback_turn();
             pendingTool[0] = 0;
             return -1;
         }
         if (!strcmp(as.stopReason, "max_tokens"))
-            ui->note("[reply cut off: too long]", 1);
+            warn("[reply cut off: too long]");
         if (strcmp(as.stopReason, "tool_use")) {
             if (as.hasTool) {             /* a call cut off before it was complete */
                 writeResult(as.toolId, "Error: reply cut off before the call was complete", 1, NULL);

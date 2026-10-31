@@ -64,10 +64,14 @@ boottests: build ## every DOSBox-X boot test
 	$(BOOTTEST) image/tests/smoke.bat
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
 	$(BOOTTEST) image/tests/net.bat
-	$(BOOTTEST) image/tests/tools.bat --bridge --expect "tool tour: PASS"
-	$(BOOTTEST) image/tests/drop.bat --bridge --expect "connection #2"
-	$(BOOTTEST) image/tests/memory.bat --bridge --expect "memory_write -> ok"
-	$(BOOTTEST) image/tests/clock.bat --bridge --expect "Clock set from the bridge"
+	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS"
+	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2"
+	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok"
+	$(BOOTTEST) image/tests/clock.bat --mock --expect "Clock set from the API"
+	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)

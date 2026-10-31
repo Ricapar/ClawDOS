@@ -88,6 +88,7 @@ class Chat {
     void   logRound(int round);
     void   loadMemories(void);
     void   pause(int secs);
+    void   warn(const char *text);
 
     static void onText(void *ctx, const char *cp437, unsigned n);
     static void onThinking(void *ctx);
