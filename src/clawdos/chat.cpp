@@ -306,6 +306,8 @@ void Chat::setClock(const char *date)
     int y, mo, d, h, mi, s;
     char line[90];
 
+    unsigned long before, elapsed;
+
     clockSet = 1;
     if (http_parse_date(date, &y, &mo, &d, &h, &mi, &s))
         return;
@@ -323,8 +325,11 @@ void Chat::setClock(const char *date)
     dt.minute = (unsigned char)mi;
     dt.second = (unsigned char)s;
     dt.hsecond = 0;
+    before = TICKS_NOW;
+    elapsed = ticks_elapsed(before, reqStart);    /* this request is in flight: keep its timing honest */
     _dos_setdate(&dd);
     _dos_settime(&dt);
+    reqStart = TICKS_NOW - elapsed;
     ui->note(line, 0);
     ui->log(line);
 }

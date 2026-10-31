@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 
 import fatimg
@@ -409,6 +410,9 @@ def clawdos_cfg(template):
     and the API key from .env filled in (a build without a key still boots)."""
     text = template.decode('cp437')
     text = re.sub(r'^tunnel .*$', f'tunnel {settings()["tunnel"]}', text, count=1, flags=re.M)
+    # The DOS PC sets its clock from the API's Date header (GMT): give it this machine's offset.
+    hours = round(time.localtime().tm_gmtoff / 3600)
+    text = re.sub(r'^timezone .*$', f'timezone {hours}', text, count=1, flags=re.M)
     key = api_key()
     if key:
         text = re.sub(r'^# key sk-ant-\.\.\..*$', f'key {key}', text, count=1, flags=re.M)

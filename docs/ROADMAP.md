@@ -72,8 +72,11 @@ is in [API.md](API.md).
       writer, SSE and JSON parsing, thinking blocks echoed back, the tool loop,
       the history as a file on the DOS PC, retries and lost-link recovery,
       `/model` across providers that speak the API. The Python bridge is gone.
-      8088 timings (86Box): Enter to first token on a fresh conversation and
-      with ~100 KB of history: _to be measured_.
+      First live run (86Box 8088, 2026-10-31): a fresh conversation's first
+      request (11.7 KB up: prompt, tool schemas, one message) reached the first
+      token after 19 s and finished at 21 s, with the system prompt and tools
+      served from the prompt cache on the second run (`cr=4061`). The ~100 KB
+      history timing is still to be measured.
 - [ ] **M6 - Building on the DOS PC**: better tools for Claude writing programs on
       the DOS PC itself (Turbo C, assemblers), from what the CGA demo and WarGames
       sessions of 2026-10-25/26 showed (the bridge's JSONL logs of that time). Details below.

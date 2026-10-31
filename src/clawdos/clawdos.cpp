@@ -264,7 +264,7 @@ static void drawInputLine(int i)
     if (line == 0)
         r.c[2] = '>' | (A_BRIGHT << 8);
     if (inputLen == 0 && i == 0) {
-        rowText(r, BOX_TEXT, state == IDLE ? "What would you like to do?\"  (F1 for help)" : "",
+        rowText(r, BOX_TEXT, state == IDLE ? "What would you like to do?  (F1 for help)" : "",
                 A_DIM);
     } else if (line < lineCount) {
         int first = lineStart[line];
