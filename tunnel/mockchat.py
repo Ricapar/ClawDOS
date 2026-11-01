@@ -82,7 +82,7 @@ SCENARIOS = {
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
 # The tool tour: (tool, args, expected status, text the result must contain).
-# Tools CLAWDOS.EXE doesn't have yet are expected to fail; flip them as they land.
+# Tools HARNESS.EXE doesn't have yet are expected to fail; flip them as they land.
 TOUR_EXPECT = {}
 TOUR_TEXT = 'Hello from the tool tour.\nSecond line.'
 
@@ -173,7 +173,7 @@ SMALL_TALK = [
      "characters at a time. Send !help to see the test commands."),
     (r'\b(who|what) are you\b',
      "I'm the mock Messages API for ClawDOS. I imitate the real model closely enough "
-     "to test CLAWDOS.EXE: replies stream in token-sized pieces after a short "
+     "to test HARNESS.EXE: replies stream in token-sized pieces after a short "
      "pause, I remember the conversation, and I can fail in all the ways "
      "the real API can. Point CLAWDOS at a TLS tunnel for the real thing."),
     (r'\b(8088|ibm|cga|pc)\b',
@@ -187,7 +187,7 @@ SMALL_TALK = [
      "You're welcome! This has been a mock conversation, but the real one "
      "will look exactly the same on your screen."),
     (r'\b(bye|goodbye|see you)\b',
-     "Goodbye! Press F10 to leave CLAWDOS.EXE."),
+     "Goodbye! Press F10 to leave HARNESS.EXE."),
 ]
 
 

@@ -23,7 +23,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` the clock
   from the Date header (`Clock set from the API`); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `relaunch.bat --timeout 150` the run
-  tool through CLAW.EXE with the clock back at 1980 (`Largest executable program size` from MEM, `CLAW.EXE exit code 0`
+  tool through CLAWDOS.EXE with the clock back at 1980 (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
   for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
@@ -34,16 +34,17 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
-- CLAW.EXE (src/claw) is the launcher the user starts: it runs CLAWDOS.EXE with `-launched`, and when a `run` tool call
-  makes CLAWDOS exit with code 200 it runs the commands itself (lib/shell.c) with CLAWDOS's memory free, then starts
-  `CLAWDOS -resume -launched`, which reopens the conversation and carries the turn on. The files between them are in
-  lib/relaunch.h; RESUME.TXT stays until the resume has connected, so `CLAW -resume` retries one that failed. Two
-  relaunch lessons: a program started after CLAWDOS has set the clock meets mTCP's DHCP lease check (DHCP stamped the
-  lease with the boot clock; lib/mtcpcfg.c moves the stamp with the clock), and a fresh process must not reuse the
-  local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's tick count).
-  mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far heap in this
-  build (DOSUNIT shows it after one malloc).
-- CLAWDOS.EXE is the whole harness: it speaks the Messages API itself (src/clawdos/chat.cpp drives the turn; lib/apireq.c
+- CLAWDOS.EXE (src/clawdos) is the small launcher the user types: it runs HARNESS.EXE with `-launched`, and when a
+  `run` tool call makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
+  memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The
+  files between them are in lib/relaunch.h; RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
+  retries one that failed. `HARNESS.EXE` run on its own keeps programs inside its memory (the boot tests do that).
+  Two relaunch lessons: a program started after the harness has set the clock meets mTCP's DHCP lease check (DHCP
+  stamped the lease with the boot clock; lib/mtcpcfg.c moves the stamp with the clock), and a fresh process must not
+  reuse the local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's
+  tick count). mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far
+  heap in this build (DOSUNIT shows it after one malloc).
+- HARNESS.EXE (src/harness) is the whole harness: it speaks the Messages API itself (src/harness/chat.cpp drives the turn; lib/apireq.c
   writes the request from C:\CLAWDOS\PROMPT.TXT, TOOLS.JSN and the history file; lib/apistream.c turns the SSE stream into
   screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
@@ -51,7 +52,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `python3 tunnel/mockapi.py` fakes the API offline on plain HTTP (point CLAWDOS at it: `CLAWDOS 10.0.2.2:18023`); in a chat,
   `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, ...); `!tool NAME k=v` calls one
   DOS tool, `!tooltour` all; tests `python3 tunnel/test_mockapi.py`. Tool schemas: image/clawdos/TOOLS.JSN (the one source;
-  the mock reads it too); executors dispatched by src/clawdos/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
+  the mock reads it too); executors dispatched by src/harness/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
   after the `-m` reply, `-p NAME` picks a provider section, `-noscroll` turns off hardware scrolling.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
   the state they change `volatile`.
@@ -65,5 +66,5 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
   The real IBM CGA does NOT wrap its display at the end of its 16 KB (86Box's does): the window must stay inside it.
   A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
-- Code linking mTCP (lib/net, lib/http, CLAWDOS.EXE) is GPLv3.
+- Code linking mTCP (lib/net, lib/http, HARNESS.EXE) is GPLv3.
 - Watcom: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).

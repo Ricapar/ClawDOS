@@ -42,8 +42,8 @@ PICOMEM/            picomem:*.COM
 PICOMEM/            picomem:*.EXE
 
 CLAWDOS/        build:hello.exe
-CLAWDOS/        build:claw.exe
 CLAWDOS/        build:clawdos.exe
+CLAWDOS/        build:harness.exe
 CLAWDOS/        repo:image/clawdos/*
 
 TESTS/                  build:dosunit.exe

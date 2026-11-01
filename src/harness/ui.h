@@ -1,4 +1,4 @@
-/* What CLAWDOS.EXE's screen offers tools.cpp. */
+/* What HARNESS.EXE's screen offers tools.cpp. */
 #ifndef CLAWDOS_UI_H
 #define CLAWDOS_UI_H
 

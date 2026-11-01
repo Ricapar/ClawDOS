@@ -1,4 +1,4 @@
-"""A fake Anthropic Messages API for testing CLAWDOS.EXE offline.
+"""A fake Anthropic Messages API for testing HARNESS.EXE offline.
 
   python3 tunnel/mockapi.py [--port 18023] [--speed 1.0] [--tools image/clawdos/TOOLS.JSN]
 

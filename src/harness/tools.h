@@ -1,4 +1,4 @@
-/* CLAWDOS.EXE tool calls: a tool_use from the model in, its result out, with
+/* HARNESS.EXE tool calls: a tool_use from the model in, its result out, with
  * safe mode asking before anything changes. */
 #ifndef CLAWDOS_TOOLS_H
 #define CLAWDOS_TOOLS_H
@@ -8,7 +8,7 @@
 void tools_init(int safe, int unattended);
 int  tools_safe(void);
 void tools_toggle_safe(void);
-/* Started by CLAW.EXE (-launched): run hands its commands to the launcher and
+/* Started by CLAWDOS.EXE (-launched): run hands its commands to the launcher and
    returns TS_RELAUNCH instead of running them here (see relaunch.h). */
 void tools_set_launched(int on);
 /* After the relaunch: the note under the Run header, as the call would have shown. */

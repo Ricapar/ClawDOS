@@ -35,7 +35,7 @@ set and talks to the network through a standard packet driver, so in principle
 it runs on any PC-compatible running DOS with a network card and a CGA-compatible
 text display. It was built to target a 4.77 MHz IBM PC XT (5160).
 
-**CLAWDOS.EXE** is the whole harness, and it runs on the 8088: it speaks the
+**HARNESS.EXE** is the whole harness, and it runs on the 8088: it speaks the
 Claude Messages API itself (request bodies, the streamed JSON reply, the tool
 loop), keeps the conversation history on its own disk, holds the API key and
 runs the tools.
@@ -50,7 +50,7 @@ the API. `tunnel/tunnel.py` is 100 lines of standard-library Python; `socat` or
 flowchart LR
     subgraph DOS["DOS PC (8088 or later)"]
         direction TB
-        subgraph APP["CLAWDOS.EXE"]
+        subgraph APP["HARNESS.EXE"]
             direction TB
             UI["Chat interface"]
             LOOP["Agent loop<br/>Messages API requests, SSE + JSON,<br/>history on disk, API key"]
@@ -100,7 +100,7 @@ sends and expects is in [docs/API.md](docs/API.md).
 4. **Boot an emulated 8088 PC** in another: `python scripts/run86box.py` (8088,
    640K, CGA, with an NE1000 card and NAT networking). It boots, brings up the
    network and shows the `C:\>` prompt.
-5. **Type `CLAW`** (or `CLAWDOS`; see [Memory for programs](#memory-for-programs)).
+5. **Type `CLAWDOS`** (see [Memory for programs](#memory-for-programs)).
    In the emulator the tunnel is the host machine, `10.0.2.2:8443`, which the
    image is built to use.
 
@@ -128,7 +128,7 @@ networking. It is faster but less exact (it emulates an 80186).
    make sure NE2000 is enabled (Other). The card's WiFi settings are its own;
    see the PicoMEM documentation.
 5. **Boot the DOS PC.** Networking comes up automatically (type `NETUP` to retry),
-   then type `CLAW`.
+   then type `CLAWDOS`.
 
 ### Using it
 
@@ -145,7 +145,7 @@ the one it starts with).
 
 ### Tools on DOS
 
-CLAWDOS.EXE offers the model a fixed set of tools (`C:\CLAWDOS\TOOLS.JSN`),
+HARNESS.EXE offers the model a fixed set of tools (`C:\CLAWDOS\TOOLS.JSN`),
 runs them and shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
 
 
@@ -160,17 +160,18 @@ a second COMMAND.COM (about 70K) for batch files, redirection and built-in comma
 
 ### Memory for programs
 
-CLAWDOS.EXE holds about 310K while it runs (mTCP, the API buffers, the code),
-which leaves a program started by `run` about 190K. **`CLAW.EXE`** is a 50K
-launcher that gets around this: start `CLAW` instead of `CLAWDOS`, with the
-same arguments, and every `run` makes CLAWDOS save its state and exit, the
-launcher run the commands with about 450K free, and CLAWDOS start again on the
-same conversation with the program's output as the tool result. It costs a
-reload and a reconnect per `run` (under a second in DOSBox-X; about 11 s on
-the 8088) and the chat's Up/Down input history. If CLAWDOS cannot come back
-(the tunnel or the network is down), fix that and type `CLAW -resume`: the
-conversation carries on from the program's output. The files behind it are in
-`lib/relaunch.h`; `image/tests/relaunch.bat` exercises it.
+HARNESS.EXE holds about 310K while it runs (mTCP, the API buffers, the code),
+which would leave a program started by `run` about 190K. So **`CLAWDOS.EXE`**,
+the command you type, is a 50K launcher: it starts HARNESS.EXE, and every `run`
+makes the harness save its state and exit, the launcher run the commands with
+about 450K free, and the harness start again on the same conversation with the
+program's output as the tool result. It costs a reload and a reconnect per
+`run` (under a second in DOSBox-X; about 11 s on the 8088) and the chat's
+Up/Down input history. If the harness cannot come back (the tunnel or the
+network is down), fix that and type `CLAWDOS -resume`: the conversation carries
+on from the program's output. Running `HARNESS` directly keeps programs inside
+its memory. The files behind it are in `lib/relaunch.h`;
+`image/tests/relaunch.bat` exercises it.
 
 With the mock API, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and
@@ -241,7 +242,8 @@ knowing about (clock set, retries, lost links, errors).
 
 | Path | What |
 |---|---|
-| `src/clawdos/` | CLAWDOS.EXE |
+| `src/harness/` | HARNESS.EXE, the chat client |
+| `src/clawdos/` | CLAWDOS.EXE, the launcher that runs it |
 | `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
 | `tests/unit/` | DOSUNIT.EXE: unit tests for the hardware-free code (every parser above), run in DOSBox-X |
 | `tunnel/` | The TLS tunnel (`tunnel.py`) and the offline mock Messages API (`mockapi.py`) |
@@ -252,4 +254,4 @@ knowing about (clock set, retries, lost links, errors).
 
 ## License
 
-Programs linking mTCP (CLAWDOS.EXE, anything using `lib/net`) are GPLv3.
+Programs linking mTCP (HARNESS.EXE, anything using `lib/net`) are GPLv3.

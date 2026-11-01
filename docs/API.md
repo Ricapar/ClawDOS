@@ -1,6 +1,6 @@
 # What CLAWDOS sends to the API, and what it expects back
 
-CLAWDOS.EXE is a client of the Anthropic Messages API. The only thing between it
+HARNESS.EXE is a client of the Anthropic Messages API. The only thing between it
 and `api.anthropic.com` is a TLS tunnel that copies bytes (below). This page is
 the reference for the DOS side: the files it uses, the request it writes, the
 stream it reads and how the history stays valid. The design behind it is

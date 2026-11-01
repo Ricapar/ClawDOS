@@ -1,4 +1,4 @@
-/* CLAWDOS.EXE tool calls: see tools.h.
+/* HARNESS.EXE tool calls: see tools.h.
  *
  * The model's tool_use block arrives as a name and a JSON input object
  * (chat.cpp). We show the call in the transcript, ask first if it's a W
@@ -184,7 +184,7 @@ static void restoreScreen(unsigned short __far *save)
     ui_redraw();
 }
 
-static int launched;                  /* started by CLAW.EXE: runs go to it */
+static int launched;                  /* started by CLAWDOS.EXE: runs go to it */
 
 void tools_set_launched(int on) { launched = on; }
 

@@ -5,9 +5,9 @@ REM !bigevent sends a 20 KB text delta. CLAWDOS ends that reply with an error,
 REM and the next message in the same run is answered normally.
 ECHO CLAWDOS-BIGEVENT-TEST > COM1
 CALL C:\NET\NETUP.BAT
-C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -q -m "!bigevent"
-ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1
-C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -q -m "hello"
-ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!bigevent"
+ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "hello"
+ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1
 ECHO CLAWDOS-TEST-DONE > COM1

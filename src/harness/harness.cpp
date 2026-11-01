@@ -1,4 +1,4 @@
-/* CLAWDOS.EXE - chat with Claude from an IBM PC 5160.
+/* HARNESS.EXE - chat with Claude from an IBM PC 5160.
  *
  * Talks the Messages API itself (chat.cpp) through a TLS tunnel, sends what
  * you type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
@@ -121,7 +121,7 @@ static int exitCode;
 static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
 static int quickFlag, noscrollFlag;   /* -q and -noscroll as given, for the relaunch state */
-static int resumeMode;                /* -resume: back from a run under CLAW.EXE */
+static int resumeMode;                /* -resume: back from a run under CLAWDOS.EXE */
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
@@ -1081,7 +1081,7 @@ static int restoreScreenFile(void)
 }
 
 /* A run goes to the launcher: save what a relaunched CLAWDOS needs, give the
-   memory back and leave with the exit code CLAW.EXE watches for. */
+   memory back and leave with the exit code CLAWDOS.EXE watches for. */
 static void relaunchExit(void)
 {
     if (writeState())
@@ -1159,12 +1159,15 @@ int main(int argc, char *argv[])
         } else if ((!stricmp(argv[i], "-p") || !stricmp(argv[i], "/p")) && i + 1 < argc) {
             providerArg = argv[++i];
         } else if (!stricmp(argv[i], "-launched") || !stricmp(argv[i], "/launched")) {
-            tools_set_launched(1);    /* CLAW.EXE is our parent: runs go to it */
+            tools_set_launched(1);    /* CLAWDOS.EXE is our parent: runs go to it */
         } else if (!stricmp(argv[i], "-resume") || !stricmp(argv[i], "/resume")) {
             resumeMode = 1;
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("CLAWDOS " VERSION " - chat with an AI from DOS\n\n"
+            printf("ClawDOS " VERSION " - chat with an AI from DOS\n\n"
                    "Usage: CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q]\n"
+                   "       (CLAWDOS.EXE launches this program, HARNESS.EXE, and takes over\n"
+                   "       while a run tool program needs the memory; HARNESS alone keeps\n"
+                   "       programs inside its own memory)\n"
                    "              [-m message] [-i text]\n\n"
                    "Settings come from " CFG_PATH ". A host replaces the\n"
                    "provider's tunnel address (plain HTTP, e.g. the mock API in tests).\n"
@@ -1240,7 +1243,7 @@ int main(int argc, char *argv[])
         if (chat.resume(cfg, providerArg, resumeState.model, host[0] ? host : NULL, &chatUi,
                         resumeState.chat, &c))
             fatal(chat.errorText());
-        remove(RELAUNCH_STATE);       /* resumed; until now CLAW -resume could try again */
+        remove(RELAUNCH_STATE);       /* resumed; until now CLAWDOS -resume could try again */
         statusNote = NULL;
         drawFooter();
         resumeTurn();

@@ -29,7 +29,7 @@ harness, running on the 8088.
 ## Claude chat architecture
 
 ```
- DOS PC (CLAWDOS.EXE)                 --plain HTTP over TCP-->  TLS tunnel        --HTTPS-->  Claude API
+ DOS PC (HARNESS.EXE)                 --plain HTTP over TCP-->  TLS tunnel        --HTTPS-->  Claude API
   CGA text UI, scrollback, mTCP,                               (tunnel.py, socat
   Messages API requests, SSE + JSON,                            or stunnel: copies
   history on disk, API key, tools                               bytes, nothing else)
@@ -58,16 +58,16 @@ is in [API.md](API.md).
 - [x] **M3 - Bridge server** (retired October 2026): `bridge/dosbridge.py` spoke
       the API for the DOS PC and relayed tool calls over a line protocol. Replaced
       by M5.5; its offline mock lives on as `tunnel/mockapi.py`.
-- [x] **M4 - CLAWDOS.EXE**: streaming chat with word wrap, hardware scrolling,
+- [x] **M4 - HARNESS.EXE**: streaming chat with word wrap, hardware scrolling,
       scrollback, stop/new-chat. Verified against the mock in 86Box.
-- [x] **M4.5 - Tools**: Claude acts on the DOS PC through CLAWDOS.EXE: files, system
+- [x] **M4.5 - Tools**: Claude acts on the DOS PC through HARNESS.EXE: files, system
       info, DOS commands, memory and ports, PC speaker music (PLAY), text art;
       safe mode asks before changes (F3). The CGA drawing tool was dropped
       in October 2026: real compilers on the image made it redundant.
       Design in [superpowers/specs/2026-10-21-dos-tools-design.md](superpowers/specs/2026-10-21-dos-tools-design.md).
 - [x] **M5 - Real hardware**: boot CLAWDOS.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
-- [x] **M5.5 - Native API client**: CLAWDOS.EXE speaks the Messages API itself
+- [x] **M5.5 - Native API client**: HARNESS.EXE speaks the Messages API itself
       through a dumb TLS tunnel (`tunnel/tunnel.py`, or socat/stunnel): request
       writer, SSE and JSON parsing, thinking blocks echoed back, the tool loop,
       the history as a file on the DOS PC, retries and lost-link recovery,
@@ -107,7 +107,7 @@ is in [API.md](API.md).
 
 ## M6.2: full-memory run
 
-**Problem.** CLAWDOS.EXE stays resident while the `run` tool's program runs:
+**Problem.** HARNESS.EXE stays resident while the `run` tool's program runs:
 about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
 (Stage 1 memory, `dc21363`, already won ~90 KB). On the DOS PC this cost:
 
@@ -128,8 +128,8 @@ screen as it was, and the link restored.
 **Approaches** (pick one in the design session):
 
 1. **Exit and relaunch through a stub.** A tiny resident launcher (NASM,
-   8086, a few KB; e.g. CLAW.COM, which the user starts instead of CLAWDOS)
-   runs CLAWDOS.EXE. For a big run CLAWDOS saves its state (conversation file,
+   8086, a few KB; e.g. CLAWDOS.COM, which the user starts instead of CLAWDOS)
+   runs HARNESS.EXE. For a big run CLAWDOS saves its state (conversation file,
    pending tool id, flags like `-unsafe`, the scrollback/screen, the input
    line), shuts mTCP down cleanly (releasing the packet driver) and exits
    with a code that tells the stub to run the command. The stub runs it with
@@ -145,19 +145,20 @@ screen as it was, and the link restored.
    still dies while the receiver is gone. Needs EMS (none in 86Box's IBM PC 5160
    unless an EMS board is emulated); a disk swap file would be the fallback.
 
-**Status (branch `relaunch`, a spike of approach 1).** CLAW.EXE (src/claw, a
-small-model C program linking lib/shell.c) starts CLAWDOS with `-launched`;
-the run tool then writes the commands to C:\CLAWDOS\RUN.TXT and CLAWDOS saves
-its state (RESUME.TXT: chat file, pending tool_use id, round, convo flags,
+**Status (branch `relaunch`, a spike of approach 1).** The chat client is now
+HARNESS.EXE, and CLAWDOS.EXE (src/clawdos, a small-model C program linking
+lib/shell.c) is the launcher the user types: it starts HARNESS with `-launched`;
+the run tool then writes the commands to C:\CLAWDOS\RUN.TXT and the harness
+saves its state (RESUME.TXT: chat file, pending tool_use id, round, convo flags,
 switches; SCREEN.SAV: the 16 KB of video memory plus the scroll and console
 state) and exits with code 200. The launcher runs the commands exactly as the
-in-process tool would, writes RUN.OUT and starts `CLAWDOS -resume`, which
+in-process tool would, writes RUN.OUT and starts `HARNESS -resume`, which
 reopens the history file, restores the screen, shows the result under the Run
 header and continues the rounds (lib/relaunch.h, Chat::resume/continueTurn).
 Measured in DOSBox-X (`image/tests/relaunch.bat`): a program gets 449 KB,
-against 220 KB in-process; CLAW's block is 50 KB; CLAWDOS is away 1.7 s for a
-1.0 s program. Every `run` goes through the launcher when started by CLAW;
-plain `CLAWDOS` still runs programs in-process. Not done: the input history
+against 220 KB in-process; the launcher's block is 50 KB; the harness is away
+1.7 s for a 1.0 s program. Every `run` goes through the launcher; `HARNESS`
+started on its own still runs programs in-process. Not done: the input history
 (Up/Down) is lost across the relaunch, the launcher could be smaller (printf,
 the argument-store code it never calls), timing on the real PC, and the policy
 question below.
@@ -171,7 +172,7 @@ once the clock had been set from the API (DHCP had stamped the lease with the
 1980 boot clock; CLAWDOS now moves the stamp in MTCP.CFG along with the clock,
 lib/mtcpcfg.h), and it could draw the local TCP port its predecessor had just
 closed, because mTCP's tick counter starts at 0 in every process (the port now
-comes from the BIOS time of day). `CLAW -resume` retries a resume that failed.
+comes from the BIOS time of day). `CLAWDOS -resume` retries a resume that failed.
 
 Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths
 are already tested. The open questions either way:
@@ -184,7 +185,7 @@ are already tested. The open questions either way:
 - **When to go big.** Every run (simple, but DIR then costs a reconnect), a
   tool argument the model sets, or automatically for known heavy programs
   (TCC, TLINK, MAKE, batch files). DEVTOOLS.TXT must say which.
-- **Where state goes.** A file in C:\CLAW (survives a crash or reboot, so
+- **Where state goes.** A file in C:\CLAWDOS (survives a crash or reboot, so
   CLAWDOS could even recover after the program hangs the DOS PC) or an EMS page.
 - **Safe mode:** the y/n prompt stays before the exit; Esc and the
   exit-code hold screen move into the stub.

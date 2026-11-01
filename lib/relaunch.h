@@ -1,4 +1,4 @@
-/* ClawDOS relaunch: how CLAWDOS.EXE hands a `run` to the launcher, CLAW.EXE,
+/* ClawDOS relaunch: how HARNESS.EXE hands a `run` to the launcher, CLAWDOS.EXE,
  * and gets the result back, so the program runs with the memory CLAWDOS held.
  *
  * CLAWDOS writes RUN.TXT, saves its state (RESUME.TXT, SCREEN.SAV) and exits

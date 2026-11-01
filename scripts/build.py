@@ -49,16 +49,16 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
-    'claw.exe': {'sources': ['src/claw/claw.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
+    'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
                              'lib/relaunch.c'], 'model': 's'},
-    'clawdos.exe': {'sources': ['src/clawdos/clawdos.cpp', 'src/clawdos/chat.cpp', 'src/clawdos/tools.cpp', 'lib/screen.c',
+    'harness.exe': {'sources': ['src/harness/harness.cpp', 'src/harness/chat.cpp', 'src/harness/tools.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/mtcpcfg.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/net.cpp', 'lib/http.cpp'],
-                   'model': 'l', 'mtcp': 'src/clawdos/clawdos.cfg'},
+                   'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
     'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c', 'lib/mtcpcfg.c'],
                     'model': 'l'},
@@ -384,7 +384,7 @@ def build_image(autotest=None):
     fs = fatimg.open_fs(img)
     fill_image(fs, manifest_entries(autotest))
 
-    # Point CLAWDOS.EXE at the TLS tunnel and give it the API key.
+    # Point HARNESS.EXE at the TLS tunnel and give it the API key.
     fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG')))
 
     out = os.path.join(BUILD, IMAGE_NAME)

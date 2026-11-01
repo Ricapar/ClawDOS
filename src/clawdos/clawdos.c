@@ -1,12 +1,13 @@
-/* CLAW.EXE: start CLAWDOS.EXE and stay resident while it runs, so that a
- * program the model runs can have the memory CLAWDOS holds.
+/* CLAWDOS.EXE: the launcher the user types. It starts HARNESS.EXE (the chat
+ * client itself) and stays resident while it runs, so that a program the
+ * model runs can have the memory the harness holds.
  *
- * CLAW passes its own command line to CLAWDOS (plus -launched). When CLAWDOS
- * hands over a run (exit code RELAUNCH_EXIT, lib/relaunch.h) only this
+ * CLAWDOS passes its own command line to HARNESS (plus -launched). When the
+ * harness hands over a run (exit code RELAUNCH_EXIT, lib/relaunch.h) only this
  * program is left in memory: it runs the commands with lib/shell.c, exactly
- * as CLAWDOS's run tool would, writes the captured output and starts
- * CLAWDOS -resume, which carries the conversation on. Any other exit code is
- * CLAWDOS quitting, and CLAW quits with it.
+ * as the harness's run tool would, writes the captured output and starts
+ * HARNESS -resume, which carries the conversation on. Any other exit code is
+ * the harness quitting, and CLAWDOS quits with it.
  */
 
 #include <stdio.h>
@@ -22,7 +23,7 @@
 
 #define TAIL_MAX 126                  /* a DOS command tail */
 
-static char exe[80];                  /* CLAWDOS.EXE, beside us */
+static char exe[80];                  /* HARNESS.EXE, beside us */
 static char args[TAIL_MAX + 16];
 static char cmds[SHELL_CMDS_MAX * (SHELL_CMD_MAX + 2) + 1];
 
@@ -49,7 +50,7 @@ static void findExe(const char *argv0)
         memcpy(exe, argv0, slash - argv0 + 1);
         exe[slash - argv0 + 1] = 0;
     }
-    strcat(exe, "CLAWDOS.EXE");
+    strcat(exe, "HARNESS.EXE");
 }
 
 int main(int argc, char *argv[])
@@ -63,15 +64,15 @@ int main(int argc, char *argv[])
     for (;;) {
         code = spawnlp(P_WAIT, exe, exe, args, NULL);
         if (code == -1) {
-            printf("CLAW: cannot run %s\n", exe);
+            printf("CLAWDOS: cannot run %s\n", exe);
             return 1;
         }
         if (code != RELAUNCH_EXIT) {
             /* CLAWDOS deletes the state once it has resumed: still there, the
                conversation waits (the network or the tunnel was down). */
             if (code != 0 && resuming && access(RELAUNCH_STATE, 0) == 0)
-                printf("CLAW: the conversation was not resumed (CLAWDOS left with code %d).\n"
-                       "      Fix what it said, then CLAW -resume carries it on.\n", code);
+                printf("CLAWDOS: the conversation was not resumed (HARNESS left with code %d).\n"
+                       "      Fix what it said, then CLAWDOS -resume carries it on.\n", code);
             return code;
         }
         {
@@ -81,11 +82,11 @@ int main(int argc, char *argv[])
 
             tout_reset(&t);
             if (relaunch_read_run(cmds, sizeof cmds, &hold))
-                status = tool_fail(&t, "CLAW: no " RELAUNCH_RUN);
+                status = tool_fail(&t, "CLAWDOS: no " RELAUNCH_RUN);
             else
                 status = shell_run(&t, cmds, hold);
             if (relaunch_write_out(status, ticks_elapsed(TICKS_NOW, start), &t))
-                printf("CLAW: cannot write %s\n", RELAUNCH_OUT);
+                printf("CLAWDOS: cannot write %s\n", RELAUNCH_OUT);
         }
         strcpy(args, "-resume -launched");
         resuming = 1;

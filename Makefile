@@ -61,7 +61,7 @@ boottests: build ## every DOSBox-X boot test
 	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
-	    --expect "Clock set from the API" --expect "CLAW.EXE exit code 0" --expect "resume state consumed"
+	    --expect "Clock set from the API" --expect "CLAWDOS.EXE exit code 0" --expect "resume state consumed"
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)
