@@ -1025,7 +1025,6 @@ static int readState(Resume *r)
             r->ticks = strtoul(v, NULL, 10);
     }
     fclose(f);
-    remove(RELAUNCH_STATE);           /* one resume per state */
     return r->chat[0] && r->tool[0] ? 0 : -1;
 }
 
@@ -1089,6 +1088,11 @@ static void relaunchExit(void)
         fatal("Cannot write " RELAUNCH_STATE);
     saveScreenFile();
     chat.close();
+    /* mTCP's endStack prints "End: heap is corrupted!" whenever Open Watcom's
+       _fheapchk() is unhappy, and in this build it is unhappy with any far heap
+       at all (DOSUNIT: one malloc is enough). A normal exit resets the screen
+       over it; here the program's screen would start with it. */
+    freopen("NUL", "w", stderr);
     Net::stopStack();
     exit(RELAUNCH_EXIT);
 }
@@ -1187,7 +1191,6 @@ int main(int argc, char *argv[])
         quitAfterReply = resumeState.quit;
         providerArg = resumeState.provider;
         strcpy(host, resumeState.host);
-        tools_set_launched(1);
     } else {
         quitAfterReply = quick && firstMessage != NULL;
     }
@@ -1237,6 +1240,7 @@ int main(int argc, char *argv[])
         if (chat.resume(cfg, providerArg, resumeState.model, host[0] ? host : NULL, &chatUi,
                         resumeState.chat, &c))
             fatal(chat.errorText());
+        remove(RELAUNCH_STATE);       /* resumed; until now CLAW -resume could try again */
         statusNote = NULL;
         drawFooter();
         resumeTurn();

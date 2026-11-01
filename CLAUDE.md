@@ -23,8 +23,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` the clock
   from the Date header (`Clock set from the API`); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `relaunch.bat --timeout 150` the run
-  tool through CLAW.EXE (`Largest executable program size` from MEM, then the tour); `units.bat --expect UNITS-OK` runs
-  tests/unit/dosunit.c (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  tool through CLAW.EXE with the clock back at 1980 (`Largest executable program size` from MEM, `CLAW.EXE exit code 0`
+  for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
+  (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
@@ -35,7 +36,13 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - CLAW.EXE (src/claw) is the launcher the user starts: it runs CLAWDOS.EXE with `-launched`, and when a `run` tool call
   makes CLAWDOS exit with code 200 it runs the commands itself (lib/shell.c) with CLAWDOS's memory free, then starts
-  `CLAWDOS -resume`, which reopens the conversation and carries the turn on. The files between them are in lib/relaunch.h.
+  `CLAWDOS -resume -launched`, which reopens the conversation and carries the turn on. The files between them are in
+  lib/relaunch.h; RESUME.TXT stays until the resume has connected, so `CLAW -resume` retries one that failed. Two
+  relaunch lessons: a program started after CLAWDOS has set the clock meets mTCP's DHCP lease check (DHCP stamped the
+  lease with the boot clock; lib/mtcpcfg.c moves the stamp with the clock), and a fresh process must not reuse the
+  local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's tick count).
+  mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far heap in this
+  build (DOSUNIT shows it after one malloc).
 - CLAWDOS.EXE is the whole harness: it speaks the Messages API itself (src/clawdos/chat.cpp drives the turn; lib/apireq.c
   writes the request from C:\CLAWDOS\PROMPT.TXT, TOOLS.JSN and the history file; lib/apistream.c turns the SSE stream into
   screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port

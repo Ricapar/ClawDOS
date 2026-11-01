@@ -52,11 +52,13 @@ class NetConn {
     int    farEndClosed(void);
 
     const char *errorText(void) { return err; }
+    uint16_t localPort(void) { return srcPort; }   /* our end of the last connect */
 
   private:
     TcpSocket *sock;
     uint8_t dead;
     uint8_t closedByPeer;
+    uint16_t srcPort;
     const char *err;
 };
 

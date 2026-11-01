@@ -6,6 +6,7 @@
 #include <dos.h>
 #include <direct.h>
 #include <io.h>
+#include <time.h>
 
 #include "chat.h"
 #include "apireq.h"
@@ -17,6 +18,7 @@
 #include "tools.h"
 #include "utf8.h"
 #include "convo.h"
+#include "mtcpcfg.h"
 
 #define SSE_MAX        16384u
 #define TOOL_INPUT_MAX 16384u
@@ -135,13 +137,13 @@ int8_t Chat::connect(void)
     if (http.open(prov->tunnel)) {
         sprintf(errBuf, "%.60s (%.48s)", http.errorText(), prov->tunnel);
         err = errBuf;
+        sprintf(line, "connect failed, local port %u", http.localPort());
+        ui->log(line);
         return -1;
     }
     connections++;
-    if (connections > 1) {
-        sprintf(line, "connection #%d", connections);
-        ui->log(line);
-    }
+    sprintf(line, "connection #%d, local port %u", connections, http.localPort());
+    ui->log(line);
     return 0;
 }
 
@@ -367,6 +369,7 @@ void Chat::setClock(const char *date)
     char line[90];
 
     unsigned long before, elapsed;
+    time_t was, now;
 
     clockSet = 1;
     if (http_parse_date(date, &y, &mo, &d, &h, &mi, &s))
@@ -387,11 +390,18 @@ void Chat::setClock(const char *date)
     dt.hsecond = 0;
     before = TICKS_NOW;
     elapsed = ticks_elapsed(before, reqStart);    /* this request is in flight: keep its timing honest */
+    was = time(NULL);
     _dos_setdate(&dd);
     _dos_settime(&dt);
+    now = time(NULL);
     reqStart = TICKS_NOW - elapsed;
     ui->note(line, 0);
     ui->log(line);
+    /* DHCP stamped its lease with the old clock: move the stamp along, or every
+       mTCP program started from now on (CLAWDOS -resume included) refuses to
+       run with "Your DHCP lease has expired". */
+    if (mtcpcfg_shift_timestamp(getenv("MTCPCFG"), (long)(now - was)))
+        ui->log("the DHCP lease stamp in the mTCP config was not moved with the clock");
 }
 
 void Chat::logRound(int round)

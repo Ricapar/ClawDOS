@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <process.h>
+#include <io.h>
 #include <dos.h>
 #include <i86.h>
 #include "shell.h"
@@ -53,7 +54,7 @@ static void findExe(const char *argv0)
 
 int main(int argc, char *argv[])
 {
-    int code;
+    int code, resuming = 0;
 
     (void)argc;
     findExe(argv[0]);
@@ -65,8 +66,14 @@ int main(int argc, char *argv[])
             printf("CLAW: cannot run %s\n", exe);
             return 1;
         }
-        if (code != RELAUNCH_EXIT)
+        if (code != RELAUNCH_EXIT) {
+            /* CLAWDOS deletes the state once it has resumed: still there, the
+               conversation waits (the network or the tunnel was down). */
+            if (code != 0 && resuming && access(RELAUNCH_STATE, 0) == 0)
+                printf("CLAW: the conversation was not resumed (CLAWDOS left with code %d).\n"
+                       "      Fix what it said, then CLAW -resume carries it on.\n", code);
             return code;
+        }
         {
             ToolCtx t;
             int hold = 5, status;
@@ -80,6 +87,7 @@ int main(int argc, char *argv[])
             if (relaunch_write_out(status, ticks_elapsed(TICKS_NOW, start), &t))
                 printf("CLAW: cannot write %s\n", RELAUNCH_OUT);
         }
-        strcpy(args, "-resume");
+        strcpy(args, "-resume -launched");
+        resuming = 1;
     }
 }

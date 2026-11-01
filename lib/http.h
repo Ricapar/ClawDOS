@@ -43,6 +43,7 @@ class Http {
 
     void   service(void) { Net::service(); }
     const char *errorText(void) { return conn.errorText(); }
+    uint16_t localPort(void) { return conn.localPort(); }
 
     /* Called every couple of ticks while waiting for the network and after
        every piece sent, so the caller can animate a spinner and read keys. */

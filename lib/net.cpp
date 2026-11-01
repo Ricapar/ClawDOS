@@ -15,6 +15,7 @@
 #include "tcpsockm.h"
 
 #include "net.h"
+#include "ticks.h"
 
 /* How long a send may take. WiFi stalls on the real PC last tens of seconds
    and then recover; giving up sooner drops a link that would have carried on. */
@@ -72,7 +73,7 @@ int8_t Net::configValue(const char *key, char *val, uint16_t len)
     return rc;
 }
 
-NetConn::NetConn() : sock(NULL), dead(0), closedByPeer(0), err("") { }
+NetConn::NetConn() : sock(NULL), dead(0), closedByPeer(0), srcPort(0), err("") { }
 
 int8_t NetConn::connect(const char *hostSpec, uint16_t port)
 {
@@ -113,8 +114,12 @@ int8_t NetConn::connect(const char *hostSpec, uint16_t port)
         return -1;
     }
     sock->setRecvBuffer(4096);
-    uint16_t localPort = 2048 + (uint16_t)(TIMER_GET_CURRENT() % 20000);
-    if (sock->connect(localPort, addr, port, 10000)) {
+    /* Our port comes from the time of day, not from mTCP's tick counter: that
+       starts at 0 in every process, so a relaunched CLAWDOS would reuse the
+       port its predecessor had just closed, and the far end ignores a SYN on a
+       connection it still remembers (the resume then failed to connect). */
+    srcPort = 2048 + (uint16_t)(TICKS_NOW % 20000);
+    if (sock->connect(srcPort, addr, port, 10000)) {
         err = "Can't connect (is the tunnel running?)";
         TcpSocketMgr::freeSocket(sock);
         sock = NULL;

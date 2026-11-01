@@ -24,6 +24,7 @@
 #include "apistream.h"
 #include "convo.h"
 #include "dosfs.h"
+#include "mtcpcfg.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -925,6 +926,42 @@ static void testHistoryCommit(void)
     remove("C:\\HISTTEST.JSN");
 }
 
+/* --- mtcp config --------------------------------------------------------------- */
+
+static void readBack(const char *path, char *out, unsigned max)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned n = 0;
+
+    if (f) {
+        n = fread(out, 1, max - 1, f);
+        fclose(f);
+    }
+    out[n] = 0;
+}
+
+static void testMtcpCfg(void)
+{
+    static char got[400];
+
+    writeFile("C:\\MTCPTEST.CFG",
+              "DHCPVER DHCP Client version Oct 10 2026\r\n"
+              "TIMESTAMP ( 315532958 ) Tue Jan  1 00:02:38 1980\r\n"
+              "packetint 0x60\r\nLEASE_TIME 86400\r\n");
+    CHECK("mtcpcfg shift", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 1477970256L) == 0);
+    readBack("C:\\MTCPTEST.CFG", got, sizeof got);
+    CHECK("mtcpcfg shift: timestamp moved", strstr(got, "\r\nTIMESTAMP ( 1793503214 ) ") != NULL);
+    CHECK("mtcpcfg shift: rest kept", strstr(got, "DHCPVER DHCP Client version Oct 10 2026\r\n") == got
+          && strstr(got, "\r\npacketint 0x60\r\nLEASE_TIME 86400\r\n") != NULL);
+    writeFile("C:\\MTCPTEST.CFG", "packetint 0x60\r\n");
+    CHECK("mtcpcfg shift: no timestamp", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 5) == -1);
+    readBack("C:\\MTCPTEST.CFG", got, sizeof got);
+    CHECK_STR("mtcpcfg shift: untouched", got, "packetint 0x60\r\n");
+    remove("C:\\MTCPTEST.CFG");
+    CHECK("mtcpcfg shift: no file", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 5) == -1);
+    CHECK("mtcpcfg shift: no path", mtcpcfg_shift_timestamp(NULL, 5) == -1);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -948,6 +985,7 @@ int main(void)
     testLongDeltas();
     testConvo();
     testHistoryCommit();
+    testMtcpCfg();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

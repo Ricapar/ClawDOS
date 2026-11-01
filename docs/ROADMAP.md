@@ -159,8 +159,19 @@ against 220 KB in-process; CLAW's block is 50 KB; CLAWDOS is away 1.7 s for a
 1.0 s program. Every `run` goes through the launcher when started by CLAW;
 plain `CLAWDOS` still runs programs in-process. Not done: the input history
 (Up/Down) is lost across the relaunch, the launcher could be smaller (printf,
-the argument-store code it never calls), timing on the 8088 and the real PC,
-and the policy question below.
+the argument-store code it never calls), timing on the real PC, and the policy
+question below.
+
+First live runs on the 86Box 8088 (2026-10-31): a 35 s `dir /s | find` kept
+CLAWDOS away 46 s, so a relaunch costs about 11 s there (the 133 KB EXE reloads,
+reconnects and reopens the history); `TCC -c VOYAGER.C` reported "Available
+memory 215298" and TLINK ran, where the in-process run had no room. Two faults
+came out of it, both fixed: the resumed CLAWDOS failed mTCP's DHCP lease check
+once the clock had been set from the API (DHCP had stamped the lease with the
+1980 boot clock; CLAWDOS now moves the stamp in MTCP.CFG along with the clock,
+lib/mtcpcfg.h), and it could draw the local TCP port its predecessor had just
+closed, because mTCP's tick counter starts at 0 in every process (the port now
+comes from the BIOS time of day). `CLAW -resume` retries a resume that failed.
 
 Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths
 are already tested. The open questions either way:

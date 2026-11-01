@@ -166,8 +166,10 @@ launcher that gets around this: start `CLAW` instead of `CLAWDOS`, with the
 same arguments, and every `run` makes CLAWDOS save its state and exit, the
 launcher run the commands with about 450K free, and CLAWDOS start again on the
 same conversation with the program's output as the tool result. It costs a
-reload and a reconnect per `run` (under a second in DOSBox-X; a few seconds on
-the 8088) and the chat's Up/Down input history. The files behind it are in
+reload and a reconnect per `run` (under a second in DOSBox-X; about 11 s on
+the 8088) and the chat's Up/Down input history. If CLAWDOS cannot come back
+(the tunnel or the network is down), fix that and type `CLAW -resume`: the
+conversation carries on from the program's output. The files behind it are in
 `lib/relaunch.h`; `image/tests/relaunch.bat` exercises it.
 
 With the mock API, `!tool NAME key=value ...` calls any tool (e.g.
