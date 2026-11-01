@@ -22,7 +22,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   serial or mock log. The Makefile's `boottests` target lists them all: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` the clock
   from the Date header (`Clock set from the API`); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
-  boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `units.bat --expect UNITS-OK` runs
+  boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `relaunch.bat --timeout 150` the run
+  tool through CLAW.EXE (`Largest executable program size` from MEM, then the tour); `units.bat --expect UNITS-OK` runs
   tests/unit/dosunit.c (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
@@ -32,6 +33,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
+- CLAW.EXE (src/claw) is the launcher the user starts: it runs CLAWDOS.EXE with `-launched`, and when a `run` tool call
+  makes CLAWDOS exit with code 200 it runs the commands itself (lib/shell.c) with CLAWDOS's memory free, then starts
+  `CLAWDOS -resume`, which reopens the conversation and carries the turn on. The files between them are in lib/relaunch.h.
 - CLAWDOS.EXE is the whole harness: it speaks the Messages API itself (src/clawdos/chat.cpp drives the turn; lib/apireq.c
   writes the request from C:\CLAWDOS\PROMPT.TXT, TOOLS.JSN and the history file; lib/apistream.c turns the SSE stream into
   screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port

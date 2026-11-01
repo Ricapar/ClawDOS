@@ -145,6 +145,23 @@ screen as it was, and the link restored.
    still dies while the receiver is gone. Needs EMS (none in 86Box's IBM PC 5160
    unless an EMS board is emulated); a disk swap file would be the fallback.
 
+**Status (branch `relaunch`, a spike of approach 1).** CLAW.EXE (src/claw, a
+small-model C program linking lib/shell.c) starts CLAWDOS with `-launched`;
+the run tool then writes the commands to C:\CLAWDOS\RUN.TXT and CLAWDOS saves
+its state (RESUME.TXT: chat file, pending tool_use id, round, convo flags,
+switches; SCREEN.SAV: the 16 KB of video memory plus the scroll and console
+state) and exits with code 200. The launcher runs the commands exactly as the
+in-process tool would, writes RUN.OUT and starts `CLAWDOS -resume`, which
+reopens the history file, restores the screen, shows the result under the Run
+header and continues the rounds (lib/relaunch.h, Chat::resume/continueTurn).
+Measured in DOSBox-X (`image/tests/relaunch.bat`): a program gets 449 KB,
+against 220 KB in-process; CLAW's block is 50 KB; CLAWDOS is away 1.7 s for a
+1.0 s program. Every `run` goes through the launcher when started by CLAW;
+plain `CLAWDOS` still runs programs in-process. Not done: the input history
+(Up/Down) is lost across the relaunch, the launcher could be smaller (printf,
+the argument-store code it never calls), timing on the 8088 and the real PC,
+and the policy question below.
+
 Leaning toward 1: simpler, no EMS dependency, and CLAWDOS's exit/start paths
 are already tested. The open questions either way:
 

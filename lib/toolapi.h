@@ -10,7 +10,9 @@
 extern "C" {
 #endif
 
-enum { TS_OK, TS_ERROR, TS_DENIED, TS_STOPPED };
+/* TS_RELAUNCH: a run handed to the launcher (relaunch.h); the result comes
+   after CLAWDOS restarts. */
+enum { TS_OK, TS_ERROR, TS_DENIED, TS_STOPPED, TS_RELAUNCH };
 
 #define TOOL_OUT_MAX  4096
 #define TOOL_ARGS_MAX 16384u

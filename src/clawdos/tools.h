@@ -8,6 +8,11 @@
 void tools_init(int safe, int unattended);
 int  tools_safe(void);
 void tools_toggle_safe(void);
+/* Started by CLAW.EXE (-launched): run hands its commands to the launcher and
+   returns TS_RELAUNCH instead of running them here (see relaunch.h). */
+void tools_set_launched(int on);
+/* After the relaunch: the note under the Run header, as the call would have shown. */
+void tools_show_result(int status, const ToolCtx *t);
 
 /* Run one tool call: `input` is the tool_use input object (UTF-8 JSON, len
    bytes). Shows the header, asks in safe mode, runs the executor. `t` holds the

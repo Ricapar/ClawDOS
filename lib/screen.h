@@ -69,6 +69,17 @@ void scr_cursor_visible(int on);
 void scr_suspend(unsigned short __far *save);
 void scr_resume(const unsigned short __far *save);
 
+/* The scrolling state behind a saved screen, so that a fresh process (CLAWDOS
+   restarted around a program run, see relaunch.h) can scr_resume it: take it
+   with the save, set it back just before scr_resume. */
+typedef struct ScrState {
+    unsigned top;
+    int history;
+    unsigned cur_pos;
+} ScrState;
+void scr_state_get(ScrState *s);
+void scr_state_set(const ScrState *s);
+
 #ifdef __cplusplus
 }
 #endif

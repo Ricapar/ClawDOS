@@ -64,6 +64,29 @@ void con_init(void)
     place_cursor();
 }
 
+void con_state_get(ConState *s)
+{
+    s->row = row;
+    s->col = col;
+    s->lm = lm;
+    s->rm = rm;
+    s->soft_wrapped = soft_wrapped;
+    s->used = used;
+    memcpy(s->line, line, sizeof line);
+}
+
+void con_state_set(const ConState *s)
+{
+    row = s->row;
+    col = s->col;
+    lm = s->lm;
+    rm = s->rm;
+    soft_wrapped = s->soft_wrapped;
+    used = s->used;
+    memcpy(line, s->line, sizeof line);
+    mark_row = -1;
+}
+
 void con_attr(unsigned char a) { attr = a; }
 int  con_row(void) { return row; }
 int  con_col(void) { return col; }

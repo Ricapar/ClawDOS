@@ -36,9 +36,22 @@ class Chat {
     int8_t newConversation(void);          /* a new CHATS file; memories re-read */
     /* Send the user's text and run the whole turn, tool rounds included.
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
-       -1 failed (a note has been shown). */
+       -1 failed (a note has been shown), 2 a run waits for the launcher
+       (relaunch.h): pendingRound()/pendingToolId() and state() are what a
+       relaunched CLAWDOS needs to continueTurn(). */
     int8_t turn(const char *cp437Text);
     int    answered(void) { return convo.assistantInTurn > 0; }
+
+    /* Like init, but back into an existing conversation after a relaunch: the
+       history file, the convo state and the provider/model in use. */
+    int8_t resume(Cfg *cfg, const char *providerId, const char *model, const char *hostOverride,
+                  ChatUi *ui, const char *chatPath, const Convo *state);
+    int    pendingRound(void) { return pendRound; }
+    const char *pendingToolId(void) { return pendTool; }
+    const Convo *state(void) { return &convo; }
+    /* Carry the turn on with the launcher's result for the pending call: the
+       tool_result message, then the remaining rounds. Returns as turn(). */
+    int8_t continueTurn(int round, const char *toolId, int status, ToolCtx *t);
 
     int8_t switchProvider(const char *id, const char *model);   /* /model */
     const char *describe(void);            /* "anthropic: claude-opus-5-5" */
@@ -72,7 +85,12 @@ class Chat {
     int clockSet;
     int streamRc;
     unsigned long reqStart, firstText;
+    int pendRound;                         /* the call the launcher is running (turn() returned 2) */
+    char pendTool[64];
 
+    int8_t setup(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
+    int8_t rounds(int round);              /* the request/tool loop from this round on */
+    int8_t finishTool(int round, const char *toolId, int status, ToolCtx *t);   /* -2: next round */
     int8_t connect(void);
     int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, 2 ask again, -1 failed */
     int8_t stream(void);

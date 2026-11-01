@@ -23,6 +23,7 @@
 #include "sysinfo.h"
 #include "sound.h"
 #include "shell.h"
+#include "relaunch.h"
 #include "screen.h"
 #include "console.h"
 #include "tools.h"
@@ -183,13 +184,24 @@ static void restoreScreen(unsigned short __far *save)
     ui_redraw();
 }
 
-/* DOS commands on a plain DOS screen; the chat comes back afterwards. */
+static int launched;                  /* started by CLAW.EXE: runs go to it */
+
+void tools_set_launched(int on) { launched = on; }
+
+/* DOS commands on a plain DOS screen; the chat comes back afterwards. Under
+   the launcher the commands are written out for it and CLAWDOS leaves, so the
+   program gets the memory CLAWDOS held (relaunch.h). */
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
     unsigned short __far *save;
     int status;
 
+    if (launched) {
+        if (relaunch_write_run(cmd, unattended ? 1 : 5))
+            return tool_fail(t, "cannot write " RELAUNCH_RUN);
+        return TS_RELAUNCH;
+    }
     if ((save = saveScreen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
     status = shell_run(t, cmd, unattended ? 1 : 5);
@@ -348,6 +360,8 @@ static int execute(const char *name, int overflow, ToolCtx *t)
         }
     }
 
+    if (status == TS_RELAUNCH)
+        return status;                /* tools_show_result shows the note after the relaunch */
     if (status == TS_DENIED)
         ui_tool_note("Denied by user", 1);
     else if (status == TS_STOPPED)
@@ -356,6 +370,16 @@ static int execute(const char *name, int overflow, ToolCtx *t)
         ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
     return status;
+}
+
+void tools_show_result(int status, const ToolCtx *t)
+{
+    if (status == TS_STOPPED)
+        ui_tool_note("Interrupted by user", 1);
+    else
+        ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
+                     status != TS_OK);
+    ui_tool_done();
 }
 
 /* One member of the tool_use input: strings decoded, numbers as written,

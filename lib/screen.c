@@ -433,6 +433,21 @@ void scr_suspend(unsigned short __far *save)
     int86(0x10, &r, &r);
 }
 
+void scr_state_get(ScrState *s)
+{
+    s->top = top;
+    s->history = history;
+    s->cur_pos = cur_pos;
+}
+
+void scr_state_set(const ScrState *s)
+{
+    top = s->top;
+    history = s->history;
+    cur_pos = s->cur_pos;
+    view = 0;
+}
+
 void scr_resume(const unsigned short __far *save)
 {
     union REGS r;

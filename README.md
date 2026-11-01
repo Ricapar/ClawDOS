@@ -100,8 +100,9 @@ sends and expects is in [docs/API.md](docs/API.md).
 4. **Boot an emulated 8088 PC** in another: `python scripts/run86box.py` (8088,
    640K, CGA, with an NE1000 card and NAT networking). It boots, brings up the
    network and shows the `C:\>` prompt.
-5. **Type `CLAWDOS`**. In the emulator the tunnel is the host machine,
-   `10.0.2.2:8443`, which the image is built to use.
+5. **Type `CLAW`** (or `CLAWDOS`; see [Memory for programs](#memory-for-programs)).
+   In the emulator the tunnel is the host machine, `10.0.2.2:8443`, which the
+   image is built to use.
 
 Prefer DOSBox-X? `python scripts/rundosbox.py` boots the same image with
 networking. It is faster but less exact (it emulates an 80186).
@@ -127,7 +128,7 @@ networking. It is faster but less exact (it emulates an 80186).
    make sure NE2000 is enabled (Other). The card's WiFi settings are its own;
    see the PicoMEM documentation.
 5. **Boot the DOS PC.** Networking comes up automatically (type `NETUP` to retry),
-   then type `CLAWDOS`.
+   then type `CLAW`.
 
 ### Using it
 
@@ -154,7 +155,20 @@ that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
 playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
-or be stopped with Ctrl-C. They get about 290K of memory: `run` starts a plain program directly, and only loads a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
+or be stopped with Ctrl-C. `run` starts a plain program directly, and only loads
+a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
+
+### Memory for programs
+
+CLAWDOS.EXE holds about 310K while it runs (mTCP, the API buffers, the code),
+which leaves a program started by `run` about 190K. **`CLAW.EXE`** is a 50K
+launcher that gets around this: start `CLAW` instead of `CLAWDOS`, with the
+same arguments, and every `run` makes CLAWDOS save its state and exit, the
+launcher run the commands with about 450K free, and CLAWDOS start again on the
+same conversation with the program's output as the tool result. It costs a
+reload and a reconnect per `run` (under a second in DOSBox-X; a few seconds on
+the 8088) and the chat's Up/Down input history. The files behind it are in
+`lib/relaunch.h`; `image/tests/relaunch.bat` exercises it.
 
 With the mock API, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and

@@ -60,6 +60,7 @@ boottests: build ## every DOSBox-X boot test
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size"
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)

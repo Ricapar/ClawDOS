@@ -12,6 +12,15 @@ extern "C" {
 #endif
 
 void con_init(void);                 /* call after scr_init(); clears screen */
+
+/* The writing position, for a fresh process taking over a saved screen (see
+   ScrState in screen.h): get it before scr_suspend, set it after con_init. */
+typedef struct ConState {
+    int row, col, lm, rm, soft_wrapped, used;
+    unsigned short line[80];
+} ConState;
+void con_state_get(ConState *s);
+void con_state_set(const ConState *s);
 void con_attr(unsigned char attr);   /* attribute for following text */
 void con_putc(unsigned char c);      /* '\n' = new line */
 void con_write(const char *s);

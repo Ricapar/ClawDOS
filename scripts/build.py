@@ -48,10 +48,13 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
     'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
+    # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
+    'claw.exe': {'sources': ['src/claw/claw.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
+                             'lib/relaunch.c'], 'model': 's'},
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.cpp', 'src/clawdos/chat.cpp', 'src/clawdos/tools.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
-                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c',
+                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/net.cpp', 'lib/http.cpp'],

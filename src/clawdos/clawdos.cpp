@@ -21,6 +21,9 @@
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
 
 #include "types.h"
 #include "inlines.h"
@@ -32,6 +35,7 @@
 #include "tools.h"
 #include "toolapi.h"
 #include "ticks.h"
+#include "relaunch.h"
 #include "ui.h"
 
 #define VERSION   "0.3"
@@ -116,6 +120,16 @@ static int quitting;
 static int exitCode;
 static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
+static int quickFlag, noscrollFlag;   /* -q and -noscroll as given, for the relaunch state */
+static int resumeMode;                /* -resume: back from a run under CLAW.EXE */
+
+/* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
+struct Resume {
+    char chat[40], tool[64], provider[16], model[48], host[80], theme[16];
+    int round, merge, mergeAtStart, assistant, safe, quick, quit, noscroll;
+    unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
+};
+static Resume resumeState;
 static const char *toolVerb;          /* spinner verb while a tool runs */
 static int stopRequested;             /* Esc during a turn */
 static unsigned long lastSpin;
@@ -561,6 +575,7 @@ static void newChat(void)
 static void submit(void);
 static void handleKey(unsigned key);
 static void modelCommand(const char *arg);
+static void relaunchExit(void);
 
 static void finished(void)
 {
@@ -623,6 +638,8 @@ static void submit(void)
         setState(WAITING);
         stopRequested = 0;
         rc = chat.turn(text);
+        if (rc == 2)
+            relaunchExit();           /* does not return */
         if (rc == 1) {
             note("Interrupted by user", A_ERR);
             if (!chat.answered())
@@ -964,6 +981,157 @@ static void fatal(const char *text)
     exit(1);
 }
 
+/* --- relaunch around a run (relaunch.h) --------------------------------------- */
+
+static int writeState(void)
+{
+    FILE *f = fopen(RELAUNCH_STATE, "w");
+    const Convo *c = chat.state();
+
+    if (!f)
+        return -1;
+    fprintf(f, "chat %s\ntool %s\nround %d\nmerge %d\nmergeat %d\nassistant %d\n",
+            chat.chatPath(), chat.pendingToolId(), chat.pendingRound(),
+            c->mergeNext, c->mergeAtStart, c->assistantInTurn);
+    fprintf(f, "safe %d\nquick %d\nquit %d\nnoscroll %d\nhost %s\nprovider %s\nmodel %s\ntheme %s\nticks %lu\n",
+            tools_safe(), quickFlag, quitAfterReply, noscrollFlag, host,
+            chat.provider()->id, chat.provider()->model, theme->name, TICKS_NOW);
+    return fclose(f) ? -1 : 0;
+}
+
+#define STATE_STR(key, field) if (!strcmp(line, key)) { strncpy(r->field, v, sizeof r->field - 1); continue; }
+#define STATE_INT(key, field) if (!strcmp(line, key)) { r->field = atoi(v); continue; }
+
+static int readState(Resume *r)
+{
+    FILE *f = fopen(RELAUNCH_STATE, "r");
+    char line[200];
+
+    if (!f)
+        return -1;
+    memset(r, 0, sizeof *r);
+    while (fgets(line, sizeof line, f)) {
+        char *v = strchr(line, ' ');
+        if (!v)
+            continue;
+        *v++ = 0;
+        v[strcspn(v, "\r\n")] = 0;
+        STATE_STR("chat", chat) STATE_STR("tool", tool) STATE_STR("provider", provider)
+        STATE_STR("model", model) STATE_STR("host", host) STATE_STR("theme", theme)
+        STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
+        STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
+        STATE_INT("quit", quit) STATE_INT("noscroll", noscroll)
+        if (!strcmp(line, "ticks"))
+            r->ticks = strtoul(v, NULL, 10);
+    }
+    fclose(f);
+    remove(RELAUNCH_STATE);           /* one resume per state */
+    return r->chat[0] && r->tool[0] ? 0 : -1;
+}
+
+/* The chat screen and the state behind it, to a file: the in-process run keeps
+   them in memory, which a relaunch loses. scr_suspend also leaves a plain DOS
+   screen for the program. */
+static int saveScreenFile(void)
+{
+    unsigned short __far *buf = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
+    ScrState ss;
+    ConState cs;
+    int fd, rc = -1;
+
+    if (!buf)
+        return -1;
+    scr_state_get(&ss);
+    con_state_get(&cs);
+    scr_suspend(buf);
+    fd = open(RELAUNCH_SCREEN, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, S_IREAD | S_IWRITE);
+    if (fd >= 0) {
+        rc = 0;
+        if (write(fd, buf, SCR_SAVE_BYTES) != (int)SCR_SAVE_BYTES
+            || write(fd, &ss, sizeof ss) != sizeof ss || write(fd, &cs, sizeof cs) != sizeof cs)
+            rc = -1;
+        close(fd);
+    }
+    free(buf);
+    return rc;
+}
+
+static int restoreScreenFile(void)
+{
+    unsigned short __far *buf = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
+    ScrState ss;
+    ConState cs;
+    int fd, rc = -1;
+
+    if (!buf)
+        return -1;
+    fd = open(RELAUNCH_SCREEN, O_RDONLY | O_BINARY);
+    if (fd >= 0) {
+        if (read(fd, buf, SCR_SAVE_BYTES) == (int)SCR_SAVE_BYTES
+            && read(fd, &ss, sizeof ss) == sizeof ss && read(fd, &cs, sizeof cs) == sizeof cs) {
+            scr_state_set(&ss);
+            con_state_set(&cs);
+            scr_resume(buf);
+            rc = 0;
+        }
+        close(fd);
+        remove(RELAUNCH_SCREEN);
+    }
+    free(buf);
+    return rc;
+}
+
+/* A run goes to the launcher: save what a relaunched CLAWDOS needs, give the
+   memory back and leave with the exit code CLAW.EXE watches for. */
+static void relaunchExit(void)
+{
+    if (writeState())
+        fatal("Cannot write " RELAUNCH_STATE);
+    saveScreenFile();
+    chat.close();
+    Net::stopStack();
+    exit(RELAUNCH_EXIT);
+}
+
+static void secsText(char *out, unsigned long ticks)
+{
+    unsigned long t = ticks * 100 / 182;    /* tenths of a second */
+    sprintf(out, "%lu.%lu", t / 10, t % 10);
+}
+
+/* Back from a relaunch: the launcher's result under the Run header, then the
+   rest of the turn. */
+static void resumeTurn(void)
+{
+    ToolCtx t;
+    int status = TS_ERROR;
+    unsigned long progTicks = 0;
+    char line[90], a[16], b[16];
+    int8_t rc;
+
+    tout_reset(&t);
+    if (relaunch_read_out(&t, &status, &progTicks)) {
+        tout_puts(&t, "the launcher left no result");
+        strcpy(t.summary, "no result from the launcher");
+        status = TS_ERROR;
+    }
+    setState(WAITING);
+    tools_show_result(status, &t);
+    secsText(a, progTicks);
+    secsText(b, ticks_elapsed(TICKS_NOW, resumeState.ticks));
+    sprintf(line, "relaunch: program %s s, CLAWDOS away %s s", a, b);
+    uiLog(line);
+    stopRequested = 0;
+    rc = chat.continueTurn(resumeState.round, resumeState.tool, status, &t);
+    if (rc == 2)
+        relaunchExit();
+    if (rc == 1)
+        note("Interrupted by user", A_ERR);
+    else if (rc < 0 && quitAfterReply)
+        exitCode = 1;
+    finished();
+}
+
 int main(int argc, char *argv[])
 {
     char note_[120];
@@ -986,6 +1154,10 @@ int main(int argc, char *argv[])
             prefill = argv[++i];
         } else if ((!stricmp(argv[i], "-p") || !stricmp(argv[i], "/p")) && i + 1 < argc) {
             providerArg = argv[++i];
+        } else if (!stricmp(argv[i], "-launched") || !stricmp(argv[i], "/launched")) {
+            tools_set_launched(1);    /* CLAW.EXE is our parent: runs go to it */
+        } else if (!stricmp(argv[i], "-resume") || !stricmp(argv[i], "/resume")) {
+            resumeMode = 1;
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
             printf("CLAWDOS " VERSION " - chat with an AI from DOS\n\n"
                    "Usage: CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q]\n"
@@ -1004,8 +1176,24 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (resumeMode) {                 /* the flags come from the CLAWDOS that left */
+        if (readState(&resumeState)) {
+            fprintf(stderr, "CLAWDOS -resume: nothing to resume (%s).\n", RELAUNCH_STATE);
+            return 1;
+        }
+        unsafe = !resumeState.safe;
+        quick = resumeState.quick;
+        noscroll = resumeState.noscroll;
+        quitAfterReply = resumeState.quit;
+        providerArg = resumeState.provider;
+        strcpy(host, resumeState.host);
+        tools_set_launched(1);
+    } else {
+        quitAfterReply = quick && firstMessage != NULL;
+    }
     tools_init(!unsafe, quick);
-    quitAfterReply = quick && firstMessage != NULL;
+    quickFlag = quick;
+    noscrollFlag = noscroll;
     cfg = (Cfg *)malloc(sizeof(Cfg));
     if (cfg == NULL) {
         fprintf(stderr, "Out of memory.\n");
@@ -1021,7 +1209,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s line %d: unknown setting or too many providers.\n", CFG_PATH, bad);
         return 1;
     }
-    if (cfg->theme[0] && (i = findTheme(cfg->theme)) >= 0)
+    if (resumeMode && resumeState.theme[0] && (i = findTheme(resumeState.theme)) >= 0)
+        theme = &themes[i];
+    else if (cfg->theme[0] && (i = findTheme(cfg->theme)) >= 0)
         theme = &themes[i];
     if (Net::startStack())
         return 1;
@@ -1033,20 +1223,34 @@ int main(int argc, char *argv[])
     con_track_cursor(0);            /* the cursor lives in the input box */
     con_init();
     scr_footer(footerRows(), A_TEXT);
+    if (resumeMode)
+        restoreScreenFile();          /* the chat as it was when the run began */
     sprintf(note_, "Connecting to %.60s ...", host[0] ? host : "the tunnel");
     statusNote = note_;
     drawFooter();
 
-    if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi))
-        fatal(chat.errorText());
-
-    welcome();
-    statusNote = NULL;
-    drawFooter();
-    if (firstMessage)
-        setInput(firstMessage), submit();
-    if (prefill)
-        setInput(prefill);
+    if (resumeMode) {
+        Convo c;
+        c.mergeNext = resumeState.merge;
+        c.mergeAtStart = resumeState.mergeAtStart;
+        c.assistantInTurn = resumeState.assistant;
+        if (chat.resume(cfg, providerArg, resumeState.model, host[0] ? host : NULL, &chatUi,
+                        resumeState.chat, &c))
+            fatal(chat.errorText());
+        statusNote = NULL;
+        drawFooter();
+        resumeTurn();
+    } else {
+        if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi))
+            fatal(chat.errorText());
+        welcome();
+        statusNote = NULL;
+        drawFooter();
+        if (firstMessage)
+            setInput(firstMessage), submit();
+        if (prefill)
+            setInput(prefill);
+    }
 
     while (!quitting) {
         if (Net::breakPressed)

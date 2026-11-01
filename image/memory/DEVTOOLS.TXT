@@ -3,7 +3,9 @@ All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
 source with the write tool, then build and run it with the run tool. Working
 examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
 
-MEMORY: programs you run get about 290 KB. Give run a program and its
+MEMORY: programs you run get about 450 KB when ClawDOS was started as CLAW
+(it steps out of memory while they run; sysinfo shows what you would get
+without that), about 190 KB under plain CLAWDOS. Give run a program and its
 arguments (TCC -c X.C): that starts it directly. A .BAT file, redirection
 (> <) or a built-in (DIR, TYPE, CD) loads a second COMMAND.COM and costs
 70 KB, so don't wrap compilers in a .BAT. There is no & or &&: put the steps

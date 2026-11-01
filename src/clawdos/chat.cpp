@@ -37,7 +37,8 @@ Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), to
     convo_init(&convo);
 }
 
-int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
+/* What init and resume share: the provider, the buffers. */
+int8_t Chat::setup(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
 {
     const char *missing;
 
@@ -70,6 +71,13 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
     }
     memories[0] = 0;
     http.idle = ui->idle;
+    return 0;
+}
+
+int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
+{
+    if (setup(c, providerId, hostOverride, u))
+        return -1;
     if (newConversation())
         return -1;
     if (connect())
@@ -81,6 +89,27 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         warn(errBuf);
     }
     return 0;
+}
+
+int8_t Chat::resume(Cfg *c, const char *providerId, const char *model, const char *hostOverride,
+                    ChatUi *u, const char *chatPath, const Convo *state)
+{
+    if (setup(c, providerId, hostOverride, u))
+        return -1;
+    if (model && model[0]) {
+        strncpy(prov->model, model, sizeof prov->model - 1);
+        prov->model[sizeof prov->model - 1] = 0;
+    }
+    strncpy(path, chatPath, sizeof path - 1);
+    path[sizeof path - 1] = 0;
+    if (hist_open(path)) {            /* appends: the file is as the run left it */
+        sprintf(errBuf, "Cannot reopen %s", path);
+        err = errBuf;
+        return -1;
+    }
+    convo = *state;
+    loadMemories();
+    return connect();                 /* the clock was set before the relaunch */
 }
 
 void Chat::close(void)
@@ -516,8 +545,6 @@ int8_t Chat::request(int noTools)
 
 int8_t Chat::turn(const char *text)
 {
-    int round;
-
     convo_turn_begin(&convo);
     reasked = 0;
     if (convo_user_text(&convo, text)) {
@@ -525,7 +552,33 @@ int8_t Chat::turn(const char *text)
         convo_rollback_turn(&convo);
         return -1;
     }
-    for (round = 0; ; round++) {
+    return rounds(0);
+}
+
+/* The tool_result for a finished call: 1 stopped, 0 the turn is over, -2 next round. */
+int8_t Chat::finishTool(int round, const char *toolId, int status, ToolCtx *t)
+{
+    convo_tool_result(&convo, toolId, tools_result_text(status, t), status != TS_OK,
+                      round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
+    if (status == TS_STOPPED)
+        return 1;
+    if (round >= MAX_ROUNDS)          /* the model kept calling tools after the cap */
+        return 0;
+    return -2;
+}
+
+int8_t Chat::continueTurn(int round, const char *toolId, int status, ToolCtx *t)
+{
+    int8_t rc;
+
+    reasked = 0;
+    rc = finishTool(round, toolId, status, t);
+    return rc == -2 ? rounds(round + 1) : rc;
+}
+
+int8_t Chat::rounds(int round)
+{
+    for (; ; round++) {
         ToolCtx t;
         int status;
         int8_t rc = request(round >= MAX_ROUNDS);
@@ -557,11 +610,13 @@ int8_t Chat::turn(const char *text)
         } else {
             status = ui->tool(as.toolName, as.toolInput, as.toolInputLen, &t);
         }
-        convo_tool_result(&convo, as.toolId, tools_result_text(status, &t), status != TS_OK,
-                          round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
-        if (status == TS_STOPPED)
-            return 1;
-        if (round >= MAX_ROUNDS)          /* the model kept calling tools after the cap */
-            return 0;
+        if (status == TS_RELAUNCH) {      /* the launcher runs it; a new CLAWDOS continues */
+            pendRound = round;
+            strcpy(pendTool, as.toolId);
+            return 2;
+        }
+        rc = finishTool(round, as.toolId, status, &t);
+        if (rc != -2)
+            return rc;
     }
 }
