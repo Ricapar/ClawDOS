@@ -57,8 +57,3 @@ DEBUGGING
   lDebug, a stronger FreeDOS DEBUG: the same commands (a, u, d, t, g, q),
   and it stops cleanly at the end of the script. Manual (large):
   C:\DEVEL\DOC\LDEBUG\LDEBUG.TXT. Plain DEBUG still works too.
-
-NOT AVAILABLE
-Pacific C hangs on this 8088. NASM 2, FASM, Open Watcom and DJGPP need a 386.
-Builds take seconds to a minute here, so keep programs small and fix all the
-errors you can see before rebuilding.

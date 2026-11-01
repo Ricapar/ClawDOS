@@ -8,6 +8,7 @@
 *.exe
 *.com
 *.img
+*.pyc
 # The user's own (commercial) disk images, used by the image build
 /external/
 __pycache__/
@@ -18,3 +19,4 @@ __pycache__/
 # Leftovers from the bridge days: its virtualenv and its local conversation logs
 /.venv/
 /bridge/
+.DS_Store
