@@ -180,6 +180,7 @@ They live in `C:\DEVEL` (licences in `C:\DEVEL\DOC`) and `C:\TC`, and
 Examples are in `C:\TESTS\DEV`. Turbo C is commercial: the build copies it from
 your own floppy images in `external/` (e.g. `Borland - Turbo C v2.0 - Disk 3 of
 6 - Command Line and Utilities.img`) and leaves it out if they aren't there.
+Ours came from <https://archive.org/details/borland-turbo-c-v2.0>.
 Pacific C was tried and hangs on an 8088. `docs/research/` has the survey of
 what else runs on a DOS PC and what a licensed copy would add.
 
