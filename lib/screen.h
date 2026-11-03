@@ -80,6 +80,21 @@ typedef struct ScrState {
 void scr_state_get(ScrState *s);
 void scr_state_set(const ScrState *s);
 
+/* The ticker: a spinner glyph and a seconds counter in one row that the timer
+   interrupt (INT 1Ch) keeps moving by itself, so they don't freeze while the
+   program is busy connecting, sending, or reading the disk. The caller draws
+   the row, then hands over: `glyphs` (8) cycle at glyphCol, one step every two
+   ticks; the seconds go at secsCol, counting on from `elapsed` ticks as of the
+   tick reading `at`; `tail` (the cells drawn after the digits) is redrawn when
+   the number grows a digit. The interrupt skips any tick while screen calls
+   are running or the screen is suspended. scr_ticker_off unhooks it (and so
+   does exit). */
+void scr_ticker(int row, int glyphCol, const unsigned char *glyphs, unsigned char glyphAttr,
+                int secsCol, unsigned char secsAttr, unsigned long elapsed, unsigned long at,
+                const unsigned short *tail, int tailLen);
+void scr_ticker_off(void);
+int  scr_ticker_on(void);
+
 #ifdef __cplusplus
 }
 #endif

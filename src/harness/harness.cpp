@@ -215,18 +215,25 @@ static void drawStatus(void)
     rowBlank(r);
     if (state != IDLE) {
         unsigned long now = TICKS_NOW;
-        unsigned secs = TICKS_TO_SECS(ticks_elapsed(now, busySince));
-        int col;
+        unsigned long elapsed = ticks_elapsed(now, busySince);
+        int col, digits, end;
 
         r.c[1] = spinGlyphs[(unsigned)(now >> 1) & 7] | (A_CLAWD << 8);
         col = rowText(r, 3, toolVerb ? toolVerb : verbs[verbIndex], A_ACCENT);
         col = rowText(r, col, "... ", A_ACCENT);
-        sprintf(buf, "(%us %c esc to interrupt%s)", secs, G_DOT,
-                queued ? " \xFA 1 message queued" : "");
-        rowText(r, col, buf, A_DIM);
-    } else if (statusNote) {
-        rowText(r, 1, statusNote, A_DIM);
+        digits = sprintf(buf, "(%u", TICKS_TO_SECS(elapsed));
+        sprintf(buf + digits, "s %c esc to interrupt%s)", G_DOT, queued ? " \xFA 1 message queued" : "");
+        end = rowText(r, col, buf, A_DIM);
+        scr_putn(footerTop(), 0, r.c, SCR_COLS);
+        /* From here the timer interrupt moves the spinner and the seconds,
+           even while we're busy with no time to call this. */
+        scr_ticker(footerTop(), 1, spinGlyphs, A_CLAWD, col + 1, A_DIM, elapsed, now,
+                   &r.c[col + digits], end - (col + digits));
+        return;
     }
+    scr_ticker_off();
+    if (statusNote)
+        rowText(r, 1, statusNote, A_DIM);
     scr_putn(footerTop(), 0, r.c, SCR_COLS);
 }
 
@@ -724,15 +731,23 @@ static void uiNote(const char *text, int error)
     note(text, error ? A_ERR : A_DIM);
 }
 
+/* The spinner and seconds move by themselves (scr_ticker); this only redraws
+   the status row if the ticker isn't running, e.g. after the screen was handed
+   to a program and back. */
+static void keepStatus(void)
+{
+    if (state != IDLE && !scr_ticker_on() && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
+        lastSpin = TICKS_NOW;
+        drawStatus();
+    }
+}
+
 /* Called while the loop waits on the network: keys and the spinner. */
 static void uiIdle(void)
 {
     while (biosIsKeyReady())
         handleKey(biosKeyRead());
-    if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
-        lastSpin = TICKS_NOW;
-        drawStatus();
-    }
+    keepStatus();
 }
 
 /* While a tool runs (tool_esc calls this): keep the connection alive and the
@@ -740,10 +755,7 @@ static void uiIdle(void)
 static void toolIdle(void)
 {
     Net::service();
-    if (state != IDLE && ticks_elapsed(TICKS_NOW, lastSpin) >= 2) {
-        lastSpin = TICKS_NOW;
-        drawStatus();
-    }
+    keepStatus();
 }
 
 static int uiEscPressed(void)
@@ -1093,6 +1105,7 @@ static void relaunchExit(void)
        at all (DOSUNIT: one malloc is enough). A normal exit resets the screen
        over it; here the program's screen would start with it. */
     freopen("NUL", "w", stderr);
+    scr_ticker_off();                 /* before mTCP puts back the INT 1Ch it hooked under ours */
     Net::stopStack();
     exit(RELAUNCH_EXIT);
 }

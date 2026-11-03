@@ -1,7 +1,9 @@
 /* ClawDOS screen: see screen.h. */
 
 #include <conio.h>
+#include <dos.h>
 #include <i86.h>
+#include <stdlib.h>
 #include <string.h>
 #include "screen.h"
 
@@ -27,6 +29,13 @@ static int foot;            /* rows pinned at the bottom */
    reading VRAM (slow, and snowy on CGA). */
 #define MIRROR_TOP   (SCR_ROWS - SCR_FOOT_MAX)
 static unsigned short mirror[SCR_FOOT_MAX][SCR_COLS];
+
+/* Set while a screen call is changing VRAM, `top` or the mirror, and while the
+   screen is handed to something else: the ticker's interrupt stays off them. */
+static volatile int busy;
+static volatile int suspended;
+#define BUSY_BEGIN() (busy++)
+#define BUSY_END()   (busy--)
 
 /* Fill n cells starting at cell offset `off` (wrapping) with `cell`. */
 static void vfill(unsigned off, unsigned cell, unsigned n)
@@ -223,6 +232,7 @@ void scr_init(void)
     hwscroll = (r.h.bl == 0x10);    /* plain CGA: 16 KB wrapping VRAM */
     snowcheck = hwscroll;
 
+    suspended = 0;
     top = 0;
     history = 0;
     view = 0;
@@ -235,6 +245,7 @@ void scr_done(void)
 {
     union REGS r;
 
+    scr_ticker_off();
     r.x.ax = 0x0003;
     int86(0x10, &r, &r);
 }
@@ -254,15 +265,19 @@ static void mirror_fill(int row, int col, unsigned cell, int n)
 void scr_putc(int row, int col, unsigned char ch, unsigned char attr)
 {
     unsigned cell = ch | (attr << 8);
+    BUSY_BEGIN();
     mirror_fill(row, col, cell, 1);
     vfill(cell_off(row, col), cell, 1);
+    BUSY_END();
 }
 
 void scr_putn(int row, int col, const unsigned short *cells, int n)
 {
+    BUSY_BEGIN();
     if (row >= MIRROR_TOP)
         memcpy(&mirror[row - MIRROR_TOP][col], cells, n * sizeof(cells[0]));
     vcopy(cell_off(row, col), cells, n);
+    BUSY_END();
 }
 
 void scr_puts(int row, int col, const char *s, unsigned char attr)
@@ -278,16 +293,20 @@ void scr_puts(int row, int col, const char *s, unsigned char attr)
 void scr_fill(int row, int col, int n, unsigned char ch, unsigned char attr)
 {
     unsigned cell = ch | (attr << 8);
+    BUSY_BEGIN();
     mirror_fill(row, col, cell, n);
     vfill(cell_off(row, col), cell, n);
+    BUSY_END();
 }
 
 void scr_clear(unsigned char attr)
 {
     int r;
+    BUSY_BEGIN();
     for (r = MIRROR_TOP; r < SCR_ROWS; r++)
         mirror_fill(r, 0, ' ' | (attr << 8), SCR_COLS);
     vfill(top, ' ' | (attr << 8), SCR_ROWS * SCR_COLS);
+    BUSY_END();
 }
 
 void scr_footer(int rows, unsigned char attr)
@@ -341,6 +360,7 @@ void scr_scroll(unsigned char attr)
     unsigned blank = ' ' | (attr << 8);
     int r, c;
 
+    BUSY_BEGIN();
     /* The mirror follows the scrolling rows; the footer's part stays put. */
     for (r = 0; r < bottom - 1 - MIRROR_TOP; r++)
         memcpy(mirror[r], mirror[r + 1], sizeof(mirror[0]));
@@ -382,6 +402,7 @@ void scr_scroll(unsigned char attr)
         }
         vfill((bottom - 1) * SCR_COLS, blank, SCR_COLS);
     }
+    BUSY_END();
 }
 
 int scr_view(int lines)
@@ -393,8 +414,10 @@ int scr_view(int lines)
     if (lines > history)
         lines = history;
     if (lines != view) {
+        BUSY_BEGIN();
         view = lines;
         set_start();
+        BUSY_END();
     }
     return view;
 }
@@ -428,6 +451,7 @@ void scr_suspend(unsigned short __far *save)
 {
     union REGS r;
 
+    suspended = 1;                  /* the ticker keeps off until scr_resume */
     _fmemcpy(save, MK_FP(VRAM_SEG, 0), SCR_SAVE_BYTES);
     r.x.ax = 0x0003;
     int86(0x10, &r, &r);
@@ -442,10 +466,12 @@ void scr_state_get(ScrState *s)
 
 void scr_state_set(const ScrState *s)
 {
+    BUSY_BEGIN();
     top = s->top;
     history = s->history;
     cur_pos = s->cur_pos;
     view = 0;
+    BUSY_END();
 }
 
 void scr_resume(const unsigned short __far *save)
@@ -463,4 +489,186 @@ void scr_resume(const unsigned short __far *save)
     } else {
         scr_cursor(cur_pos / SCR_COLS, cur_pos % SCR_COLS);
     }
+    suspended = 0;
 }
+
+/* --- the ticker (see screen.h) --------------------------------------------- */
+
+#define TK_TAIL_MAX  64
+
+static volatile int tk_on;          /* drawing; the hook can stay in while off */
+static volatile int tk_in;          /* the interrupt is running (no re-entry) */
+static int tk_row, tk_glyph_col, tk_secs_col;
+static unsigned char tk_glyph_attr, tk_secs_attr;
+static unsigned char tk_glyphs[8];
+static unsigned short tk_tail[TK_TAIL_MAX];
+static int tk_tail_len;
+static volatile unsigned tk_last;   /* low word of the BIOS tick count last seen */
+static volatile unsigned tk_secs;   /* seconds shown */
+static volatile unsigned tk_frac;   /* tenths of ticks towards the next second: 182 make one */
+static volatile int tk_digits;      /* digits of tk_secs on screen */
+static unsigned short tk_buf[6 + TK_TAIL_MAX];
+static void (__interrupt __far *tk_old)();
+static int tk_hooked, tk_atexit;
+
+/* Runs on whatever stack the timer interrupted. Like lib/shell.c's hook it
+   calls none of our functions (code built for SS == DGROUP on a foreign stack):
+   the VRAM writes are inlined, with the same retrace wait as vcopy. */
+static void __interrupt __far tk_isr(void)
+{
+    if (tk_on && !busy && !suspended && !tk_in) {
+        unsigned now = *(volatile unsigned __far *)MK_FP(0x40, 0x6C);
+        unsigned d = now - tk_last;
+        tk_in = 1;
+        if (d != 0) {
+            unsigned secs = tk_secs, frac = tk_frac, off, n = 1, col = tk_glyph_col;
+            unsigned short __far *src = (unsigned short __far *)tk_buf;
+            int sync = snowcheck, pass;
+
+            if (d > 1000)           /* the midnight reset: count it as one tick */
+                d = 1;
+            tk_last = now;
+            frac += d * 10;
+            while (frac >= 182) {
+                frac -= 182;
+                secs++;
+            }
+            tk_frac = frac;
+            tk_buf[0] = tk_glyphs[(now >> 1) & 7] | (tk_glyph_attr << 8);
+            for (pass = 0; pass < 2; pass++) {
+                if (pass == 1) {    /* then the seconds, if they moved on */
+                    unsigned v = secs;
+                    int k, nd = 0;
+                    char dig[5];
+                    if (secs == tk_secs)
+                        break;
+                    tk_secs = secs;
+                    do {
+                        dig[nd++] = (char)('0' + v % 10);
+                        v /= 10;
+                    } while (v && nd < 5);
+                    for (k = 0; k < nd; k++)
+                        tk_buf[k] = (unsigned char)dig[nd - 1 - k] | (tk_secs_attr << 8);
+                    n = nd;
+                    if (nd != tk_digits) {   /* one digit longer: move the rest along */
+                        for (k = 0; k < tk_tail_len && n + k < 6 + TK_TAIL_MAX && tk_secs_col + n + k < SCR_COLS; k++)
+                            tk_buf[n + k] = tk_tail[k];
+                        n += k;
+                        tk_digits = nd;
+                    }
+                    col = tk_secs_col;
+                }
+                if (tk_row >= MIRROR_TOP) {
+                    unsigned k;
+                    for (k = 0; k < n; k++)
+                        mirror[tk_row - MIRROR_TOP][col + k] = tk_buf[k];
+                }
+                off = WRAP(top + tk_row * SCR_COLS + col);
+                _asm {
+                    push    ds
+                    push    es
+                    push    si
+                    push    di
+                    mov     ax, VRAM_SEG
+                    mov     es, ax
+                    mov     di, off
+                    shl     di, 1
+                    mov     cx, n
+                    mov     dx, CRTC_STATUS
+                    mov     ax, sync
+                    lds     si, src
+                    or      ax, ax
+                    je      fast
+                slow:
+                    and     di, 3FFFh
+                    mov     bx, [si]
+                    add     si, 2
+                w1: in      al, dx
+                    test    al, 1
+                    jnz     w1
+                w2: in      al, dx
+                    test    al, 1
+                    jz      w2
+                    mov     es:[di], bx
+                    add     di, 2
+                    loop    slow
+                    jmp     done
+                fast:
+                    and     di, 3FFFh
+                    mov     bx, [si]
+                    add     si, 2
+                    mov     es:[di], bx
+                    add     di, 2
+                    loop    fast
+                done:
+                    pop     di
+                    pop     si
+                    pop     es
+                    pop     ds
+                }
+            }
+        }
+        tk_in = 0;
+    }
+    _chain_intr(tk_old);
+}
+
+/* mTCP hooks INT 1Ch too, before us, and puts back what it found when the
+   stack stops: so unhook first (the harness does), and never put tk_old back
+   once the vector is no longer ours, or it would point into a freed program. */
+static void tk_unhook(void)
+{
+    if (tk_hooked) {
+        tk_on = 0;
+        if (_dos_getvect(0x1C) == tk_isr)
+            _dos_setvect(0x1C, tk_old);
+        tk_hooked = 0;
+    }
+}
+
+void scr_ticker(int row, int glyphCol, const unsigned char *glyphs, unsigned char glyphAttr,
+                int secsCol, unsigned char secsAttr, unsigned long elapsed, unsigned long at,
+                const unsigned short *tail, int tailLen)
+{
+    unsigned long tenths = elapsed * 10;
+    unsigned secs = (unsigned)(tenths / 182);
+    int nd = 1, i;
+
+    tk_on = 0;                      /* the interrupt leaves it alone while we set it up */
+    tk_row = row;
+    tk_glyph_col = glyphCol;
+    tk_glyph_attr = glyphAttr;
+    for (i = 0; i < 8; i++)
+        tk_glyphs[i] = glyphs[i];
+    tk_secs_col = secsCol;
+    tk_secs_attr = secsAttr;
+    if (tailLen > TK_TAIL_MAX)
+        tailLen = TK_TAIL_MAX;
+    for (i = 0; i < tailLen; i++)
+        tk_tail[i] = tail[i];
+    tk_tail_len = tailLen;
+    tk_secs = secs;
+    tk_frac = (unsigned)(tenths % 182);
+    for (i = secs; i >= 10; i /= 10)
+        nd++;
+    tk_digits = nd;
+    tk_last = (unsigned)at;
+    if (!tk_hooked) {
+        if (!tk_atexit) {           /* a hook left behind would point into freed memory */
+            atexit(tk_unhook);
+            tk_atexit = 1;
+        }
+        tk_old = _dos_getvect(0x1C);
+        _dos_setvect(0x1C, tk_isr);
+        tk_hooked = 1;
+    }
+    tk_on = 1;
+}
+
+void scr_ticker_off(void)
+{
+    tk_on = 0;
+    tk_unhook();
+}
+
+int scr_ticker_on(void) { return tk_on; }
