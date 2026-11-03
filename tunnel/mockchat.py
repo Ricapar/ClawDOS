@@ -7,6 +7,7 @@ Ordinary messages get a canned conversational reply. Messages starting with
 `!` trigger test scenarios; send `!help` for the list.
 """
 
+import base64
 import random
 import re
 import shlex
@@ -71,6 +72,7 @@ SCENARIOS = {
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
     '!chunks': 'chunked encoding split every 7 bytes',
     '!bigevent': 'one text delta of 20 KB (over the DOS PC\'s event buffer)',
+    '!bigsig': 'a 24 KB thinking signature (over the event buffer), a tool call, then a check that it came back intact',
     '!history': 'what the mock remembers of this conversation',
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
     '!tool': 'call one DOS tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
@@ -78,6 +80,9 @@ SCENARIOS = {
     '!toolstall': 'call sysinfo, then think for 30 seconds before answering (the spinner during tool rounds)',
     '!play': 'play a tune on the PC speaker',
 }
+
+# A thinking signature longer than the DOS PC's 16 KB event buffer (see !bigsig).
+BIG_SIGNATURE = base64.b64encode(bytes(range(256)) * 72).decode()   # 24576 bytes
 
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
@@ -302,6 +307,13 @@ class MockChat:
 
     def _cmd_bigevent(self, _text):
         yield 'A single text delta of 20 KB follows: ' + 'x' * 20480
+
+    def _cmd_bigsig(self, _text):
+        # Long thinking gives a long signature, sent as one event; the DOS PC
+        # must keep it whole, because the request after a tool call echoes it.
+        self.signature = BIG_SIGNATURE
+        yield from self.call('sysinfo', {})
+        yield from self.stream(' The long signature made the round trip.')
 
     def _cmd_history(self, _text):
         yield from self.stream(self.describe_history())

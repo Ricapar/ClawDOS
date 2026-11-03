@@ -962,6 +962,92 @@ static void testMtcpCfg(void)
     CHECK("mtcpcfg shift: no path", mtcpcfg_shift_timestamp(NULL, 5) == -1);
 }
 
+/* --- events too long for the SSE buffer (a long thinking signature) -------------- */
+
+static ApiStream bigAs;
+static int bigRefused;
+static void bigOnEvent(void *ctx, const char *event, const char *data, unsigned n)
+{ (void)ctx; apistream_event(&bigAs, event, data, n); }
+static int bigOnBig(void *ctx, int phase, const char *event, const char *data, unsigned n)
+{
+    int rc = apistream_big(&bigAs, phase, event, data, n);
+    (void)ctx;
+    if (rc > 0)
+        bigRefused++;
+    return rc > 0;
+}
+
+/* Feed `text` in pieces of `step` bytes to an SSE buffer that holds the
+   ordinary events but not the 300-byte string. */
+static int bigFeed(const char *text, unsigned step)
+{
+    static char buf[200];
+    static Sse s;
+    unsigned i, n = strlen(text);
+    int rc = 0;
+    sse_init(&s, buf, sizeof buf);
+    s.big = bigOnBig;
+    for (i = 0; i < n; i += step)
+        rc |= sse_feed(&s, text + i, n - i < step ? n - i : step, bigOnEvent, NULL);
+    return rc;
+}
+
+static void testLongEvents(void)
+{
+    static char sig[301], feed[2000], want[800];
+    static char input[64];
+    unsigned i, step;
+    for (i = 0; i < 300; i++)
+        sig[i] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i % 64];
+    sig[300] = 0;
+    sprintf(want, "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"hm\",\"signature\":\"%s\"},"
+                  "{\"type\":\"text\",\"text\":\"ok\"}]}", sig);
+    for (step = 1; step <= 97; step += 48) {
+        /* the API's order (type first), then the mock's (type last, spaces) */
+        int order;
+        for (order = 0; order < 2; order++) {
+            asReset(&bigAs, input, sizeof input);
+            bigRefused = 0;
+            sprintf(feed,
+                "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{}}}\n\n"
+                "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hm\"}}\n\n"
+                "event: content_block_delta\ndata: %s\n\n"
+                "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n"
+                "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n"
+                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+                order == 0 ? "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG\"}}"
+                           : "{\"index\": 0, \"delta\": {\"type\": \"signature_delta\", \"signature\": \"SIG\"}, \"type\": \"content_block_delta\"}");
+            {   /* put the signature in */
+                char *p = strstr(feed, "SIG");
+                memmove(p + 300, p + 3, strlen(p + 3) + 1);
+                memcpy(p, sig, 300);
+            }
+            CHECK("long signature fed", bigFeed(feed, step) == 0 && bigRefused == 0);
+            CHECK_STR("long signature in the history", asHist, want);
+        }
+    }
+
+    /* a long redacted_thinking block: its data streams the same way */
+    asReset(&bigAs, input, sizeof input);
+    sprintf(feed, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{}}}\n\n"
+                  "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"%s\"}}\n\n"
+                  "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                  "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", sig);
+    CHECK("long redacted fed", bigFeed(feed, 7) == 0);
+    sprintf(want, "{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"%s\"}]}", sig);
+    CHECK_STR("long redacted in the history", asHist, want);
+
+    /* anything else that long is still refused: "event too long" */
+    asReset(&bigAs, input, sizeof input);
+    bigRefused = 0;
+    sprintf(feed, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%s\"}}\n\n"
+                  "data: {\"type\":\"ping\"}\n\n", sig);
+    CHECK("long text refused", bigFeed(feed, 50) == -1 && bigRefused == 1);
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -981,6 +1067,7 @@ int main(void)
     testHistory();
     testApiReq();
     testApiStream();
+    testLongEvents();
     testToolArgs();
     testLongDeltas();
     testConvo();

@@ -172,6 +172,12 @@ class Handler(BaseHTTPRequestHandler):
             if status == 'error' and content.startswith('Error: '):
                 content = content[7:]
             pending.call.result = ToolResult(status, content)
+            want = getattr(pending.chat, 'signature', None)
+            if want and len(messages) >= 2:     # !bigsig: did the long signature come back whole?
+                sigs = [b.get('signature') for b in messages[-2].get('content', [])
+                        if isinstance(b, dict) and b.get('type') == 'thinking']
+                print(f'big signature round trip: {"PASS" if want in sigs else "FAIL"} '
+                      f'({len(want)} bytes sent, {[len(x or "") for x in sigs]} back)', flush=True)
             print(f'tool {pending.call.name} -> {status}: {content[:100]!r}', flush=True)
             chat, gen = pending.chat, pending.gen
             server.pending = None
@@ -228,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         self.start_stream()
         self.chunk_every = chat.chunk_every
         self.message_start()
-        self.thinking_block()
+        self.thinking_block(getattr(chat, 'signature', None) or SIGNATURE)
         index = 1
         text_open = False
         out_tokens = 0
@@ -284,9 +290,9 @@ class Handler(BaseHTTPRequestHandler):
             'usage': {'input_tokens': 1200, 'cache_creation_input_tokens': 0,
                       'cache_read_input_tokens': 1000, 'output_tokens': 1}}})
 
-    def thinking_block(self):
+    def thinking_block(self, signature=SIGNATURE):
         self.event('content_block_start', {'index': 0, 'content_block': {'type': 'thinking', 'thinking': '', 'signature': ''}})
-        self.event('content_block_delta', {'index': 0, 'delta': {'type': 'signature_delta', 'signature': SIGNATURE}})
+        self.event('content_block_delta', {'index': 0, 'delta': {'type': 'signature_delta', 'signature': signature}})
         self.event('content_block_stop', {'index': 0})
 
     def tool_use_block(self, index, call):

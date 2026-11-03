@@ -60,6 +60,7 @@ boottests: build ## every DOSBox-X boot test
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "Clock set from the API" --expect "CLAWDOS.EXE exit code 0" --expect "resume state consumed"
 

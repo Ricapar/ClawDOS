@@ -98,8 +98,11 @@ nothing deletes them.
 
 `Transfer-Encoding: chunked`, `text/event-stream`. Layers, each in lib/ with
 unit tests in tests/unit/dosunit.c: `http.cpp` (head, chunked decoding, read to
-close), `sse.c` (events; one `data:` payload fits 16 KB, more is an error for
-the turn), `json.c` (key lookup by path, string decoding with `\uXXXX` and
+close), `sse.c` (events; one `data:` payload fits 16 KB; a longer one goes to
+`apistream_big` in pieces, which takes a `signature_delta` or a
+`redacted_thinking` block, both one long string that grows with how long the
+model thought (9 KB seen after a short think), and streams it into the history;
+any other event over 16 KB is an error for the turn), `json.c` (key lookup by path, string decoding with `\uXXXX` and
 surrogate pairs, escaping), `utf8.c` (UTF-8 to CP437 with fallbacks for quotes,
 dashes, arrows, ticks and accented letters CP437 lacks; CP437 to UTF-8 for what
 we send), `apistream.c` (events to screen text, history and the tool call).

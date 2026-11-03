@@ -16,6 +16,9 @@ void sse_init(Sse *s, char *buf, unsigned max)
     s->overflow = 0;
     s->dropping = 0;
     s->maxLen = 0;
+    s->big = 0;
+    s->bigging = 0;
+    s->bigLen = 0;
 }
 
 static char nameBuf[8];                       /* field name being read */
@@ -25,6 +28,16 @@ static void endLine(Sse *s, SseEventFn fn, void *ctx)
     if (s->field == F_START) {                /* blank line: dispatch */
         if (s->len && s->buf[s->len - 1] == '\n')   /* the separator after the last data line */
             s->len--;
+        if (s->bigging) {                     /* the end of a long event */
+            s->bigLen += s->len;
+            if (s->len)
+                s->big(ctx, SSE_BIG_MORE, s->event, s->buf, s->len);
+            s->big(ctx, SSE_BIG_END, s->event, s->buf, 0);
+            if (s->bigLen > s->maxLen)
+                s->maxLen = s->bigLen > 0xFFFFu ? 0xFFFFu : (unsigned)s->bigLen;
+            s->bigging = 0;
+            s->len = 0;
+        }
         if (s->len > s->maxLen)
             s->maxLen = s->len;
         if (s->len && !s->dropping) {
@@ -86,6 +99,18 @@ int sse_feed(Sse *s, const char *in, unsigned n, SseEventFn fn, void *ctx)
             if (s->field == F_DATA) {
                 if (s->dropping)
                     break;
+                if (s->len >= s->max - 1 && s->big) {   /* full: hand it on in pieces */
+                    s->event[s->evlen] = 0;
+                    if (s->bigging) {
+                        s->bigLen += s->len;
+                        s->big(ctx, SSE_BIG_MORE, s->event, s->buf, s->len);
+                        s->len = 0;
+                    } else if (s->big(ctx, SSE_BIG_BEGIN, s->event, s->buf, s->len) == 0) {
+                        s->bigging = 1;
+                        s->bigLen = s->len;
+                        s->len = 0;
+                    }
+                }
                 if (s->len >= s->max - 1) {
                     s->overflow = 1;
                     s->dropping = 1;

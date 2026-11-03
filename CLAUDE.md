@@ -22,7 +22,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   serial or mock log. The Makefile's `boottests` target lists them all: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` the clock
   from the Date header (`Clock set from the API`); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
-  boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `relaunch.bat --timeout 150` the run
+  boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
+  and echoed back whole (`big signature round trip: PASS`); `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE with the clock back at 1980 (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
   for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`

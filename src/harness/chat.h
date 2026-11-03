@@ -109,6 +109,7 @@ class Chat {
     static void onThinking(void *ctx);
     static int  onHist(void *ctx, const char *p, unsigned n);
     static void onEvent(void *ctx, const char *event, const char *data, unsigned n);
+    static int onBig(void *ctx, int phase, const char *event, const char *data, unsigned n);
 };
 
 #endif

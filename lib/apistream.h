@@ -28,11 +28,20 @@ typedef struct ApiStream {
     char error[160];           /* why apistream_event returned -1 */
     /* private */
     int blocks, inBlock, blockType, sigOpen, started;
+    int bigKind;               /* the long event being streamed (apistream_big) */
+    int bigEsc, bigDone;       /* inside an escape; its string has ended */
 } ApiStream;
 
 void apistream_init(ApiStream *a, char *toolInputBuf, unsigned max);
 /* One SSE event. 0 continue, 1 message_stop seen, -1 error (a->error says why). */
 int apistream_event(ApiStream *a, const char *event, const char *data, unsigned n);
+/* An event too long for the SSE buffer, in pieces (phase as in sse.h's
+   SseBigFn). Only the kinds that are one long string are taken: a thinking
+   block's signature_delta and a redacted_thinking block's data (both grow with
+   how long the model thought, past any buffer). Their string goes straight to
+   the history. 0 taken, 1 not a kind it can take (the caller reports the event
+   as too long), -1 error (a->error says why). */
+int apistream_big(ApiStream *a, int phase, const char *event, const char *data, unsigned n);
 
 #ifdef __cplusplus
 }

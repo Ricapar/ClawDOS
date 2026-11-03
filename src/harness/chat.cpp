@@ -245,6 +245,21 @@ void Chat::onEvent(void *ctx, const char *event, const char *data, unsigned n)
         c->streamRc = apistream_event(&c->as, event, data, n);
 }
 
+/* An event too long for the SSE buffer: a thinking signature (they grow with
+   how long the model thought) is streamed into the history; anything else is
+   refused and reported as "event too long". */
+int Chat::onBig(void *ctx, int phase, const char *event, const char *data, unsigned n)
+{
+    Chat *c = (Chat *)ctx;
+    int rc;
+    if (c->streamRc != 0)
+        return phase == SSE_BIG_BEGIN ? 1 : 0;
+    rc = apistream_big(&c->as, phase, event, data, n);
+    if (rc < 0)
+        c->streamRc = -1;
+    return rc > 0 ? 1 : 0;
+}
+
 /* --- waiting on the network ---------------------------------------------------- */
 
 void Chat::pause(int secs)
@@ -422,6 +437,7 @@ int8_t Chat::stream(void)
     int n;
 
     sse_init(&sse, sseBuf, SSE_MAX);
+    sse.big = onBig;
     apistream_init(&as, toolInput, TOOL_INPUT_MAX);
     as.text = onText;
     as.thinking = onThinking;

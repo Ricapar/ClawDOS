@@ -271,3 +271,100 @@ int apistream_event(ApiStream *a, const char *event, const char *data, unsigned 
     }
     return 0;                                   /* ping and anything new */
 }
+
+/* --- events too long for the SSE buffer ---------------------------------------- */
+
+enum { BIG_NONE, BIG_SIGNATURE, BIG_REDACTED };
+
+/* Where `pat` ends in p[0..n), or NULL. */
+static const char *after(const char *p, unsigned n, const char *pat)
+{
+    unsigned k = strlen(pat), i;
+    for (i = 0; i + k <= n; i++)
+        if (p[i] == pat[0] && !memcmp(p + i, pat, k))
+            return p + i + k;
+    return NULL;
+}
+
+/* Where the string value of `"key"` starts (after its opening quote), with
+   any spacing around the colon; NULL if absent or not a string. */
+static const char *stringValue(const char *p, unsigned n, const char *quotedKey)
+{
+    const char *v = after(p, n, quotedKey), *end = p + n;
+    if (v == NULL)
+        return NULL;
+    while (v < end && (*v == ' ' || *v == '\t'))
+        v++;
+    if (v >= end || *v++ != ':')
+        return NULL;
+    while (v < end && (*v == ' ' || *v == '\t'))
+        v++;
+    return v < end && *v == '"' ? v + 1 : NULL;
+}
+
+/* The long string's bytes go to the history as they come: they are JSON
+   string text already, escapes and all. Its closing quote ends it; whatever
+   the event has after that (closing braces, fields in any order) is dropped. */
+static int bigBytes(ApiStream *a, const char *p, unsigned n)
+{
+    unsigned i;
+    if (a->bigDone)
+        return 0;
+    for (i = 0; i < n; i++) {
+        if (a->bigEsc)
+            a->bigEsc = 0;
+        else if (p[i] == '\\')
+            a->bigEsc = 1;
+        else if (p[i] == '"')
+            break;
+    }
+    if (i && emitHist(a, p, i))
+        return -1;
+    if (i < n)
+        a->bigDone = 1;
+    return 0;
+}
+
+int apistream_big(ApiStream *a, int phase, const char *event, const char *data, unsigned n)
+{
+    const char *v;
+
+    (void)event;
+    if (phase == 0) {                           /* SSE_BIG_BEGIN: what is it? */
+        a->bigKind = BIG_NONE;
+        a->bigEsc = a->bigDone = 0;
+        if (after(data, n, "\"signature_delta\"") && (v = stringValue(data, n, "\"signature\"")) != NULL) {
+            if (emitHistZ(a, "\",\"signature\":\""))
+                return -1;
+            a->sigOpen = 1;
+            a->bigKind = BIG_SIGNATURE;
+        } else if (after(data, n, "\"redacted_thinking\"") && (v = stringValue(data, n, "\"data\"")) != NULL) {
+            if (a->blocks && emitHistZ(a, ","))
+                return -1;
+            a->blocks++;
+            a->inBlock = 1;
+            a->sigOpen = 0;
+            a->blockType = B_REDACTED;
+            if (emitHistZ(a, "{\"type\":\"redacted_thinking\",\"data\":\""))
+                return -1;
+            a->bigKind = BIG_REDACTED;
+        } else {
+            return 1;
+        }
+        return bigBytes(a, v, n - (unsigned)(v - data));
+    }
+    if (a->bigKind == BIG_NONE)
+        return 0;
+    if (phase == 1)                             /* SSE_BIG_MORE */
+        return bigBytes(a, data, n);
+    /* SSE_BIG_END */
+    if (!a->bigDone) {
+        a->bigKind = BIG_NONE;
+        fail(a, "a long event ended inside its string", "");
+        return -1;
+    }
+    if (a->bigKind == BIG_REDACTED && emitHistZ(a, "\"}"))
+        return -1;
+    a->bigKind = BIG_NONE;
+    return 0;
+}
