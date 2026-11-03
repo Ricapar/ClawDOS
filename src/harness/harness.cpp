@@ -1278,6 +1278,9 @@ int main(int argc, char *argv[])
             break;
         if (biosIsKeyReady())
             handleKey(biosKeyRead());
+        else                          /* rest until a key, a packet or the timer: polling */
+            _asm { sti                /* the card nonstop made the PC whine audibly */
+                   hlt }
         Net::service();
     }
 
