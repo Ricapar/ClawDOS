@@ -1241,6 +1241,7 @@ int main(int argc, char *argv[])
         scr_set_hwscroll(0);
     con_track_cursor(0);            /* the cursor lives in the input box */
     con_init();
+    wrapInput();                    /* lineCount 0 put the cursor a row up, on the box's edge */
     scr_footer(footerRows(), A_TEXT);
     if (resumeMode)
         restoreScreenFile();          /* the chat as it was when the run began */
