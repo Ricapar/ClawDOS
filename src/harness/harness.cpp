@@ -38,7 +38,10 @@
 #include "relaunch.h"
 #include "ui.h"
 
-#define VERSION   "0.3"
+#ifndef BUILD_STAMP                 /* yyyymmdd.hhmm, from the build (scripts/build.py) */
+#define BUILD_STAMP "dev"
+#endif
+#define VERSION   BUILD_STAMP
 #define CFG_PATH  "C:\\CLAWDOS\\CLAWDOS.CFG"
 #define LOG_PATH  "C:\\CLAWDOS\\CLAWDOS.LOG"
 #define INPUT_MAX 900
@@ -1176,7 +1179,7 @@ int main(int argc, char *argv[])
         } else if (!stricmp(argv[i], "-resume") || !stricmp(argv[i], "/resume")) {
             resumeMode = 1;
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
-            printf("ClawDOS " VERSION " - chat with an AI from DOS\n\n"
+            printf("ClawDOS v" VERSION " - chat with an AI from DOS\n\n"
                    "Usage: CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q]\n"
                    "       (CLAWDOS.EXE launches this program, HARNESS.EXE, and takes over\n"
                    "       while a run tool program needs the memory; HARNESS alone keeps\n"

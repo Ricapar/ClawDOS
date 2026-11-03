@@ -128,6 +128,10 @@ def build_boot():
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
 
 
+# yyyymmdd.hhmm, local time, when this build ran.
+BUILD_STAMP = time.strftime('%Y%m%d.%H%M')
+
+
 def compile_flags(spec, objdir):
     """(compiler flags, extra sources) for an app: the mTCP library and config if it uses TCP/IP."""
     model = spec.get('model', 's')
@@ -135,14 +139,19 @@ def compile_flags(spec, objdir):
     if model in 'clh':
         flags.append('-zc')     # string literals in the code segment, out of DGROUP (data pointers are far)
     extra = []
+    # Watcom can't take a quoted -D value from a command line, so quoted
+    # definitions go in a force-included header: the build stamp for every
+    # program (ClawDOS shows it, so you can tell which build a disk has), and
+    # CFG_H for mTCP, whose sources do `#include CFG_H`.
+    build_h = os.path.join(objdir, 'build_h.h')
+    with open(build_h, 'w', encoding='utf-8') as f:
+        f.write(f'#define BUILD_STAMP "{BUILD_STAMP}"\n')
+        if spec.get('mtcp'):
+            f.write(f'#define CFG_H "{os.path.basename(spec["mtcp"])}"\n')
+    flags.append(f'-fi={build_h}')
     if spec.get('mtcp'):
         cfg = os.path.join(ROOT, spec['mtcp'])
-        # mTCP sources do `#include CFG_H`; Watcom can't take a quoted -D value
-        # from a command line, so force-include a header defining it.
-        cfg_h = os.path.join(objdir, 'cfg_h.h')
-        with open(cfg_h, 'w', encoding='utf-8') as f:
-            f.write(f'#define CFG_H "{os.path.basename(cfg)}"\n')
-        flags += [f'-fi={cfg_h}', '-i=' + os.path.dirname(cfg),
+        flags += ['-i=' + os.path.dirname(cfg),
                   '-i=' + os.path.join(MTCP_SRC, 'TCPINC'), '-i=' + os.path.join(MTCP_SRC, 'INCLUDE')]
         extra = [os.path.join(MTCP_SRC, 'TCPLIB', f.upper()) for f in MTCP_LIB]
     return flags, extra
@@ -457,7 +466,7 @@ def main():
         print(write_compiledb())
         return
     s = settings(tunnel=a.tunnel)
-    print(f'[settings] tunnel = {s["tunnel"]}, key {"from .env" if api_key() else "not set"}')
+    print(f'[settings] tunnel = {s["tunnel"]}, key {"from .env" if api_key() else "not set"}, build v{BUILD_STAMP}')
     print('[boot]')
     build_boot()
     print('[apps]')
