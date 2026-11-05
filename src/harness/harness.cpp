@@ -1043,8 +1043,8 @@ static int readState(Resume *r)
     return r->chat[0] && r->tool[0] ? 0 : -1;
 }
 
-/* The chat screen and the state behind it, to a file: the in-process run keeps
-   them in memory, which a relaunch loses. scr_suspend also leaves a plain DOS
+/* The chat screen, the state behind it and the Up/Down input history, to a
+   file: the in-process run keeps them in memory, which a relaunch loses. scr_suspend also leaves a plain DOS
    screen for the program. */
 static int saveScreenFile(void)
 {
@@ -1062,7 +1062,9 @@ static int saveScreenFile(void)
     if (fd >= 0) {
         rc = 0;
         if (write(fd, buf, SCR_SAVE_BYTES) != (int)SCR_SAVE_BYTES
-            || write(fd, &ss, sizeof ss) != sizeof ss || write(fd, &cs, sizeof cs) != sizeof cs)
+            || write(fd, &ss, sizeof ss) != sizeof ss || write(fd, &cs, sizeof cs) != sizeof cs
+            || write(fd, &histCount, sizeof histCount) != sizeof histCount
+            || write(fd, history, histCount * sizeof history[0]) != (int)(histCount * sizeof history[0]))
             rc = -1;
         close(fd);
     }
@@ -1075,7 +1077,7 @@ static int restoreScreenFile(void)
     unsigned short __far *buf = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
     ScrState ss;
     ConState cs;
-    int fd, rc = -1;
+    int fd, n, rc = -1;
 
     if (!buf)
         return -1;
@@ -1087,6 +1089,12 @@ static int restoreScreenFile(void)
             con_state_set(&cs);
             scr_resume(buf);
             rc = 0;
+            /* the Up/Down input history follows */
+            if (read(fd, &n, sizeof n) == sizeof n && n > 0 && n <= HIST_N
+                && read(fd, history, n * sizeof history[0]) == (int)(n * sizeof history[0])) {
+                histCount = n;
+                histPos = -1;
+            }
         }
         close(fd);
         remove(RELAUNCH_SCREEN);

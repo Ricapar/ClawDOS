@@ -162,12 +162,15 @@ a second COMMAND.COM (about 70K) for batch files, redirection and built-in comma
 
 HARNESS.EXE holds about 310K while it runs (mTCP, the API buffers, the code),
 which would leave a program started by `run` about 190K. So **`CLAWDOS.EXE`**,
-the command you type, is a 50K launcher: it starts HARNESS.EXE, and every `run`
-makes the harness save its state and exit, the launcher run the commands with
-about 450K free, and the harness start again on the same conversation with the
-program's output as the tool result. It costs a reload and a reconnect per
-`run` (under a second in DOSBox-X; about 11 s on the 8088) and the chat's
-Up/Down input history. If the harness cannot come back (the tunnel or the
+the command you type, is a 50K launcher: it starts HARNESS.EXE, and a `run`
+with `full_memory` set makes the harness save its state and exit, the launcher
+run the commands with about 450K free, and the harness start again on the same
+conversation with the program's output as the tool result. That costs a reload
+and a reconnect (under a second in DOSBox-X; about 11 s on the 8088), so Claude
+sets it for compilers, linkers, the programs it builds and batch files
+(the run tool's schema and `image/memory/DEVTOOLS.TXT` say when), and leaves it
+off for DIR, TYPE and quick checks, which run beside the harness. The screen and
+the Up/Down input history come back with the harness. If the harness cannot come back (the tunnel or the
 network is down), fix that and type `CLAWDOS -resume`: the conversation carries
 on from the program's output. Running `HARNESS` directly keeps programs inside
 its memory. The files behind it are in `lib/relaunch.h`;

@@ -75,6 +75,7 @@ SCENARIOS = {
     '!bigsig': 'a 24 KB thinking signature (over the event buffer), a tool call, then a check that it came back intact',
     '!history': 'what the mock remembers of this conversation',
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
+    '!bigrun': 'the same with full_memory (under CLAWDOS.EXE the harness steps out of memory): !bigrun MEM /C',
     '!tool': 'call one DOS tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
     '!tooltour': 'call every DOS tool in turn and check the results',
     '!toolstall': 'call sysinfo, then think for 30 seconds before answering (the spinner during tool rounds)',
@@ -124,8 +125,9 @@ def tour_steps():
         # a program that reads standard input gets end-of-file, not a hang (FIND with
         # no file reads stdin); the exit code is reported and the rest of the list skipped
         ('run', {'command': 'FIND /C "x"\nVER'}, 'ok', lambda r: '> FIND' in r and 'exit code' in r),
-        # a list of commands stops at the first that fails
-        ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never'}, 'ok',
+        # a list of commands stops at the first that fails; full_memory makes it a
+        # relaunch under CLAWDOS.EXE (HARNESS.EXE alone runs it in place and says so)
+        ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never', 'full_memory': True}, 'ok',
          lambda r: '> DIR C:\\NOPE.XYZ' in r and 'not run:\n  REM never' in r),
     ]
     out = []
@@ -320,6 +322,10 @@ class MockChat:
 
     def _cmd_run(self, text):
         yield from self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''})
+
+    def _cmd_bigrun(self, text):
+        yield from self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else '',
+                                     'full_memory': True})
 
     def _cmd_tool(self, text):
         words = shlex.split(text, posix=False)[1:]

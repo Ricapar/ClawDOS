@@ -24,7 +24,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   from the Date header (`Clock set from the API`); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `relaunch.bat --timeout 150` the run
-  tool through CLAWDOS.EXE with the clock back at 1980 (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
+  tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) with the clock back at 1980 (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
   for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
@@ -36,7 +36,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
 - CLAWDOS.EXE (src/clawdos) is the small launcher the user types: it runs HARNESS.EXE with `-launched`, and when a
-  `run` tool call makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
+  `run` tool call with `full_memory` makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
   memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The
   files between them are in lib/relaunch.h; RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
   retries one that failed. `HARNESS.EXE` run on its own keeps programs inside its memory (the boot tests do that).

@@ -188,16 +188,19 @@ static int launched;                  /* started by CLAWDOS.EXE: runs go to it *
 
 void tools_set_launched(int on) { launched = on; }
 
-/* DOS commands on a plain DOS screen; the chat comes back afterwards. Under
-   the launcher the commands are written out for it and CLAWDOS leaves, so the
-   program gets the memory CLAWDOS held (relaunch.h). */
+/* DOS commands on a plain DOS screen; the chat comes back afterwards. With
+   full_memory under the launcher the commands are written out for it and the
+   harness leaves, so the program gets the memory the harness held
+   (relaunch.h); otherwise they run here, beside the harness. */
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
+    const char *fm = targ("full_memory");     /* true arrives as "1" (setArg) */
+    int big = fm && (*fm == '1' || !stricmp(fm, "true"));
     unsigned short __far *save;
     int status;
 
-    if (launched) {
+    if (big && launched) {
         if (relaunch_write_run(cmd, unattended ? 1 : 5))
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
         return TS_RELAUNCH;
@@ -206,6 +209,9 @@ static int toolRun(ToolCtx *t)
         return tool_fail(t, "not enough memory to save the screen");
     status = shell_run(t, cmd, unattended ? 1 : 5);
     restoreScreen(save);
+    if (big && !launched)
+        tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
+                     " so the program ran beside it)\n");
     return status;
 }
 

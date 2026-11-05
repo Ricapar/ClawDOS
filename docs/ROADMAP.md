@@ -157,11 +157,15 @@ reopens the history file, restores the screen, shows the result under the Run
 header and continues the rounds (lib/relaunch.h, Chat::resume/continueTurn).
 Measured in DOSBox-X (`image/tests/relaunch.bat`): a program gets 449 KB,
 against 220 KB in-process; the launcher's block is 50 KB; the harness is away
-1.7 s for a 1.0 s program. Every `run` goes through the launcher; `HARNESS`
-started on its own still runs programs in-process. Not done: the input history
-(Up/Down) is lost across the relaunch, the launcher could be smaller (printf,
-the argument-store code it never calls), timing on the real PC, and the policy
-question below.
+1.7 s for a 1.0 s program. Only a `run` with `full_memory: true` goes through
+the launcher (the model decides: TOOLS.JSN and DEVTOOLS.TXT say to set it for
+compilers, linkers, assemblers, freshly built programs and batch files); the
+rest run inside the harness, with no reconnect. `HARNESS` started on its own
+runs everything in-process and tells the model the flag had no effect. The
+Up/Down input history travels in SCREEN.SAV. The launcher's 50 KB was left as
+it is: most of it is the output capture's buffers and the C runtime that
+shell.c's formatting needs. Still to do: timing on the real PC, and building
+WarGames with stock headers and MAKE through `full_memory`.
 
 First live runs on the 86Box 8088 (2026-10-31): a 35 s `dir /s | find` kept
 CLAWDOS away 46 s, so a relaunch costs about 11 s there (the 133 KB EXE reloads,

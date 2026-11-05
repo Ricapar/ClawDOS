@@ -228,6 +228,10 @@
     "command": {
      "type": "string",
      "description": "The command line, at most 120 characters; or several, one per line"
+    },
+    "full_memory": {
+     "type": "boolean",
+     "description": "true: ClawDOS steps out of memory while the commands run, so they get about 450 KB instead of about 190 KB, at a cost of several seconds on the 8088 (ClawDOS reloads and reconnects). Use it for compilers, linkers and assemblers (TCC, TLINK, MAKE, NASM), for programs you just built, for .BAT files, and for anything that ran out of memory. Leave it out for DIR, TYPE, small tools and quick checks."
     }
    },
    "required": [
