@@ -45,11 +45,10 @@ test: ## unit tests of the mock API (fast, no emulator)
 
 check: test boottests ## everything: the mock API tests and every DOSBox-X boot test
 
-boot: build ## one boot test in DOSBox-X (TEST=image/tests/x.bat, default smoke)
-	$(BOOTTEST) $(or $(TEST),image/tests/smoke.bat)
+boot: build ## one boot test in DOSBox-X (TEST=image/tests/x.bat, default units)
+	$(BOOTTEST) $(or $(TEST),image/tests/units.bat --expect UNITS-OK)
 
 boottests: build ## every DOSBox-X boot test
-	$(BOOTTEST) image/tests/smoke.bat
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
 	$(BOOTTEST) image/tests/net.bat
 	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot the ClawDOS image headless in DOSBox-X with a test batch file and print its log.
 
-  python scripts/boottest.py [image/tests/smoke.bat] [--timeout 90]
+  python scripts/boottest.py [image/tests/units.bat] [--timeout 90]
 
 The test batch file runs as C:\\AUTOTEST.BAT instead of the normal startup. It
 should write its results to COM1 (captured to build/serial.log) and finish with
@@ -57,7 +57,7 @@ def read_log(path):
 def parse_args():
     """The command line."""
     ap = argparse.ArgumentParser()
-    ap.add_argument('test', nargs='?', default=os.path.join(build.ROOT, 'image', 'tests', 'smoke.bat'))
+    ap.add_argument('test', nargs='?', default=os.path.join(build.ROOT, 'image', 'tests', 'units.bat'))
     ap.add_argument('--timeout', type=int, default=90)
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     ap.add_argument('--set', action='append', default=[], metavar='"SECTION KEY=VALUE"',

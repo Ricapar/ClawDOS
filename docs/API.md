@@ -3,8 +3,7 @@
 HARNESS.EXE is a client of the Anthropic Messages API. The only thing between it
 and `api.anthropic.com` is a TLS tunnel that copies bytes (below). This page is
 the reference for the DOS side: the files it uses, the request it writes, the
-stream it reads and how the history stays valid. The design behind it is
-[superpowers/specs/2026-10-31-native-api-client-design.md](superpowers/specs/2026-10-31-native-api-client-design.md).
+stream it reads and how the history stays valid.
 
 ## Files on the DOS PC
 

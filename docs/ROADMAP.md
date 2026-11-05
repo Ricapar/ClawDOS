@@ -38,8 +38,7 @@ harness, running on the 8088.
 Why a tunnel: the Claude API requires TLS 1.2+. An 8088 at 4.77 MHz could in
 principle do the handshake, but it would take minutes and need lots of RAM for
 certificates and crypto state. Everything else, from building the request to
-parsing the streamed reply and keeping the history, the PC does itself
-(design: [superpowers/specs/2026-10-31-native-api-client-design.md](superpowers/specs/2026-10-31-native-api-client-design.md)).
+parsing the streamed reply and keeping the history, the PC does itself.
 The tunnel has no knowledge of the API, so native TLS (BearSSL's i15 big-number
 code is written for 16-bit multipliers) or a tunnel inside the PicoMEM firmware
 could replace it later without touching CLAWDOS. What CLAWDOS sends and expects
@@ -64,7 +63,6 @@ is in [API.md](API.md).
       info, DOS commands, memory and ports, PC speaker music (PLAY), text art;
       safe mode asks before changes (F3). The CGA drawing tool was dropped
       in October 2026: real compilers on the image made it redundant.
-      Design in [superpowers/specs/2026-10-21-dos-tools-design.md](superpowers/specs/2026-10-21-dos-tools-design.md).
 - [x] **M5 - Real hardware**: boot CLAWDOS.IMG from the PicoMEM, PM2000 over
       WiFi, chat with the live Claude API.
 - [x] **M5.5 - Native API client**: HARNESS.EXE speaks the Messages API itself

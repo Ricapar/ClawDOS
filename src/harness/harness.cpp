@@ -6,7 +6,7 @@
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
- *   CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
+ *   CLAWDOS [host[:port]] [-p provider] [-unsafe] [-q] [-m message] [-i text]
  *           [-memories]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
@@ -110,13 +110,13 @@ static int quitting;
 static int exitCode;
 static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
-static int quickFlag, noscrollFlag;   /* -q and -noscroll as given, for the relaunch state */
+static int quickFlag;                 /* -q as given, for the relaunch state */
 static int resumeMode;                /* -resume: back from a run under CLAWDOS.EXE */
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
     char chat[40], tool[64], provider[16], model[48], host[80];
-    int round, merge, mergeAtStart, assistant, safe, quick, quit, noscroll;
+    int round, merge, mergeAtStart, assistant, safe, quick, quit;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -577,7 +577,7 @@ static void submit(void)
         return;
     }
     input[inputLen] = 0;
-    if (!stricmp(input, "/quit") || !stricmp(input, "/exit")) {
+    if (!stricmp(input, "/quit")) {
         quitting = 1;
         return;
     }
@@ -588,12 +588,12 @@ static void submit(void)
             histCount++;
     }
     histPos = -1;
-    if (!stricmp(input, "/new") || !stricmp(input, "/clear")) {
+    if (!stricmp(input, "/new")) {
         setInput("");
         newChat();
         return;
     }
-    if (!stricmp(input, "/memories") || !stricmp(input, "/memory")) {
+    if (!stricmp(input, "/memories")) {
         setInput("");
         memories();
         return;
@@ -978,8 +978,8 @@ static int writeState(void)
     fprintf(f, "chat %s\ntool %s\nround %d\nmerge %d\nmergeat %d\nassistant %d\n",
             chat.chatPath(), chat.pendingToolId(), chat.pendingRound(),
             c->mergeNext, c->mergeAtStart, c->assistantInTurn);
-    fprintf(f, "safe %d\nquick %d\nquit %d\nnoscroll %d\nhost %s\nprovider %s\nmodel %s\nticks %lu\n",
-            tools_safe(), quickFlag, quitAfterReply, noscrollFlag, host,
+    fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\nticks %lu\n",
+            tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, TICKS_NOW);
     return fclose(f) ? -1 : 0;
 }
@@ -1005,7 +1005,7 @@ static int readState(Resume *r)
         STATE_STR("model", model) STATE_STR("host", host)
         STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
         STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
-        STATE_INT("quit", quit) STATE_INT("noscroll", noscroll)
+        STATE_INT("quit", quit)
         if (!strcmp(line, "ticks"))
             r->ticks = strtoul(v, NULL, 10);
     }
@@ -1133,34 +1133,32 @@ static void resumeTurn(void)
 int main(int argc, char *argv[])
 {
     char note_[120];
-    int noscroll = 0, unsafe = 0, quick = 0;
+    int unsafe = 0, quick = 0;
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     const char *providerArg = NULL;
     int i, bad, openMemories = 0;
 
     for (i = 1; i < argc; i++) {
-        if (!stricmp(argv[i], "-noscroll") || !stricmp(argv[i], "/noscroll")) {
-            noscroll = 1;
-        } else if (!stricmp(argv[i], "-unsafe") || !stricmp(argv[i], "/unsafe")) {
+        if (!stricmp(argv[i], "-unsafe")) {
             unsafe = 1;
-        } else if (!stricmp(argv[i], "-q") || !stricmp(argv[i], "/q")) {
+        } else if (!stricmp(argv[i], "-q")) {
             quick = 1;
-        } else if ((!stricmp(argv[i], "-m") || !stricmp(argv[i], "/m")) && i + 1 < argc) {
+        } else if (!stricmp(argv[i], "-m") && i + 1 < argc) {
             firstMessage = argv[++i];
-        } else if ((!stricmp(argv[i], "-i") || !stricmp(argv[i], "/i")) && i + 1 < argc) {
+        } else if (!stricmp(argv[i], "-i") && i + 1 < argc) {
             prefill = argv[++i];
-        } else if ((!stricmp(argv[i], "-p") || !stricmp(argv[i], "/p")) && i + 1 < argc) {
+        } else if (!stricmp(argv[i], "-p") && i + 1 < argc) {
             providerArg = argv[++i];
-        } else if (!stricmp(argv[i], "-launched") || !stricmp(argv[i], "/launched")) {
+        } else if (!stricmp(argv[i], "-launched")) {
             tools_set_launched(1);    /* CLAWDOS.EXE is our parent: runs go to it */
-        } else if (!stricmp(argv[i], "-memories") || !stricmp(argv[i], "/memories")) {
+        } else if (!stricmp(argv[i], "-memories")) {
             openMemories = 1;         /* open the memory manager once connected (screenshots) */
-        } else if (!stricmp(argv[i], "-resume") || !stricmp(argv[i], "/resume")) {
+        } else if (!stricmp(argv[i], "-resume")) {
             resumeMode = 1;
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
             printf("ClawDOS v" VERSION " - chat with an AI from DOS\n\n"
-                   "Usage: CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q]\n"
+                   "Usage: CLAWDOS [host[:port]] [-p provider] [-unsafe] [-q]\n"
                    "       (CLAWDOS.EXE launches this program, HARNESS.EXE, and takes over\n"
                    "       while a run tool program needs the memory; HARNESS alone keeps\n"
                    "       programs inside its own memory)\n"
@@ -1168,7 +1166,6 @@ int main(int argc, char *argv[])
                    "Settings come from " CFG_PATH ". A host replaces the\n"
                    "provider's tunnel address (plain HTTP, e.g. the mock API in tests).\n"
                    "-p       use this [provider] section instead of the configured one\n"
-                   "-noscroll  scroll by copying text, not by moving the CGA start address\n"
                    "-unsafe  start with safe mode off: tools run without asking\n"
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
@@ -1187,7 +1184,6 @@ int main(int argc, char *argv[])
         }
         unsafe = !resumeState.safe;
         quick = resumeState.quick;
-        noscroll = resumeState.noscroll;
         quitAfterReply = resumeState.quit;
         providerArg = resumeState.provider;
         strcpy(host, resumeState.host);
@@ -1196,7 +1192,6 @@ int main(int argc, char *argv[])
     }
     tools_init(!unsafe, quick);
     quickFlag = quick;
-    noscrollFlag = noscroll;
     cfg = (Cfg *)malloc(sizeof(Cfg));
     if (cfg == NULL) {
         fprintf(stderr, "Out of memory.\n");
@@ -1217,8 +1212,6 @@ int main(int argc, char *argv[])
     tool_idle = toolIdle;              /* keep the connection alive and the spinner moving during tools */
 
     scr_init();
-    if (noscroll)
-        scr_set_hwscroll(0);
     con_track_cursor(0);            /* the cursor lives in the input box */
     con_init();
     wrapInput();                    /* lineCount 0 put the cursor a row up, on the box's edge */

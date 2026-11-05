@@ -37,7 +37,6 @@ enum {
 
 void scr_init(void);                 /* 80x25 color text, cleared */
 void scr_done(void);                 /* back to a clean DOS screen */
-void scr_set_hwscroll(int on);       /* 0: scroll by copying (call right after scr_init) */
 int  scr_has_hwscroll(void);
 
 void scr_putc(int row, int col, unsigned char ch, unsigned char attr);

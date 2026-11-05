@@ -41,7 +41,6 @@ NET/                fdpkg:NET/CRYNWR.ZIP!DRIVERS/CRYNWR/NE1000.COM
 PICOMEM/            picomem:*.COM
 PICOMEM/            picomem:*.EXE
 
-CLAWDOS/        build:hello.exe
 CLAWDOS/        build:clawdos.exe
 CLAWDOS/        build:harness.exe
 CLAWDOS/        repo:image/clawdos/*

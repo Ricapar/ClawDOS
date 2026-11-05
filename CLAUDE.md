@@ -54,7 +54,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, ...); `!tool NAME k=v` calls one
   DOS tool, `!tooltour` all; tests `python3 tunnel/test_mockapi.py`. Tool schemas: image/clawdos/TOOLS.JSN (the one source;
   the mock reads it too); executors dispatched by src/harness/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
-  after the `-m` reply, `-p NAME` picks a provider section, `-noscroll` turns off hardware scrolling.
+  after the `-m` reply, `-p NAME` picks a provider section.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make
   the state they change `volatile`. The status row's spinner and seconds run from INT 1Ch (lib/screen.c scr_ticker),
   so they move while the harness is busy; mTCP hooks INT 1Ch too, so scr_ticker_off() before Net::stopStack().

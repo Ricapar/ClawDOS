@@ -250,7 +250,6 @@ void scr_done(void)
     int86(0x10, &r, &r);
 }
 
-void scr_set_hwscroll(int on)  { hwscroll = on && hwscroll; }
 int  scr_has_hwscroll(void)    { return hwscroll; }
 
 static void mirror_fill(int row, int col, unsigned cell, int n)

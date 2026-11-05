@@ -4,7 +4,7 @@
   python scripts/build.py              build everything -> build/CLAWDOS.IMG
   python scripts/build.py --tunnel 192.168.1.50:8443
                                        set the TLS tunnel's address (remembered)
-  python scripts/build.py --autotest image/tests/smoke.bat
+  python scripts/build.py --autotest image/tests/units.bat
                                        also install C:\\AUTOTEST.BAT (run at boot
                                        instead of the normal startup)
 """
@@ -47,7 +47,6 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   model:   memory model letter (s, c, m, l)
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
 APPS = {
-    'hello.exe': {'sources': ['src/hello/hello.c'], 'model': 's'},
     # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
                              'lib/relaunch.c'], 'model': 's'},
