@@ -56,12 +56,104 @@ static const char *mem_path(ToolCtx *t, int *status)
     return path;
 }
 
+/* The summary of C:\MEMORY\<file> (an 8.3 name), "" if it can't be read. */
+static void file_summary(const char *file, char *summary)
+{
+    char path[32];
+    unsigned got;
+    int h;
+
+    sprintf(path, "%s\\%s", MEM_DIR, file);
+    summary[0] = 0;
+    if (_dos_open(path, 0, &h) == 0) {
+        if (_dos_read(h, buf, sizeof(buf), &got) == 0)
+            mem_summary(buf, got, summary);
+        _dos_close(h);
+    }
+}
+
+int mem_scan(MemEntry *out, int max)
+{
+    struct find_t f;
+    MemEntry e;
+    int count = 0, i, n;
+
+    if (_dos_findfirst(MEM_DIR "\\*.TXT", _A_NORMAL | _A_RDONLY | _A_ARCH, &f))
+        return 0;
+    do {
+        strncpy(e.name, f.name, 8);
+        e.name[8] = 0;
+        if (strchr(e.name, '.'))
+            *strchr(e.name, '.') = 0;
+        e.size = f.size;
+        file_summary(f.name, e.summary);
+        n = count < max ? count : max;          /* insertion sort by name */
+        for (i = n; i > 0 && strcmp(out[i - 1].name, e.name) > 0; i--)
+            if (i < max)
+                out[i] = out[i - 1];
+        if (i < max)
+            out[i] = e;
+        count++;
+    } while (_dos_findnext(&f) == 0);
+    return count;
+}
+
+static char *name_path(const char *name)
+{
+    static char path[32];
+
+    if (!mem_name_ok(name))
+        return NULL;
+    sprintf(path, "%s\\%s.TXT", MEM_DIR, name);
+    strupr(path);
+    return path;
+}
+
+int mem_load(const char *name, char *out, unsigned max, int *cut)
+{
+    const char *p = name_path(name);
+    unsigned got, i, n = 0;
+    int h, ended = 0;
+
+    *cut = 0;
+    if (p == NULL || max == 0 || _dos_open(p, 0, &h))
+        return -1;
+    while (!ended && _dos_read(h, buf, sizeof(buf), &got) == 0 && got > 0) {
+        for (i = 0; i < got; i++) {
+            if (buf[i] == 0x1A) {
+                ended = 1;
+                break;
+            }
+            if (buf[i] == '\r')
+                continue;
+            if (n >= max - 1) {
+                *cut = 1;
+                ended = 1;
+                break;
+            }
+            out[n++] = buf[i];
+        }
+    }
+    _dos_close(h);
+    out[n] = 0;
+    return (int)n;
+}
+
+int mem_delete(const char *name)
+{
+    const char *p = name_path(name);
+
+    if (p == NULL)
+        return -1;
+    _dos_setfileattr(p, _A_NORMAL);   /* a read-only one goes too */
+    return remove(p) ? -1 : 0;
+}
+
 int tool_memory_list(ToolCtx *t)
 {
     struct find_t f;
-    char summary[MEM_SUMMARY + 1], name[sizeof(f.name)], path[32];  /* 8.3 + NUL */
-    unsigned count = 0, got;
-    int h;
+    char summary[MEM_SUMMARY + 1], name[sizeof(f.name)];  /* 8.3 + NUL */
+    unsigned count = 0;
 
     if (_dos_findfirst(MEM_DIR "\\*.TXT", _A_NORMAL | _A_RDONLY | _A_ARCH, &f)) {
         strcpy(t->summary, "none yet");
@@ -73,13 +165,7 @@ int tool_memory_list(ToolCtx *t)
             return TS_STOPPED;
         strcpy(name, f.name);
         *strchr(name, '.') = 0;
-        sprintf(path, "%s\\%s", MEM_DIR, f.name);
-        summary[0] = 0;
-        if (_dos_open(path, 0, &h) == 0) {
-            if (_dos_read(h, buf, sizeof(buf), &got) == 0)
-                mem_summary(buf, got, summary);
-            _dos_close(h);
-        }
+        file_summary(f.name, summary);
         tout_printf(t, "%-8s %5lu  %s\n", name, (unsigned long)f.size, summary);
         count++;
     } while (_dos_findnext(&f) == 0);

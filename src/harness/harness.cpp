@@ -7,6 +7,7 @@
  * input box pinned to the bottom of the screen.
  *
  *   CLAWDOS [host[:port]] [-p provider] [-noscroll] [-unsafe] [-q] [-m message] [-i text]
+ *           [-memories]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
@@ -37,6 +38,7 @@
 #include "ticks.h"
 #include "relaunch.h"
 #include "ui.h"
+#include "memui.h"
 
 #ifndef BUILD_STAMP                 /* yyyymmdd.hhmm, from the build (scripts/build.py) */
 #define BUILD_STAMP "dev"
@@ -102,6 +104,7 @@ static const Theme *theme = &themes[0];
 #define SCAN_F1   0x3B
 #define SCAN_F2   0x3C
 #define SCAN_F3   0x3D
+#define SCAN_F4   0x3E
 #define SCAN_F10  0x44
 #define SCAN_ALTX 0x2D
 #define SCAN_HOME 0x47
@@ -307,7 +310,7 @@ static void drawHint(void)
     rowBlank(r);
     col = rowText(r, 2, "F1 help \xFA F2 new chat \xFA F3 ", A_DIM);
     col = rowText(r, col, tools_safe() ? "safe:on" : "safe:off", tools_safe() ? A_GOOD : A_ERR);
-    col = rowText(r, col, " \xFA PgUp/PgDn \xFA F10 quit", A_DIM);
+    col = rowText(r, col, " \xFA F4 memory \xFA F10 quit", A_DIM);
     {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
         const char *where = chat.address();
         int len = strlen(where), room = SCR_COLS - 5 - col;
@@ -424,6 +427,7 @@ static void showHelp(void)
         "/model lists the AI providers in CLAWDOS.CFG \xFA /model name switches",
         "/theme lists the colour themes \xFA /theme name switches",
         "F3 toggles safe mode (asks before tools change files, memory or ports)",
+        "F4 or /memories looks through Claude's memories and deletes them",
         0
     };
     blankLine();
@@ -518,7 +522,7 @@ static void welcome(void)
         case 2: rowText(r, R, "Tips for getting started", A_ACCENT); break;
         case 3: rowText(r, R, "Type below and press Enter to chat", A_TEXT, RW); break;
         case 4: rowText(r, R, "Esc stops \xFA F2 new chat \xFA F3 safe", A_TEXT, RW); break;
-        case 5: rowText(r, R, "PgUp/PgDn scroll back \xFA F1 help", A_TEXT, RW); break;
+        case 5: rowText(r, R, "F1 help \xFA F4 memories \xFA PgUp/PgDn", A_TEXT, RW); break;
         case 6:
             rowFill(r, MID + 1, SCR_COLS - MID - 2, G_H, A_CLAWD);
             r.c[MID] = 0xC3 | (A_CLAWD << 8);              /* tee joints */
@@ -582,6 +586,28 @@ static void newChat(void)
     drawFooter();
 }
 
+/* F4 or /memories: the memory manager (memui.cpp) has the screen until Esc.
+   The conversation keeps the list of memories it started with. */
+static void memIdle(void)
+{
+    _asm { sti
+           hlt }
+    Net::service();
+}
+
+static void memories(void)
+{
+    int deleted;
+
+    if (state != IDLE)
+        return;
+    deleted = memui_run(A_ACCENT, memIdle);
+    if (deleted < 0)
+        note("Not enough memory to open the memory manager.", A_ERR);
+    else if (deleted > 0)
+        note("Deleted memories take effect in a new chat (F2).", A_DIM);
+}
+
 static void submit(void);
 static void handleKey(unsigned key);
 static void modelCommand(const char *arg);
@@ -627,6 +653,11 @@ static void submit(void)
     if (!stricmp(input, "/new") || !stricmp(input, "/clear")) {
         setInput("");
         newChat();
+        return;
+    }
+    if (!stricmp(input, "/memories") || !stricmp(input, "/memory")) {
+        setInput("");
+        memories();
         return;
     }
     if (!stricmp(input, "/help")) {
@@ -908,6 +939,7 @@ static void handleKey(unsigned key)
         case SCAN_ALTX: quitting = 1; break;
         case SCAN_F1:   showHelp(); break;
         case SCAN_F2:   if (state == IDLE) newChat(); break;
+        case SCAN_F4:   memories(); return;
         case SCAN_F3:
             tools_toggle_safe();
             note(tools_safe() ? "Safe mode on: changes need your OK."
@@ -1167,7 +1199,7 @@ int main(int argc, char *argv[])
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     const char *providerArg = NULL;
-    int i, bad;
+    int i, bad, openMemories = 0;
 
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-noscroll") || !stricmp(argv[i], "/noscroll")) {
@@ -1184,6 +1216,8 @@ int main(int argc, char *argv[])
             providerArg = argv[++i];
         } else if (!stricmp(argv[i], "-launched") || !stricmp(argv[i], "/launched")) {
             tools_set_launched(1);    /* CLAWDOS.EXE is our parent: runs go to it */
+        } else if (!stricmp(argv[i], "-memories") || !stricmp(argv[i], "/memories")) {
+            openMemories = 1;         /* open the memory manager once connected (screenshots) */
         } else if (!stricmp(argv[i], "-resume") || !stricmp(argv[i], "/resume")) {
             resumeMode = 1;
         } else if (argv[i][0] == '-' || argv[i][0] == '/') {
@@ -1192,7 +1226,7 @@ int main(int argc, char *argv[])
                    "       (CLAWDOS.EXE launches this program, HARNESS.EXE, and takes over\n"
                    "       while a run tool program needs the memory; HARNESS alone keeps\n"
                    "       programs inside its own memory)\n"
-                   "              [-m message] [-i text]\n\n"
+                   "              [-m message] [-i text] [-memories]\n\n"
                    "Settings come from " CFG_PATH ". A host replaces the\n"
                    "provider's tunnel address (plain HTTP, e.g. the mock API in tests).\n"
                    "-p       use this [provider] section instead of the configured one\n"
@@ -1200,7 +1234,8 @@ int main(int argc, char *argv[])
                    "-unsafe  start with safe mode off: tools run without asking\n"
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
-                   "-i       start with this text in the input box\n");
+                   "-i       start with this text in the input box\n"
+                   "-memories  open the memory manager (F4) once connected\n");
             return 1;
         } else {
             strncpy(host, argv[i], sizeof(host) - 1);
@@ -1282,6 +1317,8 @@ int main(int argc, char *argv[])
             setInput(firstMessage), submit();
         if (prefill)
             setInput(prefill);
+        if (openMemories)
+            memories();
     }
 
     while (!quitting) {

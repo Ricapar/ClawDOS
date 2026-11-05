@@ -14,6 +14,11 @@ void tools_set_launched(int on);
 /* After the relaunch: the note under the Run header, as the call would have shown. */
 void tools_show_result(int status, const ToolCtx *t);
 
+/* Hand the screen over (scr_suspend into an EMS page or the heap; NULL when
+   neither has room) and take it back, footer redrawn (ui_redraw). */
+unsigned short __far *tools_save_screen(void);
+void tools_restore_screen(unsigned short __far *save);
+
 /* Run one tool call: `input` is the tool_use input object (UTF-8 JSON, len
    bytes). Shows the header, asks in safe mode, runs the executor. `t` holds the
    CP437 output; returns TS_*. */

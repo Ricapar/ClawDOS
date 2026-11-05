@@ -183,6 +183,61 @@ static void testMemoryList(void)
     remove(MEM_DIR "\\ABCDEFGH.TXT");
 }
 
+/* The memory manager's calls (F4): scan sorted by name, load, delete. */
+static int memIndex(const MemEntry *e, int n, const char *name)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        if (!strcmp(e[i].name, name))
+            return i;
+    return -1;
+}
+
+static void testMemoryManage(void)
+{
+    static MemEntry e[32];
+    static char text[64];
+    ToolCtx t;
+    int n, a, b, cut;
+
+    tout_reset(&t);
+    t.unattended = 1;
+    targ_reset();
+    targ_set("name", "ZZUNITB", 7);
+    targ_set("text", "Second unit memory\nmore", 24);
+    CHECK("memui write b", tool_memory_write(&t) == TS_OK);
+    tout_reset(&t);
+    targ_reset();
+    targ_set("name", "ZZUNITA", 7);
+    targ_set("text", "First unit memory\nline two", 27);
+    CHECK("memui write a", tool_memory_write(&t) == TS_OK);
+
+    n = mem_scan(e, 32);
+    a = memIndex(e, n, "ZZUNITA");
+    b = memIndex(e, n, "ZZUNITB");
+    CHECK("memui scan finds both", a >= 0 && b >= 0);
+    CHECK("memui scan sorted", a >= 0 && b == a + 1);
+    if (a >= 0) {
+        CHECK("memui scan summary", !strcmp(e[a].summary, "First unit memory"));
+        CHECK("memui scan size", e[a].size == 27);
+    }
+    CHECK("memui scan max 1 counts all", mem_scan(e, 1) == n && n >= 2);
+    CHECK("memui scan max 1 keeps first", n < 2 || strcmp(e[0].name, "ZZUNITA") <= 0);
+
+    CHECK("memui load", mem_load("ZZUNITA", text, sizeof(text), &cut) == 26 && !cut);
+    CHECK("memui load drops CR", !strcmp(text, "First unit memory\nline two"));
+    CHECK("memui load cut", mem_load("ZZUNITA", text, 6, &cut) == 5 && cut && !strcmp(text, "First"));
+    CHECK("memui load missing", mem_load("ZZNONE", text, sizeof(text), &cut) == -1);
+    CHECK("memui load bad name", mem_load("..\\X", text, sizeof(text), &cut) == -1);
+
+    CHECK("memui delete", mem_delete("ZZUNITA") == 0);
+    CHECK("memui delete again fails", mem_delete("ZZUNITA") != 0);
+    CHECK("memui delete bad name", mem_delete("*") != 0);
+    n = mem_scan(e, 32);
+    CHECK("memui gone after delete", memIndex(e, n, "ZZUNITA") < 0 && memIndex(e, n, "ZZUNITB") >= 0);
+    mem_delete("ZZUNITB");
+}
+
 /* --- bios ------------------------------------------------------------------- */
 
 static void testTicks(void)
@@ -1054,6 +1109,7 @@ int main(void)
     testPlay();
     testMemory();
     testMemoryList();
+    testMemoryManage();
     testTicks();
     testConsole();
     testEdit();

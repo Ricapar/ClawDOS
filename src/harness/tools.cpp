@@ -165,7 +165,7 @@ static int toolTextart(ToolCtx *t)
 /* Somewhere to keep the chat screen while a tool has the display: an EMS page
    when there is EMS (one page is exactly the CGA's 16 KB), so a program run
    meanwhile gets that conventional memory, or else the heap. */
-static unsigned short __far *saveScreen(void)
+unsigned short __far *tools_save_screen(void)
 {
     unsigned short __far *save = (unsigned short __far *)ems_page();
     if (save == NULL)
@@ -175,7 +175,7 @@ static unsigned short __far *saveScreen(void)
     return save;
 }
 
-static void restoreScreen(unsigned short __far *save)
+void tools_restore_screen(unsigned short __far *save)
 {
     unsigned short __far *page = (unsigned short __far *)ems_page();   /* remap it */
     scr_resume(save);
@@ -205,10 +205,10 @@ static int toolRun(ToolCtx *t)
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
         return TS_RELAUNCH;
     }
-    if ((save = saveScreen()) == NULL)
+    if ((save = tools_save_screen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
     status = shell_run(t, cmd, unattended ? 1 : 5);
-    restoreScreen(save);
+    tools_restore_screen(save);
     if (big && !launched)
         tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
                      " so the program ran beside it)\n");

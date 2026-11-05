@@ -51,7 +51,8 @@ APPS = {
     # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
                              'lib/relaunch.c'], 'model': 's'},
-    'harness.exe': {'sources': ['src/harness/harness.cpp', 'src/harness/chat.cpp', 'src/harness/tools.cpp', 'lib/screen.c',
+    'harness.exe': {'sources': ['src/harness/harness.cpp', 'src/harness/chat.cpp', 'src/harness/tools.cpp', 'src/harness/memui.cpp',
+                               'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/mtcpcfg.c',
