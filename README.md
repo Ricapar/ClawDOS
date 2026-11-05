@@ -137,9 +137,7 @@ edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
 chat, F3 safe mode, F4 memories, F10 quit. `CLAWDOS host:port` replaces the tunnel address
 (plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
 a message at startup and `-i text` pre-fills the input box. Type `/model` to
-list the providers in `CLAWDOS.CFG` and switch, and `/theme claude` or
-`/theme opencode` to change colours (`theme opencode` in `CLAWDOS.CFG` sets
-the one it starts with).
+list the providers in `CLAWDOS.CFG` and switch.
 
 **Memories** (F4 or `/memories`): a full screen listing what Claude has saved in
 `C:\MEMORY` (name, size, first line). Enter shows one, Del deletes it after a

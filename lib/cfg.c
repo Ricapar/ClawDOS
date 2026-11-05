@@ -31,7 +31,7 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
 {
     if (p == NULL) {
         if (!stricmp(key, "provider")) setStr(c->provider, sizeof c->provider, val);
-        else if (!stricmp(key, "theme")) setStr(c->theme, sizeof c->theme, val);
+        else if (!stricmp(key, "theme")) ;   /* gone: older CFGs still load */
         else if (!stricmp(key, "timezone")) c->timezone = atoi(val);
         else if (!stricmp(key, "clock")) c->clock = atoi(val);
         else if (!stricmp(key, "name")) setStr(c->name, sizeof c->name, val);

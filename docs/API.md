@@ -24,7 +24,6 @@ Lines are `key value` (spaces or tabs between), `#` starts a comment except in
 
 ```
 provider anthropic          # the [section] used at startup (-p overrides)
-theme claude                # claude or opencode
 timezone -5                 # hours from UTC, for the clock set from the Date header
 clock 1                     # default; 0 leaves the DOS clock alone
 name Claude                 # {name} in PROMPT.TXT (a section may override)

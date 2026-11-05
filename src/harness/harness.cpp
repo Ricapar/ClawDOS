@@ -49,27 +49,11 @@
 #define INPUT_MAX 900
 #define HIST_N    8
 
-/* Colours. The themed ones (/theme, or CLAWDOS_THEME in the mTCP config) are
-   Clawd and the welcome panel's frame, accents, and the input box. CGA has no
-   orange; brown is the nearest, and on an IBM 5153 monitor it is a warm dark
-   orange. */
-struct Theme {
-    const char *name;
-    unsigned char clawd, accent, box;
-};
-
-static const Theme themes[] = {
-    { "claude",   SCR_ATTR(C_BROWN, C_BLACK), SCR_ATTR(C_LIGHTRED, C_BLACK),
-                  SCR_ATTR(C_DARKGRAY, C_BLACK) },
-    { "opencode", SCR_ATTR(C_LIGHTBLUE, C_BLACK), SCR_ATTR(C_LIGHTCYAN, C_BLACK),
-                  SCR_ATTR(C_BLUE, C_BLACK) },
-};
-#define N_THEMES  (int)(sizeof(themes) / sizeof(themes[0]))
-static const Theme *theme = &themes[0];
-
-#define A_CLAWD   (theme->clawd)
-#define A_ACCENT  (theme->accent)
-#define A_BOX     (theme->box)
+/* Colours. CGA has no orange; brown is the nearest, and on an IBM 5153
+   monitor it is a warm dark orange. */
+#define A_CLAWD   SCR_ATTR(C_BROWN, C_BLACK)
+#define A_ACCENT  SCR_ATTR(C_LIGHTRED, C_BLACK)
+#define A_BOX     SCR_ATTR(C_DARKGRAY, C_BLACK)
 #define A_TITLE   SCR_ATTR(C_WHITE, C_BLACK)
 #define A_TEXT    SCR_ATTR(C_LIGHTGRAY, C_BLACK)
 #define A_BRIGHT  SCR_ATTR(C_WHITE, C_BLACK)
@@ -131,7 +115,7 @@ static int resumeMode;                /* -resume: back from a run under CLAWDOS.
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
-    char chat[40], tool[64], provider[16], model[48], host[80], theme[16];
+    char chat[40], tool[64], provider[16], model[48], host[80];
     int round, merge, mergeAtStart, assistant, safe, quick, quit, noscroll;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
@@ -425,53 +409,12 @@ static void showHelp(void)
         "\x18/\x19 recall earlier messages \xFA \x1B/\x1A Home End Del edit \xFA Ctrl-U clears",
         "PgUp/PgDn scroll back \xFA F2 or /new starts over \xFA F10 or /quit leaves",
         "/model lists the AI providers in CLAWDOS.CFG \xFA /model name switches",
-        "/theme lists the colour themes \xFA /theme name switches",
         "F3 toggles safe mode (asks before tools change files, memory or ports)",
         "F4 or /memories looks through Claude's memories and deletes them",
         0
     };
     blankLine();
     dimLines(help);
-}
-
-static int findTheme(const char *name)
-{
-    for (int i = 0; i < N_THEMES; i++)
-        if (!stricmp(name, themes[i].name))
-            return i;
-    return -1;
-}
-
-/* /theme lists the themes, /theme NAME switches. What's already on the screen
-   keeps its colours; the footer is redrawn and the rest follows. */
-static void themeCommand(const char *arg)
-{
-    char buf[80];
-    int i;
-
-    while (*arg == ' ')
-        arg++;
-    if (!*arg) {
-        strcpy(buf, "Themes:");
-        for (i = 0; i < N_THEMES; i++) {
-            strcat(buf, " ");
-            strcat(buf, themes[i].name);
-            if (&themes[i] == theme)
-                strcat(buf, " (current)");
-        }
-        note(buf, A_DIM);
-        return;
-    }
-    i = findTheme(arg);
-    if (i < 0) {
-        sprintf(buf, "No theme called %.40s; /theme lists them.", arg);
-        note(buf, A_ERR);
-        return;
-    }
-    theme = &themes[i];
-    drawFooter();
-    sprintf(buf, "Theme: %s", theme->name);
-    note(buf, A_DIM);
 }
 
 static void systemLine(char *buf)
@@ -645,11 +588,6 @@ static void submit(void)
             histCount++;
     }
     histPos = -1;
-    if (!strnicmp(input, "/theme", 6) && (input[6] == 0 || input[6] == ' ')) {
-        themeCommand(input + 6);      /* before setInput: the name is in input */
-        setInput("");
-        return;
-    }
     if (!stricmp(input, "/new") || !stricmp(input, "/clear")) {
         setInput("");
         newChat();
@@ -1040,9 +978,9 @@ static int writeState(void)
     fprintf(f, "chat %s\ntool %s\nround %d\nmerge %d\nmergeat %d\nassistant %d\n",
             chat.chatPath(), chat.pendingToolId(), chat.pendingRound(),
             c->mergeNext, c->mergeAtStart, c->assistantInTurn);
-    fprintf(f, "safe %d\nquick %d\nquit %d\nnoscroll %d\nhost %s\nprovider %s\nmodel %s\ntheme %s\nticks %lu\n",
+    fprintf(f, "safe %d\nquick %d\nquit %d\nnoscroll %d\nhost %s\nprovider %s\nmodel %s\nticks %lu\n",
             tools_safe(), quickFlag, quitAfterReply, noscrollFlag, host,
-            chat.provider()->id, chat.provider()->model, theme->name, TICKS_NOW);
+            chat.provider()->id, chat.provider()->model, TICKS_NOW);
     return fclose(f) ? -1 : 0;
 }
 
@@ -1064,7 +1002,7 @@ static int readState(Resume *r)
         *v++ = 0;
         v[strcspn(v, "\r\n")] = 0;
         STATE_STR("chat", chat) STATE_STR("tool", tool) STATE_STR("provider", provider)
-        STATE_STR("model", model) STATE_STR("host", host) STATE_STR("theme", theme)
+        STATE_STR("model", model) STATE_STR("host", host)
         STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
         STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
         STATE_INT("quit", quit) STATE_INT("noscroll", noscroll)
@@ -1274,10 +1212,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s line %d: unknown setting or too many providers.\n", CFG_PATH, bad);
         return 1;
     }
-    if (resumeMode && resumeState.theme[0] && (i = findTheme(resumeState.theme)) >= 0)
-        theme = &themes[i];
-    else if (cfg->theme[0] && (i = findTheme(cfg->theme)) >= 0)
-        theme = &themes[i];
     if (Net::startStack())
         return 1;
     tool_idle = toolIdle;              /* keep the connection alive and the spinner moving during tools */

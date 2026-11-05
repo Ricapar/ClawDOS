@@ -593,7 +593,6 @@ static void testCfg(void)
     CHECK("cfg parse ok", cfg_parse(c, CFG_TEXT) == 0);
     CHECK("cfg two providers", c->nproviders == 2);
     CHECK("cfg timezone", c->timezone == -5);
-    CHECK_STR("cfg theme trimmed", c->theme, "claude");
     CHECK_STR("cfg startup provider", c->provider, "anthropic");
     p = cfg_provider(c, "ANTHROPIC");
     CHECK("cfg provider case", p != NULL);
@@ -613,7 +612,7 @@ static void testCfg(void)
     CHECK("cfg missing tunnel", cfg_parse(c, "[x]\ntype anthropic\nhost h\nkey k\nmodel m\n") == 0
           && !strcmp(cfg_missing(&c->providers[0]), "tunnel"));
     cfg_defaults(c);
-    CHECK("cfg bad global key line", cfg_parse(c, "theme claude\nbogus 1\n") == 2);
+    CHECK("cfg bad global key line", cfg_parse(c, "clock 1\nbogus 1\n") == 2);
     cfg_defaults(c);
     text[0] = 0;
     for (i = 0; i < 9; i++)
