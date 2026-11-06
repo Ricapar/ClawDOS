@@ -242,7 +242,7 @@ Every conversation is a file in `C:\CLAWDOS\CHATS\` (`MMDDnnn.JSN`): the
 messages exactly as the API sees them, which is also the log of what was said
 and done. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
 token, total, stop reason, tokens in/out, cache reads) and one per event worth
-knowing about (clock set, retries, lost links, errors).
+knowing about (retries, lost links, errors).
 
 ## Project layout
 

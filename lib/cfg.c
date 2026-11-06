@@ -8,7 +8,6 @@ void cfg_defaults(Cfg *c)
 {
     memset(c, 0, sizeof *c);
     strcpy(c->name, "Claude");
-    c->clock = 1;
 }
 
 static void providerDefaults(Provider *p, const char *id)
@@ -31,9 +30,8 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
 {
     if (p == NULL) {
         if (!stricmp(key, "provider")) setStr(c->provider, sizeof c->provider, val);
-        else if (!stricmp(key, "theme")) ;   /* gone: older CFGs still load */
-        else if (!stricmp(key, "timezone")) c->timezone = atoi(val);
-        else if (!stricmp(key, "clock")) c->clock = atoi(val);
+        else if (!stricmp(key, "theme") || !stricmp(key, "timezone") || !stricmp(key, "clock"))
+            ;                         /* gone: older CFGs still load */
         else if (!stricmp(key, "name")) setStr(c->name, sizeof c->name, val);
         else return -1;
         return 0;

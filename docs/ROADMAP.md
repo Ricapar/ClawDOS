@@ -82,9 +82,11 @@ is in [API.md](API.md).
         rewriting all of it: 49 whole-file writes of up to 5.4 KB happened),
         `search` (grep with line numbers inside CLAWDOS: FIND took 10-79 s a
         call), `run` with a list of commands that stops at the first failure
-        (FreeCOM has no `&`/`&&`; each TCC call was its own tool call), and the
-        clock set from the API's Date header (every file on the DOS PC was dated
-        1980-01-01: SNTP at boot doesn't take on the real PC).
+        (FreeCOM has no `&`/`&&`; each TCC call was its own tool call), and a
+        clock (every file on the DOS PC was dated 1980-01-01). The clock first
+        came from the API's Date header; since 2026-11 the boot scripts own it:
+        the PicoMEM 2's battery clock (ASTCLOCK) and SNTP in NETUP.BAT, which
+        failed before on DNS and mTCP's DHCP lease check.
   - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
         640 KB instead of ~285 KB. See [M6.2](#m62-full-memory-run) below.
   - [ ] **M6.3 - Screenshots**: Claude sees what its programs draw. Capture
@@ -171,8 +173,8 @@ reconnects and reopens the history); `TCC -c VOYAGER.C` reported "Available
 memory 215298" and TLINK ran, where the in-process run had no room. Two faults
 came out of it, both fixed: the resumed CLAWDOS failed mTCP's DHCP lease check
 once the clock had been set from the API (DHCP had stamped the lease with the
-1980 boot clock; CLAWDOS now moves the stamp in MTCP.CFG along with the clock,
-lib/mtcpcfg.h), and it could draw the local TCP port its predecessor had just
+1980 boot clock; fixed then by moving the stamp in MTCP.CFG, and since 2026-11
+by NETUP taking a fresh lease after SNTP), and it could draw the local TCP port its predecessor had just
 closed, because mTCP's tick counter starts at 0 in every process (the port now
 comes from the BIOS time of day). `CLAWDOS -resume` retries a resume that failed.
 

@@ -28,8 +28,6 @@ typedef struct Provider {
 
 typedef struct Cfg {
     char provider[16];    /* startup section */
-    int timezone;         /* hours from UTC */
-    int clock;            /* 1 (default): set the DOS clock from the API's Date header at startup */
     char name[24];        /* default "Claude" */
     int nproviders;
     Provider providers[CFG_PROVIDERS];

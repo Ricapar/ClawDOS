@@ -13,7 +13,7 @@ stream it reads and how the history stays valid.
 | `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the assistant's name, `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
-| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= stop= in= out= cr= cw=`, times in ms) and per notable event (clock set, retries, `connection #n`, errors), each with a timestamp. |
+| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= stop= in= out= cr= cw=`, times in ms) and per notable event (retries, `connection #n`, errors), each with a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). |
 
 ### CLAWDOS.CFG
@@ -23,8 +23,6 @@ Lines are `key value` (spaces or tabs between), `#` starts a comment except in
 
 ```
 provider anthropic          # the [section] used at startup (-p overrides)
-timezone -5                 # hours from UTC, for the clock set from the Date header
-clock 1                     # default; 0 leaves the DOS clock alone
 name Claude                 # {name} in PROMPT.TXT (a section may override)
 
 [anthropic]
@@ -128,12 +126,8 @@ Unknown events and keys are ignored.
 
 ## The clock
 
-At startup, before any turn, CLAWDOS sends a bare `GET {path}` through the
-tunnel (a 405, no tokens) and reads the `Date` header. Shifted by `timezone`,
-it sets the DOS clock when the DOS year is before 2020 (the PC has no battery
-clock), with the note `Clock set from the API; it said ...` on screen and in
-CLAWDOS.LOG. It happens outside any turn so the reply timers never straddle the
-jump. `clock 0` turns it off.
+CLAWDOS leaves the clock alone. At boot ASTCLOCK.COM reads the PicoMEM 2's
+battery clock and NETUP.BAT sets the time by SNTP (see CLAUDE.md).
 
 ## The tunnel
 

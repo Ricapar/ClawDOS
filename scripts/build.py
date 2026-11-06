@@ -54,13 +54,13 @@ APPS = {
                                'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
-                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/mtcpcfg.c',
+                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/net.cpp', 'lib/http.cpp'],
                    'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
     'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
-                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c', 'lib/mtcpcfg.c'],
+                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c'],
                     'model': 'l'},
 }
 
@@ -422,9 +422,6 @@ def clawdos_cfg(template):
     and the API key from .env filled in (a build without a key still boots)."""
     text = template.decode('cp437')
     text = re.sub(r'^tunnel .*$', f'tunnel {settings()["tunnel"]}', text, count=1, flags=re.M)
-    # The DOS PC sets its clock from the API's Date header (GMT): give it this machine's offset.
-    hours = round(time.localtime().tm_gmtoff / 3600)
-    text = re.sub(r'^timezone .*$', f'timezone {hours}', text, count=1, flags=re.M)
     key = api_key()
     if key:
         text = re.sub(r'^# key sk-ant-\.\.\..*$', f'key {key}', text, count=1, flags=re.M)

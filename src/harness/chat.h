@@ -82,7 +82,6 @@ class Chat {
     const char *err;
     Convo convo;                           /* the messages and the rules that keep the file valid */
     int reasked;                           /* re-sent after a lost link this turn */
-    int clockSet;
     int streamRc;
     unsigned long reqStart, firstText;
     int pendRound;                         /* the call the launcher is running (turn() returned 2) */
@@ -98,8 +97,6 @@ class Chat {
     int8_t waitHead(HttpHead *h);                 /* 0, -1, -2, -3 malformed, 1 Esc */
     void   drain(void);
     void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
-    void   setClock(const char *date);
-    void   syncClock(void);                       /* a bare GET at startup, for its Date header */
     void   logRound(int round);
     void   loadMemories(void);
     void   pause(int secs);

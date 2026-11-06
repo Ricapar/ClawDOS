@@ -6,7 +6,6 @@
 #include <dos.h>
 #include <direct.h>
 #include <io.h>
-#include <time.h>
 
 #include "chat.h"
 #include "apireq.h"
@@ -18,7 +17,6 @@
 #include "tools.h"
 #include "utf8.h"
 #include "convo.h"
-#include "mtcpcfg.h"
 
 #define SSE_MAX        16384u
 #define TOOL_INPUT_MAX 16384u
@@ -33,7 +31,7 @@
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
-               rxBuf(NULL), err(""), reasked(0), clockSet(0), streamRc(0), reqStart(0), firstText(0)
+               rxBuf(NULL), err(""), reasked(0), streamRc(0), reqStart(0), firstText(0)
 {
     addr[0] = path[0] = desc[0] = 0;
     convo_init(&convo);
@@ -84,8 +82,6 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         return -1;
     if (connect())
         return -1;
-    if (cfg->clock)
-        syncClock();
     if (!prov->key[0]) {
         sprintf(errBuf, "No API key for [%s]: add a key line to " CFG_PATH ".", prov->id);
         warn(errBuf);
@@ -111,7 +107,7 @@ int8_t Chat::resume(Cfg *c, const char *providerId, const char *model, const cha
     }
     convo = *state;
     loadMemories();
-    return connect();                 /* the clock was set before the relaunch */
+    return connect();
 }
 
 void Chat::close(void)
@@ -344,79 +340,6 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
             free(cp);
         }
     }
-}
-
-/* --- the clock ------------------------------------------------------------------ */
-
-/* Before any turn, so no timer straddles the jump: ask the API for anything
-   (a GET gets a 405 and costs no tokens) and read the Date header. */
-void Chat::syncClock(void)
-{
-    HttpHead h;
-    Sink *s = http.sink();
-
-    if (clockSet || !http.isOpen())
-        return;
-    sink_puts(s, "GET ");
-    sink_puts(s, prov->path);
-    sink_puts(s, " HTTP/1.1\r\nHost: ");
-    sink_puts(s, prov->host);
-    sink_puts(s, "\r\nConnection: keep-alive\r\n\r\n");
-    if (http.flush())
-        return;
-    http.beginResponse();
-    if (http.readHead(&h, 10) != 0) {
-        http.close();                 /* the next request reconnects */
-        return;
-    }
-    drain();
-    if (h.close)
-        http.close();
-    if (h.date[0])
-        setClock(h.date);
-}
-
-void Chat::setClock(const char *date)
-{
-    struct dosdate_t dd;
-    struct dostime_t dt;
-    int y, mo, d, h, mi, s;
-    char line[90];
-
-    unsigned long before, elapsed;
-    time_t was, now;
-
-    clockSet = 1;
-    if (http_parse_date(date, &y, &mo, &d, &h, &mi, &s))
-        return;
-    http_shift_time(&y, &mo, &d, &h, cfg->timezone);
-    _dos_getdate(&dd);
-    _dos_gettime(&dt);
-    if (dd.year >= 2020)
-        return;
-    sprintf(line, "Clock set from the API; it said %04u-%02u-%02u %02u:%02u:%02u",
-            dd.year, dd.month, dd.day, dt.hour, dt.minute, dt.second);
-    dd.year = (unsigned short)y;
-    dd.month = (unsigned char)mo;
-    dd.day = (unsigned char)d;
-    dt.hour = (unsigned char)h;
-    dt.minute = (unsigned char)mi;
-    dt.second = (unsigned char)s;
-    dt.hsecond = 0;
-    before = TICKS_NOW;
-    elapsed = ticks_elapsed(before, reqStart);    /* this request is in flight: keep its timing honest */
-    was = time(NULL);
-    _dos_setdate(&dd);
-    _dos_settime(&dt);
-    now = time(NULL);
-    reqStart = TICKS_NOW - elapsed;
-    ui->note(line, 0);
-    ui->log(line);
-    /* DHCP stamped its lease with the old clock: move the stamp along, or every
-       mTCP program started from now on (CLAWDOS -resume included) refuses to
-       run with "Your DHCP lease has expired". */
-    if (mtcpcfg_shift_timestamp(getenv("MTCPCFG"), (long)(now - was)))
-        ui->log("the DHCP lease stamp in the mTCP config was not moved with the clock");
 }
 
 void Chat::logRound(int round)

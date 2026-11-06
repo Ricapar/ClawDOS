@@ -5,12 +5,7 @@ REM starts HARNESS and, for a run with full_memory, takes the program while the
 REM harness is out of memory, then starts it again on the same conversation. MEM
 REM run that way shows what a program gets; a plain run stays inside the harness
 REM (no RUN.OUT); the tool tour then runs one in place and one through a relaunch.
-REM The clock is back at 1980 before DHCP runs, as on a PC without a clock:
-REM CLAWDOS sets it from the API, and the resumed CLAWDOS must still pass
-REM mTCP's DHCP lease check (lib/mtcpcfg.h).
 ECHO CLAWDOS-RELAUNCH-TEST > COM1
-DATE 01-01-1980
-TIME 00:00:00
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!bigrun MEM /C"
 ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1

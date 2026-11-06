@@ -24,7 +24,6 @@
 #include "apistream.h"
 #include "convo.h"
 #include "dosfs.h"
-#include "mtcpcfg.h"
 #include <stdlib.h>
 
 static int passed, failed;
@@ -529,30 +528,14 @@ static void testSse(void)
 static void testHttpHead(void)
 {
     HttpHead h;
-    int y, mo, d, hh, mi, ss;
     CHECK("head ok", http_parse_head("HTTP/1.1 200 OK\r\nDate: Fri, 31 Oct 2026 14:03:07 GMT\r\n"
                                      "transfer-encoding: Chunked\r\nConnection: keep-alive\r\n\r\n", &h) == 0);
     CHECK("head 200 chunked", h.status == 200 && h.chunked && h.contentLength == -1 && !h.close && h.retryAfter == 0);
-    CHECK_STR("head date", h.date, "Fri, 31 Oct 2026 14:03:07 GMT");
     CHECK("head 529", http_parse_head("HTTP/1.1 529 Overloaded\r\nContent-Length: 87\r\nretry-after: 12\r\n\r\n", &h) == 0
           && h.status == 529 && h.contentLength == 87 && !h.chunked && h.retryAfter == 12);
     CHECK("head close", http_parse_head("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n", &h) == 0 && h.close);
     CHECK("head no blank line", http_parse_head("HTTP/1.1 200 OK\r\nX: y\r\n", &h) == -1);
     CHECK("head bad status", http_parse_head("HTTP/1.1 abc\r\n\r\n", &h) == -1);
-    CHECK("date parse", http_parse_date("Fri, 31 Oct 2026 23:30:00 GMT", &y, &mo, &d, &hh, &mi, &ss) == 0
-          && y == 2026 && mo == 10 && d == 31 && hh == 23 && mi == 30 && ss == 0);
-    http_shift_time(&y, &mo, &d, &hh, -5);
-    CHECK("date shift back", y == 2026 && mo == 10 && d == 31 && hh == 18);
-    y = 2026; mo = 10; d = 31; hh = 23;
-    http_shift_time(&y, &mo, &d, &hh, 2);
-    CHECK("date shift into next month", y == 2026 && mo == 11 && d == 1 && hh == 1);
-    y = 2028; mo = 2; d = 28; hh = 23;
-    http_shift_time(&y, &mo, &d, &hh, 2);
-    CHECK("date shift leap day", y == 2028 && mo == 2 && d == 29 && hh == 1);
-    y = 2027; mo = 1; d = 1; hh = 0;
-    http_shift_time(&y, &mo, &d, &hh, -1);
-    CHECK("date shift into last year", y == 2026 && mo == 12 && d == 31 && hh == 23);
-    CHECK("date bad", http_parse_date("yesterday", &y, &mo, &d, &hh, &mi, &ss) == -1);
 }
 
 /* --- cfg ---------------------------------------------------------------------- */
@@ -592,7 +575,6 @@ static void testCfg(void)
     cfg_defaults(c);
     CHECK("cfg parse ok", cfg_parse(c, CFG_TEXT) == 0);
     CHECK("cfg two providers", c->nproviders == 2);
-    CHECK("cfg timezone", c->timezone == -5);
     CHECK_STR("cfg startup provider", c->provider, "anthropic");
     p = cfg_provider(c, "ANTHROPIC");
     CHECK("cfg provider case", p != NULL);
@@ -612,15 +594,15 @@ static void testCfg(void)
     CHECK("cfg missing tunnel", cfg_parse(c, "[x]\ntype anthropic\nhost h\nkey k\nmodel m\n") == 0
           && !strcmp(cfg_missing(&c->providers[0]), "tunnel"));
     cfg_defaults(c);
-    CHECK("cfg bad global key line", cfg_parse(c, "clock 1\nbogus 1\n") == 2);
+    CHECK("cfg bad global key line", cfg_parse(c, "name x\nbogus 1\n") == 2);
     cfg_defaults(c);
     text[0] = 0;
     for (i = 0; i < 9; i++)
         sprintf(text + strlen(text), "[p%d]\n", i);
     CHECK("cfg ninth section", cfg_parse(c, text) == 9);
     cfg_defaults(c);
-    CHECK("cfg defaults", c->timezone == 0 && !strcmp(c->name, "Claude") && c->nproviders == 0 && c->clock == 1);
-    CHECK("cfg clock off", cfg_parse(c, "clock 0\n") == 0 && c->clock == 0);
+    CHECK("cfg defaults", !strcmp(c->name, "Claude") && c->nproviders == 0);
+    CHECK("cfg old keys ignored", cfg_parse(c, "clock 0\ntimezone -5\ntheme x\n") == 0);
     free(c);
 }
 
@@ -980,42 +962,6 @@ static void testHistoryCommit(void)
     remove("C:\\HISTTEST.JSN");
 }
 
-/* --- mtcp config --------------------------------------------------------------- */
-
-static void readBack(const char *path, char *out, unsigned max)
-{
-    FILE *f = fopen(path, "rb");
-    unsigned n = 0;
-
-    if (f) {
-        n = fread(out, 1, max - 1, f);
-        fclose(f);
-    }
-    out[n] = 0;
-}
-
-static void testMtcpCfg(void)
-{
-    static char got[400];
-
-    writeFile("C:\\MTCPTEST.CFG",
-              "DHCPVER DHCP Client version Oct 10 2026\r\n"
-              "TIMESTAMP ( 315532958 ) Tue Jan  1 00:02:38 1980\r\n"
-              "packetint 0x60\r\nLEASE_TIME 86400\r\n");
-    CHECK("mtcpcfg shift", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 1477970256L) == 0);
-    readBack("C:\\MTCPTEST.CFG", got, sizeof got);
-    CHECK("mtcpcfg shift: timestamp moved", strstr(got, "\r\nTIMESTAMP ( 1793503214 ) ") != NULL);
-    CHECK("mtcpcfg shift: rest kept", strstr(got, "DHCPVER DHCP Client version Oct 10 2026\r\n") == got
-          && strstr(got, "\r\npacketint 0x60\r\nLEASE_TIME 86400\r\n") != NULL);
-    writeFile("C:\\MTCPTEST.CFG", "packetint 0x60\r\n");
-    CHECK("mtcpcfg shift: no timestamp", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 5) == -1);
-    readBack("C:\\MTCPTEST.CFG", got, sizeof got);
-    CHECK_STR("mtcpcfg shift: untouched", got, "packetint 0x60\r\n");
-    remove("C:\\MTCPTEST.CFG");
-    CHECK("mtcpcfg shift: no file", mtcpcfg_shift_timestamp("C:\\MTCPTEST.CFG", 5) == -1);
-    CHECK("mtcpcfg shift: no path", mtcpcfg_shift_timestamp(NULL, 5) == -1);
-}
-
 /* --- events too long for the SSE buffer (a long thinking signature) -------------- */
 
 static ApiStream bigAs;
@@ -1127,7 +1073,6 @@ int main(void)
     testLongDeltas();
     testConvo();
     testHistoryCommit();
-    testMtcpCfg();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;
