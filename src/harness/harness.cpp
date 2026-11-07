@@ -2,7 +2,7 @@
  *
  * Talks the Messages API itself (chat.cpp) through a TLS tunnel, sends what
  * you type, and streams the reply onto a word-wrapped, hardware-scrolled CGA
- * screen. The look follows Claude Code: a welcome panel with Clawd, "> "
+ * screen. The look follows Claude Code: a welcome panel with a mascot, "> "
  * for your messages, a bullet for Claude's, a spinner while it works, and an
  * input box pinned to the bottom of the screen.
  *
@@ -49,13 +49,29 @@
 #define INPUT_MAX 900
 #define HIST_N    8
 
-/* Colours. CGA has no orange; brown is the nearest, and on an IBM 5153
-   monitor it is a warm dark orange. */
-#define A_CLAWD   SCR_ATTR(C_BROWN, C_BLACK)
-#define A_ACCENT  SCR_ATTR(C_LIGHTRED, C_BLACK)
-#define A_BOX     SCR_ATTR(C_DARKGRAY, C_BLACK)
-#define A_TITLE   SCR_ATTR(C_WHITE, C_BLACK)
+/* Colours: "blue chrome". The conversation is on black; the parts that are
+   ClawDOS's own (the welcome panel, the input box, the F-key bar) are blue
+   or Norton-style bars, with yellow for the mascot and headings. On blue, dark
+   gray and light blue all but vanish, so dim text there is cyan. */
+#define A_MASCOT  SCR_ATTR(C_YELLOW, C_BLACK)       /* spinner */
+#define A_ACCENT  SCR_ATTR(C_YELLOW, C_BLACK)
 #define A_TEXT    SCR_ATTR(C_LIGHTGRAY, C_BLACK)
+
+#define A_P_TEXT  SCR_ATTR(C_LIGHTGRAY, C_BLUE)     /* welcome panel */
+#define A_P_FRAME SCR_ATTR(C_LIGHTCYAN, C_BLUE)
+#define A_P_MASCOT SCR_ATTR(C_YELLOW, C_BLUE)
+#define A_P_HEAD  SCR_ATTR(C_YELLOW, C_BLUE)
+#define A_P_TITLE SCR_ATTR(C_WHITE, C_BLUE)
+#define A_P_DIM   SCR_ATTR(C_CYAN, C_BLUE)
+
+#define A_BOX     SCR_ATTR(C_WHITE, C_BLUE)         /* input box: frame, prompt, text */
+#define A_BOX_HINT SCR_ATTR(C_LIGHTGRAY, C_BLUE)
+
+#define A_KEY_NUM SCR_ATTR(C_WHITE, C_BLACK)        /* F-key bar: "1" */
+#define A_KEY     SCR_ATTR(C_BLACK, C_CYAN)         /* "Help  " */
+#define A_KEY_OFF SCR_ATTR(C_WHITE, C_RED)          /* "Unsafe" */
+#define A_KEY_DIM SCR_ATTR(C_CYAN, C_BLACK)         /* the tunnel's address */
+
 #define A_BRIGHT  SCR_ATTR(C_WHITE, C_BLACK)
 #define A_DIM     SCR_ATTR(C_DARKGRAY, C_BLACK)
 #define A_ERR     SCR_ATTR(C_LIGHTRED, C_BLACK)
@@ -147,10 +163,10 @@ struct Row {
     unsigned short c[SCR_COLS];
 };
 
-static void rowBlank(Row &r)
+static void rowBlank(Row &r, unsigned char attr = A_TEXT)
 {
     for (int i = 0; i < SCR_COLS; i++)
-        r.c[i] = ' ' | (A_TEXT << 8);
+        r.c[i] = ' ' | (attr << 8);
 }
 
 static void rowFill(Row &r, int col, int n, unsigned char ch, unsigned char attr)
@@ -208,7 +224,7 @@ static void drawStatus(void)
         unsigned long elapsed = ticks_elapsed(now, busySince);
         int col, digits, end;
 
-        r.c[1] = spinGlyphs[(unsigned)(now >> 1) & 7] | (A_CLAWD << 8);
+        r.c[1] = spinGlyphs[(unsigned)(now >> 1) & 7] | (A_MASCOT << 8);
         col = rowText(r, 3, toolVerb ? toolVerb : verbs[verbIndex], A_ACCENT);
         col = rowText(r, col, "... ", A_ACCENT);
         digits = sprintf(buf, "(%u", TICKS_TO_SECS(elapsed));
@@ -217,7 +233,7 @@ static void drawStatus(void)
         scr_putn(footerTop(), 0, r.c, SCR_COLS);
         /* From here the timer interrupt moves the spinner and the seconds,
            even while we're busy with no time to call this. */
-        scr_ticker(footerTop(), 1, spinGlyphs, A_CLAWD, col + 1, A_DIM, elapsed, now,
+        scr_ticker(footerTop(), 1, spinGlyphs, A_MASCOT, col + 1, A_DIM, elapsed, now,
                    &r.c[col + digits], end - (col + digits));
         return;
     }
@@ -269,21 +285,30 @@ static void drawInputLine(int i)
     Row r;
     int line = boxScroll + i;
 
-    rowBlank(r);
+    rowBlank(r, A_BOX);
     r.c[0] = G_V | (A_BOX << 8);
     r.c[SCR_COLS - 1] = G_V | (A_BOX << 8);
     if (line == 0)
-        r.c[2] = '>' | (A_BRIGHT << 8);
+        r.c[2] = '>' | (A_BOX << 8);
     if (inputLen == 0 && i == 0) {
         rowText(r, BOX_TEXT, state == IDLE ? "What would you like to do?  (F1 for help)" : "",
-                A_DIM);
+                A_BOX_HINT);
     } else if (line < lineCount) {
         int first = lineStart[line];
         int n = lineEnd(line) - first;
         for (int k = 0; k < n; k++)
-            r.c[BOX_TEXT + k] = (unsigned char)input[first + k] | (A_BRIGHT << 8);
+            r.c[BOX_TEXT + k] = (unsigned char)input[first + k] | (A_BOX << 8);
     }
     scr_putn(footerTop() + 2 + i, 0, r.c, SCR_COLS);
+}
+
+/* One Norton-style F-key: the number, then its label on a bar. */
+static int rowKey(Row &r, int col, const char *num, const char *label, unsigned char attr)
+{
+    col = rowText(r, col, num, A_KEY_NUM);
+    rowFill(r, col, 6, ' ', attr);
+    rowText(r, col, label, attr, 6);
+    return col + 6 + 1;
 }
 
 static void drawHint(void)
@@ -292,9 +317,11 @@ static void drawHint(void)
     int col;
 
     rowBlank(r);
-    col = rowText(r, 2, "F1 help \xFA F2 new chat \xFA F3 ", A_DIM);
-    col = rowText(r, col, tools_safe() ? "safe:on" : "safe:off", tools_safe() ? A_GOOD : A_ERR);
-    col = rowText(r, col, " \xFA F4 memory \xFA F10 quit", A_DIM);
+    col = rowKey(r, 0, "1", "Help", A_KEY);
+    col = rowKey(r, col, "2", "New", A_KEY);
+    col = rowKey(r, col, "3", tools_safe() ? "Safe" : "Unsafe", tools_safe() ? A_KEY : A_KEY_OFF);
+    col = rowKey(r, col, "4", "Memory", A_KEY);
+    col = rowKey(r, col, "10", "Quit", A_KEY);
     {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
         const char *where = chat.address();
         int len = strlen(where), room = SCR_COLS - 5 - col;
@@ -302,7 +329,7 @@ static void drawHint(void)
             len = room;
         col = SCR_COLS - 2 - len - 2;
         r.c[col] = G_BULLET | ((chat.connected() ? A_GOOD : A_ERR) << 8);
-        rowText(r, col + 2, where, A_DIM, len);
+        rowText(r, col + 2, where, A_KEY_DIM, len);
     }
     scr_putn(SCR_ROWS - 1, 0, r.c, SCR_COLS);
 }
@@ -313,7 +340,6 @@ static void drawFooter(void)
     int top = footerTop();
 
     drawStatus();
-    rowBlank(r);
     rowFrame(r, G_TL, G_H, G_TR, A_BOX);
     scr_putn(top + 1, 0, r.c, SCR_COLS);
     for (int i = 0; i < boxLines; i++)
@@ -425,13 +451,13 @@ static void systemLine(char *buf)
     Net::localAddress(buf + strlen(buf));
 }
 
-/* Claude Code's welcome panel: Clawd on the left, tips on the right. */
+/* The welcome panel, on blue: the mascot on the left, tips on the right. */
 static void welcome(void)
 {
-    /* CORE in half blocks (docs/research/mascots.md): a one-eyed ISA card,
-       11x8 "pixels", edge-connector fingers along the bottom. Odd width so
-       the four legs sit symmetrically. */
-    static const char *const clawd[4] = {
+    /* The mascot, CORE, in half blocks (docs/research/mascots.md has the
+       others): a one-eyed ISA card, 11x8 "pixels", edge-connector fingers
+       along the bottom. Odd width so the four legs sit symmetrically. */
+    static const char *const mascot[4] = {
         "\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
         "\xDB \xDB\xDF\xDB\xDB\xDB\xDF\xDB \xDB",
         "\xDB \xDF\xDF\xDF\xDF\xDF\xDF\xDF \xDB",
@@ -444,38 +470,38 @@ static void welcome(void)
 
     systemLine(sys);
     for (i = 0; i < 12; i++) {
-        rowBlank(r);
+        rowBlank(r, A_P_TEXT);
         if (i == 0) {
             int col;
-            rowFrame(r, G_TL, G_H, G_TR, A_CLAWD);
-            col = rowText(r, 4, " ClawDOS ", A_TITLE);
-            rowText(r, col - 1, " v" VERSION " ", A_DIM);
-            r.c[MID] = G_TDOWN | (A_CLAWD << 8);
+            rowFrame(r, G_TL, G_H, G_TR, A_P_FRAME);
+            col = rowText(r, 4, " ClawDOS ", A_P_TITLE);
+            rowText(r, col - 1, " v" VERSION " ", A_P_DIM);
+            r.c[MID] = G_TDOWN | (A_P_FRAME << 8);
         } else if (i == 11) {
-            rowFrame(r, G_BL, G_H, G_BR, A_CLAWD);
-            r.c[MID] = G_TUP | (A_CLAWD << 8);
+            rowFrame(r, G_BL, G_H, G_BR, A_P_FRAME);
+            r.c[MID] = G_TUP | (A_P_FRAME << 8);
         } else {
-            r.c[0] = r.c[MID] = r.c[SCR_COLS - 1] = G_V | (A_CLAWD << 8);
+            r.c[0] = r.c[MID] = r.c[SCR_COLS - 1] = G_V | (A_P_FRAME << 8);
         }
         switch (i) {
-        case 2: rowCenter(r, L, LW, "Welcome to ClawDOS!", A_TITLE); break;
-        case 4: case 5: case 6: case 7: rowCenter(r, L, LW, clawd[i - 4], A_CLAWD); break;
-        case 9: rowCenter(r, L, LW, chat.describe(), A_DIM); break;
-        case 10: rowCenter(r, L, LW, chat.address(), A_DIM); break;
+        case 2: rowCenter(r, L, LW, "Welcome to ClawDOS!", A_P_TITLE); break;
+        case 4: case 5: case 6: case 7: rowCenter(r, L, LW, mascot[i - 4], A_P_MASCOT); break;
+        case 9: rowCenter(r, L, LW, chat.describe(), A_P_DIM); break;
+        case 10: rowCenter(r, L, LW, chat.address(), A_P_DIM); break;
         }
         switch (i) {
-        case 2: rowText(r, R, "Tips for getting started", A_ACCENT); break;
-        case 3: rowText(r, R, "Type below and press Enter to chat", A_TEXT, RW); break;
-        case 4: rowText(r, R, "Esc stops \xFA F2 new chat \xFA F3 safe", A_TEXT, RW); break;
-        case 5: rowText(r, R, "F1 help \xFA F4 memories \xFA PgUp/PgDn", A_TEXT, RW); break;
+        case 2: rowText(r, R, "Tips for getting started", A_P_HEAD); break;
+        case 3: rowText(r, R, "Type below and press Enter to chat", A_P_TEXT, RW); break;
+        case 4: rowText(r, R, "Esc stops \xFA F2 new chat \xFA F3 safe", A_P_TEXT, RW); break;
+        case 5: rowText(r, R, "F1 help \xFA F4 memories \xFA PgUp/PgDn", A_P_TEXT, RW); break;
         case 6:
-            rowFill(r, MID + 1, SCR_COLS - MID - 2, G_H, A_CLAWD);
-            r.c[MID] = 0xC3 | (A_CLAWD << 8);              /* tee joints */
-            r.c[SCR_COLS - 1] = 0xB4 | (A_CLAWD << 8);
+            rowFill(r, MID + 1, SCR_COLS - MID - 2, G_H, A_P_FRAME);
+            r.c[MID] = 0xC3 | (A_P_FRAME << 8);              /* tee joints */
+            r.c[SCR_COLS - 1] = 0xB4 | (A_P_FRAME << 8);
             break;
-        case 7: rowText(r, R, "This machine", A_ACCENT); break;
-        case 8: rowText(r, R, sys, A_TEXT, RW); break;
-        case 9: rowText(r, R, "ClawDOS \xFA FreeDOS \xFA mTCP", A_TEXT, RW); break;
+        case 7: rowText(r, R, "This machine", A_P_HEAD); break;
+        case 8: rowText(r, R, sys, A_P_TEXT, RW); break;
+        case 9: rowText(r, R, "ClawDOS \xFA FreeDOS \xFA mTCP", A_P_TEXT, RW); break;
         }
         con_line(r.c);
     }

@@ -19,8 +19,12 @@ Every cell has its own attribute, so a drawing can mix colours cell by cell (on 
 ```
 
 A personality core as 1983 hardware: an 8-bit ISA card with one eye, plugged into the 5160. The "AI" is
-literally something added to this PC. Suggested colours: green board, light red eye, yellow edge-connector fingers
-(the harness still draws it all in Clawd's brown, `A_CLAWD`).
+literally something added to this PC. It's drawn in solid yellow on the blue welcome panel (`A_P_MASCOT`;
+`A_MASCOT` colours the spinner). A multicolour version could use a green board, light red eye and yellow
+edge-connector fingers.
+
+To change mascot: replace `mascot[]` in `welcome()` (src/harness/harness.cpp) and, if its colour changes,
+`A_MASCOT` and `A_P_MASCOT`.
 
 It's 11 wide so the four legs sit symmetrically; the first 10-wide draft (`▀▀█ █ █ █▀`) had two cells of edge
 left of the legs and one on the right, and looked off-centre in 86Box. The outer `▀▀` on each side rounds off
@@ -63,7 +67,7 @@ samples are our own lines, not quotes from the game; keep it light, it's on scre
 - Lost link: `The tunnel has stopped cooperating. Retrying, as is tradition.`
 - Safe mode: `This will modify files. For your safety, confirm with Y.`
 
-## For reference: Clawd today (12x4, brown)
+## For reference: Clawd, the original (12x4, brown)
 
 ```
    ██████████
