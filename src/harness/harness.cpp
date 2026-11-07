@@ -428,12 +428,13 @@ static void systemLine(char *buf)
 /* Claude Code's welcome panel: Clawd on the left, tips on the right. */
 static void welcome(void)
 {
-    /* Clawd in half blocks: 12x8 "pixels", eyes are the holes. */
+    /* CORE in half blocks (docs/research/mascots.md): a one-eyed ISA card,
+       10x8 "pixels", edge-connector fingers along the bottom. */
     static const char *const clawd[4] = {
-        " \xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB ",
-        "\xDC\xDB\xDB \xDB\xDB\xDB\xDB \xDB\xDB\xDC",
-        "\xDF\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDB\xDF",
-        " \xDF \xDF    \xDF \xDF ",
+        "\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
+        "\xDB \xDB\xDF\xDB\xDB\xDF\xDB \xDB",
+        "\xDB \xDF\xDF\xDF\xDF\xDF\xDF \xDB",
+        "\xDF\xDF\xDB \xDB \xDB \xDB\xDF",
     };
     enum { L = 1, LW = 38, MID = 39, R = 42, RW = SCR_COLS - 2 - 42 };
     char sys[48];

@@ -47,6 +47,7 @@ CLAWDOS/        repo:image/clawdos/*
 
 TESTS/                  build:dosunit.exe
 TESTS/DEV/              repo:image/tests/dev/*
+TESTS/DEMO/             repo:image/tests/demo/*
 
 # Development tools that run on the 8088 (docs/research/8088 development tools.md;
 # fetched by scripts/setup-tools.ps1). Each tool's licence goes along in DEVEL/DOC.
@@ -63,6 +64,7 @@ DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/license.txt
 DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/ldebug.txt
 DEVEL/BIN/              devel:gwbasic.zip!DEVEL/GWBASIC/GWBASIC.EXE
 DEVEL/DOC/GWBASIC/      repo:image/devel/GWBASIC.TXT
+DEVEL/DOC/DEMOFX/       repo:image/devel/demofx/*
 DEVEL/BCC/              devel:bcc.zip!DEVEL/BCC/**
 
 # Turbo C 2.0 from the user's own floppy images in external/ (skipped if absent).
@@ -87,3 +89,5 @@ TC/                     repo:image/tc/TURBOC.CFG
 
 # Claude's first memory: what it can build with on this machine.
 MEMORY/                 repo:image/memory/DEVTOOLS.TXT
+# The CGA demo-effects skill: an index memory; the topics are in DEVEL/DOC/DEMOFX.
+MEMORY/                 repo:image/memory/DEMOFX.TXT
