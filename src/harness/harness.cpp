@@ -67,9 +67,9 @@
 #define A_BOX     SCR_ATTR(C_WHITE, C_BLUE)         /* input box: frame, prompt, text */
 #define A_BOX_HINT SCR_ATTR(C_LIGHTGRAY, C_BLUE)
 
-#define A_KEY_NUM SCR_ATTR(C_WHITE, C_BLACK)        /* F-key bar: "1" */
+#define A_KEY_NUM SCR_ATTR(C_WHITE, C_BLACK)        /* F-key bar: "F1" */
 #define A_KEY     SCR_ATTR(C_BLACK, C_CYAN)         /* "Help  " */
-#define A_KEY_OFF SCR_ATTR(C_WHITE, C_RED)          /* "Unsafe" */
+#define A_KEY_OFF SCR_ATTR(C_WHITE, C_RED)          /* "Safe" with safe mode off */
 #define A_KEY_DIM SCR_ATTR(C_CYAN, C_BLACK)         /* the tunnel's address */
 
 #define A_BRIGHT  SCR_ATTR(C_WHITE, C_BLACK)
@@ -317,11 +317,11 @@ static void drawHint(void)
     int col;
 
     rowBlank(r);
-    col = rowKey(r, 0, "1", "Help", A_KEY);
-    col = rowKey(r, col, "2", "New", A_KEY);
-    col = rowKey(r, col, "3", tools_safe() ? "Safe" : "Unsafe", tools_safe() ? A_KEY : A_KEY_OFF);
-    col = rowKey(r, col, "4", "Memory", A_KEY);
-    col = rowKey(r, col, "10", "Quit", A_KEY);
+    col = rowKey(r, 0, "F1", "Help", A_KEY);
+    col = rowKey(r, col, "F2", "New", A_KEY);
+    col = rowKey(r, col, "F3", "Safe", tools_safe() ? A_KEY : A_KEY_OFF);   /* red when off */
+    col = rowKey(r, col, "F4", "Memory", A_KEY);
+    col = rowKey(r, col, "F10", "Quit", A_KEY);
     {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
         const char *where = chat.address();
         int len = strlen(where), room = SCR_COLS - 5 - col;
