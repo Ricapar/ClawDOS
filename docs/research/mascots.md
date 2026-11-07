@@ -9,25 +9,28 @@ All art is CP437 half blocks (`█` 0xDB, `▀` 0xDF, `▄` 0xDC, space): each t
 4-row drawing is 8 pixels tall. The slot is rows 4-7 of the welcome panel's left half (38 columns), centred.
 Every cell has its own attribute, so a drawing can mix colours cell by cell (on black), not within a cell.
 
-## Chosen: CORE, "watching" (10x4)
+## Chosen: CORE, "watching" (11x4)
 
 ```
-  █▀▀▀▀▀▀▀▀█
-  █ █▀██▀█ █
-  █ ▀▀▀▀▀▀ █
-  ▀▀█ █ █ █▀
+  █▀▀▀▀▀▀▀▀▀█
+  █ █▀███▀█ █
+  █ ▀▀▀▀▀▀▀ █
+  ▀▀█ █ █ █▀▀
 ```
 
 A personality core as 1983 hardware: an 8-bit ISA card with one eye, plugged into the 5160. The "AI" is
-literally something added to this PC. Colours: green board, light red eye, yellow edge-connector fingers.
+literally something added to this PC. Suggested colours: green board, light red eye, yellow edge-connector fingers
+(the harness still draws it all in Clawd's brown, `A_CLAWD`).
 
-As C strings, for `welcome()`:
+It's 11 wide so the four legs sit symmetrically; the first 10-wide draft (`▀▀█ █ █ █▀`) had two cells of edge
+left of the legs and one on the right, and looked off-centre in 86Box. The outer `▀▀` on each side rounds off
+the bottom corners. As C strings, in `welcome()`:
 
 ```c
-"\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
-"\xDB \xDB\xDF\xDB\xDB\xDF\xDB \xDB",
-"\xDB \xDF\xDF\xDF\xDF\xDF\xDF \xDB",
-"\xDF\xDF\xDB \xDB \xDB \xDB\xDF",
+"\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
+"\xDB \xDB\xDF\xDB\xDB\xDB\xDF\xDB \xDB",
+"\xDB \xDF\xDF\xDF\xDF\xDF\xDF\xDF \xDB",
+"\xDF\xDF\xDB \xDB \xDB \xDB\xDF\xDF",
 ```
 
 The same card had other moods, which could come back if a state ever gets its own picture (thinking, safe-mode

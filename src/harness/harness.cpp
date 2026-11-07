@@ -429,12 +429,13 @@ static void systemLine(char *buf)
 static void welcome(void)
 {
     /* CORE in half blocks (docs/research/mascots.md): a one-eyed ISA card,
-       10x8 "pixels", edge-connector fingers along the bottom. */
+       11x8 "pixels", edge-connector fingers along the bottom. Odd width so
+       the four legs sit symmetrically. */
     static const char *const clawd[4] = {
-        "\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
-        "\xDB \xDB\xDF\xDB\xDB\xDF\xDB \xDB",
-        "\xDB \xDF\xDF\xDF\xDF\xDF\xDF \xDB",
-        "\xDF\xDF\xDB \xDB \xDB \xDB\xDF",
+        "\xDB\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDF\xDB",
+        "\xDB \xDB\xDF\xDB\xDB\xDB\xDF\xDB \xDB",
+        "\xDB \xDF\xDF\xDF\xDF\xDF\xDF\xDF \xDB",
+        "\xDF\xDF\xDB \xDB \xDB \xDB\xDF\xDF",
     };
     enum { L = 1, LW = 38, MID = 39, R = 42, RW = SCR_COLS - 2 - 42 };
     char sys[48];
