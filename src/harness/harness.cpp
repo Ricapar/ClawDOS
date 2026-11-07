@@ -307,6 +307,10 @@ static void drawInputLine(int i)
    CLAWDOS.CFG sets where it starts. "" sends no output_config at all. */
 static const char *const efforts[] = { "low", "medium", "high", "xhigh", "max" };
 static const char *const effortNames[] = { "Low", "Medium", "High", "XHigh", "Max" };
+static const unsigned char effortAttrs[] = {     /* the meter beside F5's label */
+    SCR_ATTR(C_LIGHTGREEN, C_BLACK), SCR_ATTR(C_LIGHTCYAN, C_BLACK), SCR_ATTR(C_YELLOW, C_BLACK),
+    SCR_ATTR(C_LIGHTRED, C_BLACK), SCR_ATTR(C_LIGHTMAGENTA, C_BLACK)
+};
 #define N_EFFORTS (sizeof efforts / sizeof efforts[0])
 
 static int effortIndex(void)
@@ -339,6 +343,18 @@ static void cycleEffort(void)
     strcpy(p->effort, efforts[i >= (int)N_EFFORTS ? 0 : i]);
 }
 
+/* After F5's label: a five-cell meter, one solid block per level, in the
+   level's colour (dark gray and empty when no effort is set). */
+static int rowEffortMeter(Row &r, int col)
+{
+    int i = effortIndex();
+    unsigned char attr = i >= 0 ? effortAttrs[i] : A_DIM;
+
+    for (int k = 0; k < (int)N_EFFORTS; k++)
+        r.c[col + k] = (k <= i ? 0xDB : 0xB0) | (attr << 8);
+    return col + N_EFFORTS;
+}
+
 /* One Norton-style F-key: the number, then its label on a bar. */
 static int rowKey(Row &r, int col, const char *num, const char *label, unsigned char attr)
 {
@@ -358,7 +374,8 @@ static void drawHint(void)
     col = rowKey(r, col, "F2", "New", A_KEY);
     col = rowKey(r, col, "F3", "Safe", tools_safe() ? A_KEY : A_KEY_OFF);   /* red when off */
     col = rowKey(r, col, "F4", "Memory", A_KEY);
-    col = rowKey(r, col, "F5", effortLabel(), A_KEY);
+    col = rowKey(r, col, "F5", effortLabel(), A_KEY) - 1;   /* the meter goes before the gap */
+    col = rowEffortMeter(r, col) + 1;
     col = rowKey(r, col, "F10", "Quit", A_KEY);
     {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
         const char *where = chat.address();
