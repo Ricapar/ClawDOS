@@ -134,7 +134,7 @@ networking. It is faster but less exact (it emulates an 80186).
 
 Enter sends. Esc stops a reply or clears the input. Arrows, Home, End and Del
 edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
-chat, F3 safe mode, F4 memories, F10 quit. `CLAWDOS host:port` replaces the tunnel address
+chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), F10 quit. `CLAWDOS host:port` replaces the tunnel address
 (plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
 a message at startup and `-i text` pre-fills the input box. Type `/model` to
 list the providers in `CLAWDOS.CFG` and switch.

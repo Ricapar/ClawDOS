@@ -105,6 +105,7 @@
 #define SCAN_F2   0x3C
 #define SCAN_F3   0x3D
 #define SCAN_F4   0x3E
+#define SCAN_F5   0x3F
 #define SCAN_F10  0x44
 #define SCAN_ALTX 0x2D
 #define SCAN_HOME 0x47
@@ -131,7 +132,7 @@ static int resumeMode;                /* -resume: back from a run under CLAWDOS.
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
-    char chat[40], tool[64], provider[16], model[48], host[80];
+    char chat[40], tool[64], provider[16], model[48], host[80], effort[8];
     int round, merge, mergeAtStart, assistant, safe, quick, quit;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
@@ -302,6 +303,42 @@ static void drawInputLine(int i)
     scr_putn(footerTop() + 2 + i, 0, r.c, SCR_COLS);
 }
 
+/* F5 cycles the provider's effort (output_config.effort) for the session;
+   CLAWDOS.CFG sets where it starts. "" sends no output_config at all. */
+static const char *const efforts[] = { "low", "medium", "high", "xhigh", "max" };
+static const char *const effortNames[] = { "Low", "Medium", "High", "XHigh", "Max" };
+#define N_EFFORTS (sizeof efforts / sizeof efforts[0])
+
+static int effortIndex(void)
+{
+    Provider *p = chat.provider();
+    unsigned i;
+
+    if (p)
+        for (i = 0; i < N_EFFORTS; i++)
+            if (!stricmp(p->effort, efforts[i]))
+                return i;
+    return -1;
+}
+
+static const char *effortLabel(void)
+{
+    int i = effortIndex();
+    if (i >= 0)
+        return effortNames[i];
+    return chat.provider() && !chat.provider()->effort[0] ? "Auto" : "Effort";
+}
+
+static void cycleEffort(void)
+{
+    Provider *p = chat.provider();
+    int i = effortIndex() + 1;
+
+    if (!p)
+        return;
+    strcpy(p->effort, efforts[i >= (int)N_EFFORTS ? 0 : i]);
+}
+
 /* One Norton-style F-key: the number, then its label on a bar. */
 static int rowKey(Row &r, int col, const char *num, const char *label, unsigned char attr)
 {
@@ -321,6 +358,7 @@ static void drawHint(void)
     col = rowKey(r, col, "F2", "New", A_KEY);
     col = rowKey(r, col, "F3", "Safe", tools_safe() ? A_KEY : A_KEY_OFF);   /* red when off */
     col = rowKey(r, col, "F4", "Memory", A_KEY);
+    col = rowKey(r, col, "F5", effortLabel(), A_KEY);
     col = rowKey(r, col, "F10", "Quit", A_KEY);
     {   /* the tunnel's address, right-aligned; a long one is cut to the room left */
         const char *where = chat.address();
@@ -437,6 +475,7 @@ static void showHelp(void)
         "/model lists the AI providers in CLAWDOS.CFG \xFA /model name switches",
         "F3 toggles safe mode (asks before tools change files, memory or ports)",
         "F4 or /memories looks through Claude's memories and deletes them",
+        "F5 cycles effort for the next message: low, medium, high, xhigh, max",
         0
     };
     blankLine();
@@ -906,6 +945,16 @@ static void handleKey(unsigned key)
         case SCAN_F1:   showHelp(); break;
         case SCAN_F2:   if (state == IDLE) newChat(); break;
         case SCAN_F4:   memories(); return;
+        case SCAN_F5:
+            if (chat.provider()) {
+                char msg[48];
+                cycleEffort();
+                sprintf(msg, "Effort %s from the next message.", chat.provider()->effort);
+                note(msg, A_DIM);
+                drawHint();
+            }
+            placeCursor();
+            return;
         case SCAN_F3:
             tools_toggle_safe();
             note(tools_safe() ? "Safe mode on: changes need your OK."
@@ -1006,9 +1055,9 @@ static int writeState(void)
     fprintf(f, "chat %s\ntool %s\nround %d\nmerge %d\nmergeat %d\nassistant %d\n",
             chat.chatPath(), chat.pendingToolId(), chat.pendingRound(),
             c->mergeNext, c->mergeAtStart, c->assistantInTurn);
-    fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\nticks %lu\n",
+    fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\neffort %s\nticks %lu\n",
             tools_safe(), quickFlag, quitAfterReply, host,
-            chat.provider()->id, chat.provider()->model, TICKS_NOW);
+            chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
     return fclose(f) ? -1 : 0;
 }
 
@@ -1030,7 +1079,7 @@ static int readState(Resume *r)
         *v++ = 0;
         v[strcspn(v, "\r\n")] = 0;
         STATE_STR("chat", chat) STATE_STR("tool", tool) STATE_STR("provider", provider)
-        STATE_STR("model", model) STATE_STR("host", host)
+        STATE_STR("model", model) STATE_STR("host", host) STATE_STR("effort", effort)
         STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
         STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
         STATE_INT("quit", quit)
@@ -1258,6 +1307,8 @@ int main(int argc, char *argv[])
         if (chat.resume(cfg, providerArg, resumeState.model, host[0] ? host : NULL, &chatUi,
                         resumeState.chat, &c))
             fatal(chat.errorText());
+        if (resumeState.effort[0])    /* F5 may have changed it from CLAWDOS.CFG's */
+            strcpy(chat.provider()->effort, resumeState.effort);
         remove(RELAUNCH_STATE);       /* resumed; until now CLAWDOS -resume could try again */
         statusNote = NULL;
         drawFooter();

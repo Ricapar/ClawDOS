@@ -33,7 +33,7 @@ path /v1/messages           # default
 auth x-api-key              # default; "bearer" sends Authorization: Bearer instead
 key sk-ant-...              # or: keyfile C:\CLAWDOS\ANTHROP.KEY
 model claude-opus-5-5
-effort low                  # omitted: no output_config is sent
+effort low                  # omitted: no output_config is sent; F5 cycles it
 betas ...                   # omitted: no anthropic-beta header
 cache 1                     # default; 0 sends no cache_control
 ```
@@ -63,7 +63,8 @@ prompt, the tools file and the history file from disk (lib/apireq.c):
 ```
 
 No `thinking` field is sent (the models think adaptively; `effort` is the
-control) and no `fallbacks`. One tool call per round keeps one arguments buffer
+control: F5 cycles it through low, medium, high, xhigh and max for the session,
+which costs one uncached request after a change) and no `fallbacks`. One tool call per round keeps one arguments buffer
 enough and runs the tools in the order the user sees them.
 
 ## The history file
