@@ -308,8 +308,8 @@ static void drawInputLine(int i)
 static const char *const efforts[] = { "low", "medium", "high", "xhigh", "max" };
 static const char *const effortNames[] = { "Low", "Medium", "High", "XHigh", "Max" };
 static const unsigned char effortAttrs[] = {     /* the meter beside F5's label */
-    SCR_ATTR(C_LIGHTGREEN, C_BLACK), SCR_ATTR(C_LIGHTCYAN, C_BLACK), SCR_ATTR(C_YELLOW, C_BLACK),
-    SCR_ATTR(C_LIGHTRED, C_BLACK), SCR_ATTR(C_LIGHTMAGENTA, C_BLACK)
+    SCR_ATTR(C_GREEN, C_BLACK), SCR_ATTR(C_CYAN, C_BLACK), SCR_ATTR(C_BROWN, C_BLACK),
+    SCR_ATTR(C_RED, C_BLACK), SCR_ATTR(C_MAGENTA, C_BLACK)
 };
 #define N_EFFORTS (sizeof efforts / sizeof efforts[0])
 
