@@ -91,9 +91,9 @@
 #define G_UP      0x18
 #define G_DOWN    0x19
 
-/* Input box: "| > text... |" */
-#define BOX_TEXT  4                   /* first text column */
-#define BOX_W     (SCR_COLS - 6)      /* text columns per line */
+/* Input box: a rule above and below, "> text..." between, like Claude Code */
+#define BOX_TEXT  2                   /* first text column */
+#define BOX_W     (SCR_COLS - 4)      /* text columns per line */
 #define BOX_LINES 4                   /* most lines the box grows to */
 
 #define KEY_ENTER 13
@@ -133,7 +133,8 @@ static int resumeMode;                /* -resume: back from a run under CLAWDOS.
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
     char chat[40], tool[64], provider[16], model[48], host[80], effort[8];
-    int round, merge, mergeAtStart, assistant, safe, quick, quit;
+    int round, merge, mergeAtStart, assistant, safe, quick, quit, turns;
+    long tokens;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -287,10 +288,8 @@ static void drawInputLine(int i)
     int line = boxScroll + i;
 
     rowBlank(r, A_BOX);
-    r.c[0] = G_V | (A_BOX << 8);
-    r.c[SCR_COLS - 1] = G_V | (A_BOX << 8);
     if (line == 0)
-        r.c[2] = '>' | (A_BOX << 8);
+        r.c[0] = '>' | (A_BOX << 8);
     if (inputLen == 0 && i == 0) {
         rowText(r, BOX_TEXT, state == IDLE ? "What would you like to do?  (F1 for help)" : "",
                 A_BOX_HINT);
@@ -389,17 +388,38 @@ static void drawHint(void)
     scr_putn(SCR_ROWS - 1, 0, r.c, SCR_COLS);
 }
 
+/* The rule above the input, with the conversation's size on its right:
+   "18.2K tokens \xFA 6 turns" once a reply has come. */
+static void drawBoxTop(void)
+{
+    Row r;
+    char label[40];
+    long tok = chat.contextTokens();
+    int turns = chat.turns();
+
+    rowFill(r, 0, SCR_COLS, G_H, A_BOX);
+    if (turns > 0) {
+        int n;
+        if (tok < 1000)
+            n = sprintf(label, " %ld tokens", tok);
+        else
+            n = sprintf(label, " %ld.%ldK tokens", tok / 1000, tok % 1000 / 100);
+        sprintf(label + n, " \xFA %d turn%s ", turns, turns == 1 ? "" : "s");
+        rowText(r, SCR_COLS - 2 - (int)strlen(label), label, A_BOX_HINT);
+    }
+    scr_putn(footerTop() + 1, 0, r.c, SCR_COLS);
+}
+
 static void drawFooter(void)
 {
     Row r;
     int top = footerTop();
 
     drawStatus();
-    rowFrame(r, G_TL, G_H, G_TR, A_BOX);
-    scr_putn(top + 1, 0, r.c, SCR_COLS);
+    drawBoxTop();
     for (int i = 0; i < boxLines; i++)
         drawInputLine(i);
-    rowFrame(r, G_BL, G_H, G_BR, A_BOX);
+    rowFill(r, 0, SCR_COLS, G_H, A_BOX);
     scr_putn(top + 2 + boxLines, 0, r.c, SCR_COLS);
     drawHint();
     placeCursor();
@@ -833,7 +853,7 @@ static void uiLog(const char *line)
     fclose(f);
 }
 
-static ChatUi chatUi = { uiText, uiThinking, uiNote, tools_call, uiIdle, uiEscPressed, uiLog };
+static ChatUi chatUi = { uiText, uiThinking, uiNote, tools_call, uiIdle, uiEscPressed, uiLog, drawBoxTop };
 
 
 /* --- tool calls (ui.h) ----------------------------------------------------- */
@@ -1075,6 +1095,7 @@ static int writeState(void)
     fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\neffort %s\nticks %lu\n",
             tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
+    fprintf(f, "tokens %ld\nturns %d\n", chat.contextTokens(), chat.turns());
     return fclose(f) ? -1 : 0;
 }
 
@@ -1099,7 +1120,9 @@ static int readState(Resume *r)
         STATE_STR("model", model) STATE_STR("host", host) STATE_STR("effort", effort)
         STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
         STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
-        STATE_INT("quit", quit)
+        STATE_INT("quit", quit) STATE_INT("turns", turns)
+        if (!strcmp(line, "tokens"))
+            r->tokens = atol(v);
         if (!strcmp(line, "ticks"))
             r->ticks = strtoul(v, NULL, 10);
     }
@@ -1326,6 +1349,7 @@ int main(int argc, char *argv[])
             fatal(chat.errorText());
         if (resumeState.effort[0])    /* F5 may have changed it from CLAWDOS.CFG's */
             strcpy(chat.provider()->effort, resumeState.effort);
+        chat.setUsage(resumeState.tokens, resumeState.turns);
         remove(RELAUNCH_STATE);       /* resumed; until now CLAWDOS -resume could try again */
         statusNote = NULL;
         drawFooter();

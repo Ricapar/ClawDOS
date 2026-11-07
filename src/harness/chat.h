@@ -21,6 +21,7 @@ struct ChatUi {
     void (*idle)(void);                            /* called while waiting: keys, spinner */
     int  (*escPressed)(void);                      /* 1: stop the turn */
     void (*log)(const char *line);                 /* a line for CLAWDOS.LOG */
+    void (*usage)(void);                           /* contextTokens()/turns() changed */
 };
 
 class Chat {
@@ -62,6 +63,12 @@ class Chat {
     Cfg *config(void) { return cfg; }
     Provider *provider(void) { return prov; }
 
+    /* The conversation's size after the last round (input, cache and output
+       tokens) and the turns that got a reply; 0 in a new conversation. */
+    long contextTokens(void) { return ctxTokens; }
+    int  turns(void) { return turnsDone; }
+    void setUsage(long tokens, int turnCount) { ctxTokens = tokens; turnsDone = turnCount; }
+
     int connections;                       /* TCP connections made so far */
 
   private:
@@ -85,6 +92,8 @@ class Chat {
     int streamRc;
     unsigned long reqStart, firstText;
     int pendRound;                         /* the call the launcher is running (turn() returned 2) */
+    long ctxTokens;
+    int turnsDone;
     char pendTool[64];
 
     int8_t setup(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);

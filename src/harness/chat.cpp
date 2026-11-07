@@ -34,6 +34,8 @@ Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), to
                rxBuf(NULL), err(""), reasked(0), streamRc(0), reqStart(0), firstText(0)
 {
     addr[0] = path[0] = desc[0] = 0;
+    ctxTokens = 0;
+    turnsDone = 0;
     convo_init(&convo);
 }
 
@@ -175,6 +177,8 @@ int8_t Chat::newConversation(void)
     int n;
 
     hist_close();
+    ctxTokens = 0;
+    turnsDone = 0;
     mkdir(CHATS_DIR);
     _dos_getdate(&d);
     for (n = 1; n < 1000; n++) {
@@ -536,9 +540,17 @@ int8_t Chat::rounds(int round)
             return rc;
         }
         convo_assistant_done(&convo);
+        if (convo.assistantInTurn == 1)
+            turnsDone++;              /* the turn's first reply */
+        if (as.inTok || as.cacheRead)
+            ctxTokens = as.inTok + as.cacheRead + as.cacheWrite + as.outTok;
         logRound(round);
+        if (ui->usage)
+            ui->usage();
         if (!strcmp(as.stopReason, "refusal")) {
             warn("The model declined to answer that.");
+            if (convo.assistantInTurn == 1)
+                turnsDone--;          /* the whole turn goes */
             convo_rollback_turn(&convo);
             return -1;
         }
