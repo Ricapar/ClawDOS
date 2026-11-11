@@ -866,7 +866,9 @@ static void uiProgress(int phase, const char *text, unsigned n)
                 scr_view(0);
             breakReply();
             con_margins(0, SCR_COLS - 1);
-            blankLine();
+            con_ensure_blank_line();
+            con_margins(2, SCR_COLS - 1);     /* before the new line: it starts at the margin */
+            con_newline();
             noteOpen = 1;
             noteHeadLen = 0;
         }
