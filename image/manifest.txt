@@ -47,6 +47,7 @@ CLAWDOS/        repo:image/clawdos/*
 
 TESTS/                  build:dosunit.exe
 TESTS/                  build:stdineof.com
+TESTS/                  repo:image/tests/probe/STDINEOF.BAT
 TESTS/DEV/              repo:image/tests/dev/*
 TESTS/DEMO/             repo:image/tests/demo/*
 TESTS/BENCH/            repo:image/tests/bench/*

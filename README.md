@@ -174,7 +174,7 @@ edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
 chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), F6 earlier chats, F10 quit. `CLAWDOS host:port` replaces the tunnel address
 (plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
 a message at startup, `-i text` pre-fills the input box and `-c NAME` reopens
-the chat `CHATS\NAME.JSN`. Type `/model` to list the providers in `CLAWDOS.CFG`
+the chat `CHATS\NAME.JSN` (a name as F6 lists it, not a path). Type `/model` to list the providers in `CLAWDOS.CFG`
 and switch.
 
 While Claude works through a run of tool calls it says what it is about to do:

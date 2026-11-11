@@ -23,7 +23,9 @@ extern "C" {
 
 #define CHATFILE_SHOW      3          /* typed messages (exchanges) the transcript shows */
 #define CHATFILE_SHOW_MAX  49152L     /* bytes at most read to show them */
-#define CHATFILE_TEXT_MAX  1000       /* characters shown of one text block (about 13 rows) */
+#define CHATFILE_TEXT_MAX  1000       /* bytes of a text block's JSON string read to show it: 1,000
+                                         characters of plain text (about 13 rows), fewer when it holds
+                                         escapes or letters outside ASCII */
 
 /* Up to n bytes of the file from pos into buf: how many (0 at the end), or -1. */
 typedef int (*ChatRead)(void *ctx, long pos, char *buf, unsigned n);
@@ -39,7 +41,8 @@ typedef struct ChatScan {
 int chatfile_scan(ChatRead rd, void *ctx, long size, ChatScan *s);
 
 /* What a shown message holds, in the order it comes. Text is CP437 for the
-   screen; cut says it was longer than CHATFILE_TEXT_MAX. A tool call's input
+   screen; cut says its JSON string was longer than CHATFILE_TEXT_MAX (it is
+   cut at an escape and a UTF-8 character's start). A tool call's input
    is its raw JSON object, perhaps cut short (its first members are whole). */
 typedef struct ChatShow {
     void *ctx;
@@ -54,7 +57,8 @@ enum {
     CHAT_END_REPLY,                   /* a reply without a tool call: the next text is a new message */
     CHAT_END_CALL,                    /* a reply whose tool call (toolId) never got its result */
     CHAT_END_RESULTS,                 /* a tool results message (perhaps with text): the next text joins it */
-    CHAT_END_USER                     /* a typed message never answered: the next text joins it */
+    CHAT_END_USER,                    /* a typed message never answered: the next text joins it */
+    CHAT_END_BADCALL                  /* as CHAT_END_CALL, but the id is longer than toolId holds */
 };
 
 typedef struct ChatEnd {

@@ -48,6 +48,11 @@ int tool_memory_write(ToolCtx *t);
    after an Esc. */
 int skill_list(ToolCtx *t);
 
+/* A list whose lines were cut short when the output filled (truncated): end
+   it on its last whole line that leaves room for the line `more` (no '\n'),
+   then that line. Nothing changes when nothing was cut. */
+void tout_end_list(ToolCtx *t, const char *more);
+
 #ifdef __cplusplus
 }
 #endif

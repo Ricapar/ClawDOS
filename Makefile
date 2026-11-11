@@ -62,7 +62,7 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
 	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
 	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "progress note: Tour step 1 of" \
+	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "STDINEOF under COMMAND.COM: ok" --expect "progress note: Tour step 1 of" \
 	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/notes.bat --mock --expect "progress note: Two lines" --expect "stop=end_turn" \
 	    --expect "tool header column: 0 (PASS)" --expect "headercol exit code 0" --reject "VALIDATION:"
@@ -89,7 +89,9 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "reopened result: 3 messages: user[text] assistant[tool_use] user[tool_result,text]; text: !reopened result; results: error Interrupted by the user." \
 	    --expect "reopened half: 1 messages: user[text]; text: Half a reply came. | !reopened half" \
 	    --expect "unans exit code 0" --expect "call exit code 0" --expect "result exit code 0" --expect "half exit code 0" \
-	    --expect "BIG.JSN: 206060 bytes, 18 typed, ends 1" --expect "reopened big: 37 messages" --expect "big exit code 0" \
+	    --expect "BIG.JSN: 206060 bytes (0 cut), 18 typed, ends 1" --expect "reopened big: 37 messages" --expect "big exit code 0" \
+	    --expect "NOTCHAT.JSN is not a chat file" --expect "notchat exit code 1" --expect "and its second line stays" \
+	    --expect "path exit code 1" --expect "AUTOEXEC.BAT still there" --expect "HALF.JSN: 46 bytes (66 cut)" \
 	    --expect "NOSUCH.JSN (or it is empty)" --expect "nosuch exit code 1" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"

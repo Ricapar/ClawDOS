@@ -774,6 +774,9 @@ static int openChat(const char *path)
        has the error result, so RESUME.TXT must not answer it again. */
     if (readState(&resumeState) == 0 && !stricmp(resumeState.chat, chat.chatPath())) {
         remove(RELAUNCH_STATE);
+        remove(RELAUNCH_SCREEN);
+        remove(RELAUNCH_RUN);
+        remove(RELAUNCH_OUT);
         uiLog("resume state dropped: its chat was reopened");
     }
     con_init();
@@ -784,6 +787,10 @@ static int openChat(const char *path)
     sprintf(line, "Reopened chat %.12s: %d turn%s, %ld KB.", name ? name + 1 : path, chat.turns(),
             chat.turns() == 1 ? "" : "s", (hist_size() + 1023) / 1024);
     note(line, A_DIM);
+    if (chat.openedCut() > 0) {       /* hist_open cut a damaged end */
+        sprintf(line, "Its last %ld bytes were damaged (a write cut short) and were cut off.", chat.openedCut());
+        note(line, A_ERR);
+    }
     if (end == CHAT_END_CALL)
         note("Its last tool call never finished: Claude is told so with your next message.", A_DIM);
     else if (end == CHAT_END_USER)
@@ -811,7 +818,9 @@ static void chats(void)
 
 /* -k: keys into the BIOS keyboard buffer, as if typed (the boot tests drive
    the chat list so). ~e Enter, ~x Esc, ~d Del, ~u Up, ~n Down, ~q F10, ~~ a
-   tilde; the buffer holds 15. */
+   tilde; the buffer holds 15. It assumes the buffer is where the PC/XT BIOS
+   keeps it, 40:1E-40:3D, and does not read the AT's start and end pointers
+   at 40:80 and 40:82 (DOSBox-X and the 5160 both use the default place). */
 static void typeAhead(const char *keys)
 {
     unsigned __far *head = (unsigned __far *)MK_FP(0x40, 0x1A);
@@ -1598,7 +1607,7 @@ int main(int argc, char *argv[])
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
                    "-i       start with this text in the input box\n"
-                   "-c       reopen this chat: CHATS\\NAME.JSN (F6 lists them)\n"
+                   "-c       reopen the chat NAME (C:\\CLAWDOS\\CHATS\\NAME.JSN, as F6 lists them)\n"
                    "-memories  open the memory manager (F4) once connected\n");
             return 1;
         } else {
@@ -1606,6 +1615,16 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (chatArg) {                    /* a chat's NAME (or NAME.JSN) in CHATS, as F6 lists them: never a path */
+        unsigned n = strcspn(chatArg, ".");
+        if (n == 0 || n > 8 || strspn(chatArg, CHAT_NAME_CHARS) != n
+            || (chatArg[n] && stricmp(chatArg + n, ".JSN"))) {
+            fprintf(stderr, "CLAWDOS -c: give a chat's name as F6 lists it, e.g. -c 1110001 (not %.40s).\n",
+                    chatArg);
+            return 1;
+        }
+        sprintf(chatFile, CHATS_DIR "\\%.8s.JSN", chatArg);
+    }
     if (resumeMode) {                 /* the flags come from the CLAWDOS that left */
         if (readState(&resumeState)) {
             fprintf(stderr, "CLAWDOS -resume: nothing to resume (%s).\n", RELAUNCH_STATE);
@@ -1670,15 +1689,6 @@ int main(int argc, char *argv[])
         drawFooter();
         resumeTurn();
     } else {
-        if (chatArg) {                /* a name in CHATS, or a path; .JSN if no extension */
-            const char *base = strrchr(chatArg, '\\');
-            if (strchr(chatArg, '\\') || strchr(chatArg, ':'))
-                sprintf(chatFile, "%.30s", chatArg);
-            else
-                sprintf(chatFile, CHATS_DIR "\\%.12s", chatArg);
-            if (!strchr(base ? base : chatArg, '.'))
-                strcat(chatFile, ".JSN");
-        }
         if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi, chatArg == NULL))
             fatal(chat.errorText());
         statusNote = NULL;

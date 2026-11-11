@@ -6,6 +6,8 @@
 #define CLAWDOS_CHATUI_H
 
 #define CHATS_DIR "C:\\CLAWDOS\\CHATS"
+/* What a chat's name (MMDDnnn, or one renamed on the PC) may be made of: what DOS takes in a file name. */
+#define CHAT_NAME_CHARS "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-$~!#%&@^"
 
 /* Takes the screen until Esc or Enter. `current` is the open conversation's
    file (it is marked, and cannot be deleted here); `idle` runs while waiting

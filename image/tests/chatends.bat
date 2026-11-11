@@ -7,7 +7,8 @@ REM call's result waiting for the next text, HALF a reply cut off mid-stream
 REM (HARNESS cuts it at open, leaving the typed message before it unanswered),
 REM and BIG a 206 KB chat of 18 exchanges, put together from pieces with COPY /B
 REM (opening it must not need the whole file in memory; the transcript shows its
-REM last three exchanges, each text cut at 1,000 characters). NOSUCH is not there.
+REM last three exchanges, each text cut at 1,000 bytes of its JSON). NOTCHAT is a
+REM file that is no chat: refused, and left whole. -c takes no path. NOSUCH is not there.
 REM Each is opened with -c and continued with the mock's !reopened, which logs
 REM the messages that came: roles must still alternate, the next text joining
 REM the message it follows, and the call answered with an error result.
@@ -33,6 +34,14 @@ DEL C:\P*.PRT
 CD \
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c BIG -q -m "!reopened big"
 ECHO HARNESS.EXE big exit code %ERRORLEVEL% > COM1
+ECHO A file that is no chat {kept} > C:\CLAWDOS\CHATS\NOTCHAT.JSN
+ECHO and its second line stays >> C:\CLAWDOS\CHATS\NOTCHAT.JSN
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c NOTCHAT -q -m "!reopened notchat"
+ECHO HARNESS.EXE notchat exit code %ERRORLEVEL% > COM1
+TYPE C:\CLAWDOS\CHATS\NOTCHAT.JSN > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c C:\AUTOEXEC.BAT -q -m "!reopened path"
+ECHO HARNESS.EXE path exit code %ERRORLEVEL% > COM1
+IF EXIST C:\AUTOEXEC.BAT ECHO AUTOEXEC.BAT still there > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c NOSUCH -q -m "!reopened nosuch"
 ECHO HARNESS.EXE nosuch exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1

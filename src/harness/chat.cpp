@@ -34,7 +34,7 @@
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
                rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
-               upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE)
+               upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE), repairCut(0)
 {
     addr[0] = path[0] = prePath[0] = desc[0] = 0;
     th.id[0] = 0;
@@ -212,15 +212,38 @@ int8_t Chat::newConversation(void)
    file the first request renders one, as for a new conversation. Whatever the
    file ends with, the next user text must keep the roles alternating: a call
    left without its result (the PC went off while it ran) gets one now. */
+/* Whether the file at path begins as a chat file does, with the user's
+   message: hist_open cuts a file back to its last whole JSON value, so a
+   file that is not a chat (or is damaged at its start) must never reach it. */
+static int looksLikeChat(const char *path)
+{
+    static const char head[] = "{\"role\":\"user\",";
+    char got[sizeof head - 1];
+    FILE *f = fopen(path, "rb");
+    int ok;
+
+    if (!f)
+        return 0;
+    ok = fread(got, 1, sizeof got, f) == sizeof got && !memcmp(got, head, sizeof got);
+    fclose(f);
+    return ok;
+}
+
 int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind)
 {
-    char old[sizeof path], oldPre[sizeof prePath], line[90];
-    long oldSize = path[0] ? hist_size() : -1;
+    char old[sizeof path], oldPre[sizeof prePath], line[128];
+    long oldSize = path[0] ? hist_size() : -1, size = fs_size(chatPath);
     ChatEnd end;
     Convo c;
 
-    if (strlen(chatPath) >= sizeof path || fs_size(chatPath) <= 0) {
+    if (strlen(chatPath) >= sizeof path || size <= 0) {
         sprintf(errBuf, "No chat %.60s (or it is empty).", chatPath);
+        err = errBuf;
+        return -1;
+    }
+    if (!looksLikeChat(chatPath)) {
+        sprintf(errBuf, "%.39s is not a chat file (it does not start with the user's message); left as it is.",
+                chatPath);
         err = errBuf;
         return -1;
     }
@@ -229,15 +252,20 @@ int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind
     hist_close();
     strcpy(path, chatPath);
     convo_init(&c);
-    sprintf(errBuf, "Cannot read %.60s (or no memory for it).", chatPath);
+    sprintf(errBuf, "Cannot read %.39s (or no memory for it).", chatPath);
     if (hist_open(path) == 0 && hist_size() > 0 && chatfile_scan(hist_read, NULL, hist_size(), scan) == 0
         && chatfile_read(hist_read, NULL, scan->last, hist_size(), NULL, &end) == 0) {
+        repairCut = size - hist_size();   /* before anything is added below */
         switch (end.kind) {
         case CHAT_END_CALL:
             convo_turn_begin(&c);
             if (convo_tool_result(&c, end.toolId, CALL_LOST, 1, NULL) == 0 || c.mergeNext == CONVO_JOIN_RESULTS)
                 break;                /* answered (if only by the short error result) */
             strcpy(errBuf, "Cannot write the conversation file.");   /* rolled back: still unanswered */
+            end.kind = -1;
+            break;
+        case CHAT_END_BADCALL:
+            sprintf(errBuf, "%.39s ends in a tool call with too long an id; left as it is.", chatPath);
             end.kind = -1;
             break;
         case CHAT_END_RESULTS:
@@ -254,8 +282,12 @@ int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind
         err = errBuf;
         hist_close();
         strcpy(path, old);
-        if (old[0])
-            hist_open(old);           /* back to the conversation we were in, untouched */
+        if (old[0] && hist_open(old)) {   /* back to the conversation we were in, untouched */
+            sprintf(line, "reopen of %.40s failed too: a new conversation", old);
+            ui->log(line);
+            strcat(errBuf, " The chat you were in would not reopen: this is a new one.");
+            newConversation();
+        }
         return -1;
     }
     if (oldSize == 0 && stricmp(old, path)) {   /* a new conversation nothing was said in */
@@ -269,13 +301,17 @@ int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind
     fixedSet = 0;
     if (fs_size(prePath) > 0) {
         api_fixed_from(&fix, prov);
-        api_prefix_cache(prePath, &fix.cache, &fix.ttl1h);
-        fixedSet = 1;
+        if (api_prefix_cache(prePath, &fix.cache, &fix.ttl1h) == 0) {
+            fixedSet = 1;
+        } else {                      /* its settings unknown: made afresh, as if missing */
+            remove(prePath);
+            ui->log("prefix unreadable: rendered afresh at the first request");
+        }
     }
     turnsDone = scan->exchanges - (end.kind == CHAT_END_USER);
     *endKind = end.kind;
-    sprintf(line, "opened %.40s: %ld bytes, %d typed, ends %d, prefix %s", path, hist_size(),
-            scan->exchanges, end.kind, fixedSet ? "kept" : "missing");
+    sprintf(line, "opened %.40s: %ld bytes (%ld cut), %d typed, ends %d, prefix %s", path, hist_size(),
+            repairCut, scan->exchanges, end.kind, fixedSet ? "kept" : "missing");
     ui->log(line);
     return 0;
 }

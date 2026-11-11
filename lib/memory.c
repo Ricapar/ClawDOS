@@ -274,3 +274,18 @@ int tool_memory_write(ToolCtx *t)
     tout_printf(t, "saved %lu bytes to %s\n", total, p);
     return TS_OK;
 }
+
+/* (here, not in toolapi.c: CLAWDOS.EXE links that and never ends a list) */
+void tout_end_list(ToolCtx *t, const char *more)
+{
+    unsigned need = strlen(more) + 1;
+
+    if (!t->truncated)
+        return;
+    while (t->len > 0 && (t->out[t->len - 1] != '\n' || t->len + need > TOOL_OUT_MAX))
+        t->len--;
+    memcpy(t->out + t->len, more, need - 1);
+    t->len += need;
+    t->out[t->len - 1] = '\n';
+    t->out[t->len] = 0;
+}

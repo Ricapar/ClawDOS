@@ -160,20 +160,6 @@ void tout_puts(ToolCtx *t, const char *s)
     t->out[t->len] = 0;
 }
 
-void tout_end_list(ToolCtx *t, const char *more)
-{
-    unsigned need = strlen(more) + 1;
-
-    if (!t->truncated)
-        return;
-    while (t->len > 0 && (t->out[t->len - 1] != '\n' || t->len + need > TOOL_OUT_MAX))
-        t->len--;
-    memcpy(t->out + t->len, more, need - 1);
-    t->len += need;
-    t->out[t->len - 1] = '\n';
-    t->out[t->len] = 0;
-}
-
 void tout_printf(ToolCtx *t, const char *fmt, ...)
 {
     char buf[300];

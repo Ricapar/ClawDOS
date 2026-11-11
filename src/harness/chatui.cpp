@@ -17,6 +17,7 @@
 #include "tools.h"
 #include "chatfile.h"
 #include "chatui.h"
+#include "relaunch.h"
 
 #define MAX_CHATS  100                /* listed, newest first; older ones are counted only */
 #define SUMMARY    41                 /* characters of the first message shown */
@@ -235,14 +236,39 @@ static void moveTo(int to)
     listRow(sel);
 }
 
+/* Whether RESUME.TXT (a full_memory run waiting for CLAWDOS -resume) names
+   the chat at path: deleting it then would leave the resume a lone result to
+   write into a new, empty file. */
+static int resumeNames(const char *path)
+{
+    FILE *f = fopen(RELAUNCH_STATE, "r");
+    char line[48];
+    int yes = 0;
+
+    if (!f)
+        return 0;
+    if (fgets(line, sizeof line, f) && !strncmp(line, "chat ", 5)) {   /* writeState's first line */
+        line[strcspn(line, "\r\n")] = 0;
+        yes = !stricmp(line + 5, path);
+    }
+    fclose(f);
+    return yes;
+}
+
 /* Del: ask, then delete the chat and its prefix file. 1 if it went. */
 static int confirmDelete(const char *name)
 {
-    char buf[64], path[40];
+    char buf[72], path[40];
     unsigned char ch;
 
+    sprintf(path, CHATS_DIR "\\%s.JSN", name);
     if (!strcmp(name, current)) {
         message("That is the chat you are in: it stays.", A_ERR);
+        return 0;
+    }
+    if (resumeNames(path)) {
+        sprintf(buf, "A full_memory run of %s waits for CLAWDOS -resume: it stays.", name);
+        message(buf, A_ERR);
         return 0;
     }
     sprintf(buf, "Delete chat %s? (y/n)", name);
@@ -253,7 +279,6 @@ static int confirmDelete(const char *name)
         message(buf, A_DIM);
         return 0;
     }
-    sprintf(path, CHATS_DIR "\\%s.JSN", name);
     _dos_setfileattr(path, _A_NORMAL);
     if (remove(path)) {
         sprintf(buf, "Couldn't delete %s (read-only disk?).", name);
@@ -302,7 +327,13 @@ static int pick(int logScreen, char *chosen)
         case SCAN_DEL:
             if (shown && confirmDelete(chats[sel].name)) {
                 sprintf(buf, "Deleted %s.", chats[sel].name);
-                scan();
+                memmove(&chats[sel], &chats[sel + 1], (shown - sel - 1) * sizeof chats[0]);
+                shown--;              /* the one entry goes; the rest need no rereading */
+                found--;
+                if (sel >= shown && sel > 0)
+                    sel--;
+                if (first > 0 && first + LIST_ROWS > shown)
+                    first = shown > LIST_ROWS ? shown - LIST_ROWS : 0;
                 drawList();
                 message(buf, A_GOOD);
             }

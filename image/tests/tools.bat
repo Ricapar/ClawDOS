@@ -8,5 +8,9 @@ ECHO CLAWDOS-TOOLS-TEST > COM1
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tooltour"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
+REM The tour's stdin probe runs STDINEOF.COM directly; here a batch file runs it,
+REM so COMMAND.COM is its parent (--expect "STDINEOF under COMMAND.COM: ok").
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!run C:\TESTS\STDINEOF.BAT"
+ECHO HARNESS.EXE stdin batch exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1
 ECHO CLAWDOS-TEST-DONE > COM1

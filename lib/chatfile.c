@@ -120,8 +120,9 @@ typedef struct Parse {
     unsigned keyLen;
     char role[12], type[20], name[24], id[64];
     unsigned roleLen, typeLen, nameLen, idLen;
+    int idCut;                          /* the block's id did not fit */
     int strContent;                     /* the message's content is a plain string */
-    int call;                           /* the message has a tool call, its id in callId */
+    int call;                           /* the message has a tool call, its id in callId (2: cut) */
     char callId[64];
     int endKind;                        /* of the last message completed */
     unsigned textLen, inputLen;
@@ -139,13 +140,59 @@ static void putc_(char *s, unsigned *len, unsigned max, char c)
         s[(*len)++] = c;
 }
 
+/* The escaped text cut at n bytes: back to before an escape the cut split. */
+static unsigned escapeEnd(const char *s, unsigned n)
+{
+    unsigned i = n, back = 0;
+
+    while (i > 0 && n - i < 6) {      /* the last backslash within an escape's reach */
+        i--;
+        if (s[i] == '\\')
+            break;
+    }
+    if (i >= n || s[i] != '\\')
+        return n;
+    while (back < i && s[i - 1 - back] == '\\')
+        back++;
+    if (back & 1)                     /* an escaped backslash: it ended the escape */
+        return n;
+    if (i + 1 < n && s[i + 1] == 'u') {
+        if (n - i < 6)
+            return i;
+        if (n - i == 6 && (s[i + 2] == 'd' || s[i + 2] == 'D')
+            && strchr("89abAB", s[i + 3]) != NULL)
+            return i;                 /* a high surrogate whose pair was cut off */
+        return n;
+    }
+    return n - i >= 2 ? n : i;
+}
+
+/* UTF-8 cut at n bytes: back to the start of a character the cut split. */
+static unsigned utf8End(const char *s, unsigned n)
+{
+    unsigned i = n, need;
+    unsigned char c;
+
+    while (i > 0 && n - i < 4 && ((unsigned char)s[i - 1] & 0xC0) == 0x80)
+        i--;
+    if (i == 0 || ((c = (unsigned char)s[i - 1]) & 0x80) == 0)
+        return n;
+    need = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2;
+    return n - (i - 1) >= need ? n : i - 1;
+}
+
 /* Text (the escaped string in p->text) to whoever shows it. */
 static void emitText(Parse *p, int user)
 {
     unsigned n, m;
     if (!p->show || !p->textLen)
         return;
+    if (p->textCut)                   /* cut again while that leaves a half pair at the end */
+        while ((n = escapeEnd(p->text, p->textLen)) != p->textLen)
+            p->textLen = n;
     n = json_unescape(p->text, p->textLen, p->text, sizeof p->text);   /* never longer: in place */
+    if (p->textCut)
+        n = utf8End(p->text, n);
     m = utf8_to_cp437(p->text, n, p->shown, CHATFILE_TEXT_MAX);
     p->shown[m] = 0;
     if (user ? p->show->user != NULL : p->show->reply != NULL)
@@ -168,6 +215,7 @@ static void open_(Parse *p, int isList)
         p->strContent = p->call = 0;
     } else if (p->depth == 3 && !isList) {   /* a block of the content list */
         p->typeLen = p->nameLen = p->idLen = p->textLen = p->inputLen = 0;
+        p->idCut = 0;
         p->type[0] = p->name[0] = p->id[0] = p->key3[0] = 0;
         p->textCut = p->inputCut = 0;
     }
@@ -179,7 +227,7 @@ static void close_(Parse *p, ChatEnd *end)
         if (!strcmp(p->type, "text")) {
             emitText(p, isUser(p));
         } else if (!strcmp(p->type, "tool_use")) {
-            p->call = 1;
+            p->call = p->idCut ? 2 : 1;
             strcpy(p->callId, p->id);
             if (p->show && p->show->tool)
                 p->show->tool(p->show->ctx, p->name, p->input, p->inputLen);
@@ -188,7 +236,7 @@ static void close_(Parse *p, ChatEnd *end)
         if (isUser(p))
             p->endKind = p->strContent ? CHAT_END_USER : CHAT_END_RESULTS;
         else
-            p->endKind = p->call ? CHAT_END_CALL : CHAT_END_REPLY;
+            p->endKind = p->call == 2 ? CHAT_END_BADCALL : p->call ? CHAT_END_CALL : CHAT_END_REPLY;
         if (end) {
             end->kind = p->endKind;
             strcpy(end->toolId, p->endKind == CHAT_END_CALL ? p->callId : "");
@@ -255,7 +303,11 @@ static void capture(Parse *p, char c)
     case T_ROLE: putc_(p->role, &p->roleLen, sizeof p->role, c); break;
     case T_TYPE: putc_(p->type, &p->typeLen, sizeof p->type, c); break;
     case T_NAME: putc_(p->name, &p->nameLen, sizeof p->name, c); break;
-    case T_ID:   putc_(p->id, &p->idLen, sizeof p->id, c); break;
+    case T_ID:
+        if (p->idLen >= sizeof p->id - 1)
+            p->idCut = 1;
+        putc_(p->id, &p->idLen, sizeof p->id, c);
+        break;
     case T_TEXT:
         if (p->textLen < sizeof p->text)
             p->text[p->textLen++] = c;

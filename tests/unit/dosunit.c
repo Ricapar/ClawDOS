@@ -2205,11 +2205,14 @@ typedef struct MemFile {
     const char *s;
     long len;
     unsigned step;
+    long failAt;                      /* a read reaching this offset fails, as a bad sector would; -1 never */
 } MemFile;
 
 static int memRead(void *ctx, long pos, char *buf, unsigned n)
 {
     MemFile *m = (MemFile *)ctx;
+    if (m->failAt >= 0 && pos + (long)n > m->failAt)
+        return -1;
     if (pos >= m->len)
         return 0;
     if (n > m->step)
@@ -2252,6 +2255,41 @@ static const ChatShow showLog = { NULL, shownUser, shownReply, shownTool };
 #define CF_REPLY  "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}"
 #define CF_SEP    ",\r\n"
 
+/* Three exchanges in more than CHATFILE_SHOW_MAX bytes: the shown part starts
+   at the first message within the last 48 KB, not at the first typed one. */
+static void testChatFileCap(void)
+{
+    const unsigned text = 30000;
+    char *big = (char *)malloc(62000);
+    long at;
+    unsigned n;
+    MemFile m;
+    ChatScan sc;
+    int i;
+
+    if (!big) {
+        CHECK("chatfile cap: memory", 0);
+        return;
+    }
+    strcpy(big, "{\"role\":\"user\",\"content\":\"a\"}");
+    for (i = 0; i < 2; i++) {
+        strcat(big, CF_SEP "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+        n = strlen(big);
+        memset(big + n, 'z', text);
+        strcpy(big + n + text, "\"}]}" CF_SEP);
+        strcat(big, i ? "{\"role\":\"user\",\"content\":\"c\"}" : "{\"role\":\"user\",\"content\":\"b\"}");
+    }
+    m.s = big;
+    m.len = strlen(big);
+    m.step = 2048;
+    m.failAt = -1;
+    at = strstr(big, "\"content\":\"b\"") - big - 15;     /* the typed "b" message */
+    CHECK("chatfile cap: over 48 KB", m.len > CHATFILE_SHOW_MAX && at > 0 && big[at] == '{');
+    CHECK("chatfile cap: from the last 48 KB", chatfile_scan(memRead, &m, m.len, &sc) == 0 && sc.exchanges == 3
+          && sc.from == at);
+    free(big);
+}
+
 static void testChatFile(void)
 {
     static const unsigned steps[3] = { 1, 5, 2048 };
@@ -2271,6 +2309,7 @@ static void testChatFile(void)
     }
     m.s = chat;
     m.len = strlen(chat);
+    m.failAt = -1;
     for (i = 0; i < 3; i++) {
         m.step = steps[i];
         shownLog[0] = 0;
@@ -2332,6 +2371,43 @@ static void testChatFile(void)
     CHECK("chatfile: long text", chatfile_read(memRead, &m, 0, m.len, &showLog, &end) == 0 && end.kind == CHAT_END_REPLY
           && strlen(shownLog) == 2 + CHATFILE_TEXT_MAX + 2 && shownLog[2 + CHATFILE_TEXT_MAX] == '+');
 
+    /* A cut that would split an escape or a UTF-8 character stops before it,
+       so no '?' is drawn for half of one. */
+    for (i = 0; i < 2; i++) {
+        unsigned n;
+        strcpy(big, "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+        n = strlen(big);
+        memset(big + n, 'a', 1000);
+        strcpy(big + n + CHATFILE_TEXT_MAX - (i ? 1 : 3), i ? "\xC3\xA9" "q\"}]}" : "\\u00e9q\"}]}");
+        m.s = big;
+        m.len = strlen(big);
+        shownLog[0] = 0;
+        chatfile_read(memRead, &m, 0, m.len, &showLog, &end);
+        n = strlen(shownLog);
+        sprintf(name, "chatfile: cut before %s", i ? "a UTF-8 letter" : "an escape");
+        CHECK(name, strchr(shownLog, '?') == NULL && n == 2 + CHATFILE_TEXT_MAX - (i ? 1 : 3) + 2
+              && shownLog[n - 2] == '+');
+    }
+
+    /* A tool call id too long to answer is said so, not cut. */
+    strcpy(big, CF_TYPED CF_SEP "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_");
+    i = strlen(big);
+    memset(big + i, 'x', 70);
+    strcpy(big + i + 70, "\",\"name\":\"dir\",\"input\":{}}]}");
+    m.s = big;
+    m.len = strlen(big);
+    CHECK("chatfile: id too long", chatfile_scan(memRead, &m, m.len, &sc) == 0
+          && chatfile_read(memRead, &m, sc.last, m.len, NULL, &end) == 0 && end.kind == CHAT_END_BADCALL);
+
+    /* A read that fails ends the scan and the read with -1. */
+    m.s = chat;
+    m.len = strlen(chat);
+    m.step = 64;
+    m.failAt = 100;
+    CHECK("chatfile: scan read fails", chatfile_scan(memRead, &m, m.len, &sc) == -1);
+    CHECK("chatfile: read fails", chatfile_read(memRead, &m, 0, m.len, &showLog, &end) == -1);
+    m.failAt = -1;
+
     /* The list's line: the first message's start. */
     strcpy(head, CF_TYPED);
     CHECK("chatfile: first", chatfile_first(head, strlen(head), first, sizeof first) == 19);
@@ -2343,6 +2419,7 @@ static void testChatFile(void)
     CHECK_STR("chatfile: first cut short", first, "cut ?00");
     free(big);
     free(shownLog);
+    testChatFileCap();
 }
 
 /* A typed message nothing answered (the PC went off mid-turn) takes the next

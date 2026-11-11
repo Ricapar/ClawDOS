@@ -45,6 +45,7 @@ class Chat {
        (CHAT_END_*). 0, or -1 with errorText() (the conversation is then the
        one we were in). */
     int8_t openConversation(const char *chatPath, ChatScan *scan, int *endKind);
+    long   openedCut(void) { return repairCut; }   /* bytes the reopen cut off a damaged end */
     /* Send the user's text and run the whole turn, tool rounds included.
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
        -1 failed (a note has been shown), 2 a run waits for the launcher
@@ -111,6 +112,7 @@ class Chat {
     ApiThread th;                          /* what the next request may continue */
     unsigned long sentFp;                  /* fingerprint() of the attempt that got the reply */
     int thSent;                            /* its API_TH_* (logRound, api_thread_keep) */
+    long repairCut;                        /* openConversation: bytes hist_open cut off the file's end */
     char desc[80];
     char errBuf[160];
     const char *err;

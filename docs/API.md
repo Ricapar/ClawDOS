@@ -216,15 +216,22 @@ written the turn is rolled back.
 
 ## Reopening a chat
 
-F6 (`/chats`) or `-c NAME` makes an earlier CHATS file the conversation. Nothing
+F6 (`/chats`) or `-c NAME` makes an earlier CHATS file the conversation. `-c`
+takes a chat's name only, never a path. A file that does not begin with
+`{"role":"user",` is refused and left as it is, before the history module's
+repair (which cuts a file back to its last whole JSON value) can touch it; so is
+one ending in a tool call whose id is longer than 63 bytes. A repair that does
+cut a damaged end is said on screen and in the log (`opened ...: N bytes (M
+cut)`). Nothing
 reads the whole file into memory: lib/chatfile.c reads it a piece at a time,
 once to count the typed messages and find where the last three begin (a typed
 message starts with `,\r\n{"role":"user","content":"`, a string, where results
 and the text that joins them are a list; raw CR and LF never occur inside a JSON
 string), then from there to the end to draw them as the live transcript did
 (the typed text after `> `, reply text after a bullet, a header per tool call;
-thinking blocks and results are not drawn; text past 1,000 characters is cut
-with ` ...`; at most the last 48 KB is drawn). The list itself reads only the
+thinking blocks and results are not drawn; a text block is cut after 1,000 bytes
+of its JSON string, before an escape or a UTF-8 letter the cut would split, and
+ends with ` ...`; at most the last 48 KB is drawn). The list itself reads only the
 first 160 bytes of each file.
 
 The conversation's `.PRE` file is kept, so `system` and `tools` are the bytes
@@ -250,7 +257,10 @@ still alternate:
 
 The current conversation, if nothing was said in it, is deleted when another is
 opened (each start and F2 make one). A chat that cannot be read leaves the
-current one as it was.
+current one as it was (if even that cannot be reopened, a new conversation
+starts and the note says so). A `.PRE` whose cache marker cannot be read is
+deleted and rendered afresh. Del in the list refuses the open chat and a chat
+that RESUME.TXT names (a `full_memory` run waiting for `CLAWDOS -resume`).
 
 ## The response
 
