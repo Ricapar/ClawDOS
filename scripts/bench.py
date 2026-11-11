@@ -8,8 +8,10 @@ Runs image/tests/bench.bat through scripts/test8088.py --mock: the mock's
 file, one run with full_memory (a real relaunch through CLAWDOS.EXE) and a 4 KB
 reply, so the request body grows from ~13 KB to over 100 KB. Then it reads the
 `api ...`, `relaunch:` and `stack:` lines of CLAWDOS.LOG and prints a Markdown
-table: per round the request body (len), the upload time (up), upload KB/s,
-the wait for the API (ttft - up) and the round's total; for the final round
+table: per round the seconds since the previous round ended (gap: the tool
+call, the history written, the request's length counted; from the log's
+timestamps), the request body (len), the upload time (up), upload KB/s, the
+wait for the API (ttft - up) and the round's total; for the final round
 the streamed characters per second; then the relaunch round trip and the
 stack's high-water mark. docs/ROADMAP.md keeps the table ("Benchmark"); later
 changes rerun this and compare, so the scenario and the format stay as they are.
@@ -31,7 +33,7 @@ sys.path.insert(0, os.path.join(build.ROOT, 'tunnel'))
 from mockchat import BENCH_REPLY  # noqa: E402  pylint: disable=wrong-import-position
 
 TEST = os.path.join(build.ROOT, 'image', 'tests', 'bench.bat')
-LINE = re.compile(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ((?:api|relaunch:|stack:) .*)$', re.M)
+LINE = re.compile(r'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) ((?:api|relaunch:|stack:) .*)$', re.M)
 FIELD = re.compile(r'(\w+)=(\S+)')
 
 
@@ -80,19 +82,31 @@ def kbps(nbytes, ms):
 
 def table(output, where):
     """The benchmark's report from the test output's CLAWDOS.LOG lines."""
-    lines = LINE.findall(output)
-    rounds = [dict(FIELD.findall(x)) for x in lines if x.startswith('api ')]
+    stamped = LINE.findall(output)
+    lines = [x for _, x in stamped]
+    rounds = []
+    for when, x in stamped:
+        if x.startswith('api '):
+            r = dict(FIELD.findall(x))
+            r['end'] = datetime.datetime.strptime(when, '%Y-%m-%d %H:%M:%S')
+            rounds.append(r)
     if not rounds:
         sys.exit('bench: no "api" lines in the log')
     out = [f'{where}, {datetime.date.today().isoformat()}, commit {commit()}', '',
-           '| round | len | up ms | up KB/s | ttft-up ms | total ms |',
-           '|---:|---:|---:|---:|---:|---:|']
+           '| round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |',
+           '|---:|---:|---:|---:|---:|---:|---:|']
+    previous = None
     for r in rounds:
         n, up, ttft, total = int(r['len']), int(r['up']), int(r['ttft']), int(r['total'])
-        out.append(f'| {r["round"]} | {n} | {up} | {kbps(n, up)} | {ttft - up} | {total} |')
+        gap = '-' if previous is None else f'{max(0.0, (r["end"] - previous).total_seconds() - total / 1000):.0f}'
+        previous = r['end']
+        out.append(f'| {r["round"]} | {gap} | {n} | {up} | {kbps(n, up)} | {ttft - up} | {total} |')
     sent = sum(int(r['len']) for r in rounds)
     up = sum(int(r['up']) for r in rounds)
-    out.append(f'| all | {sent} | {up} | {kbps(sent, up)} | | {sum(int(r["total"]) for r in rounds)} |')
+    wall = (rounds[-1]['end'] - rounds[0]['end']).total_seconds() + int(rounds[0]['total']) / 1000
+    out.append(f'| all | | {sent} | {up} | {kbps(sent, up)} | | {sum(int(r["total"]) for r in rounds)} |')
+    out.append('')
+    out.append(f'The turn took {wall:.0f} s from the first request to the last reply.')
     out.append('')
     last = rounds[-1]
     streaming = int(last['total']) - int(last['ttft'])
@@ -112,9 +126,11 @@ def main():
     """Run the benchmark and print its table."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dosbox', action='store_true', help='DOSBox-X instead of 86Box (a quick check)')
-    ap.add_argument('--timeout', type=int, default=3600, help='seconds to wait for the run')
+    ap.add_argument('--timeout', type=int, default=5400, help='seconds to wait for the run')
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     a = ap.parse_args()
+    print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about half an hour)"}...',
+          file=sys.stderr, flush=True)
     if a.dosbox:
         output = run_dosbox(min(a.timeout, 600), a.no_build)
         where = 'DOSBox-X (80186, not comparable)'

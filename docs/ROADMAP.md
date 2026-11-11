@@ -70,11 +70,12 @@ is in [API.md](API.md).
       writer, SSE and JSON parsing, thinking blocks echoed back, the tool loop,
       the history as a file on the DOS PC, retries and lost-link recovery,
       `/model` across providers that speak the API. The Python bridge is gone.
-      First live run (86Box 8088, 2026-10-31): a fresh conversation's first
+      First live run (86Box 8088, 2026-10-31, before buffered upload in
+      `766f1f8`, so no longer what the code does): a fresh conversation's first
       request (11.7 KB up: prompt, tool schemas, one message) reached the first
       token after 19 s and finished at 21 s, with the system prompt and tools
-      served from the prompt cache on the second run (`cr=4061`). The ~100 KB
-      history timing is still to be measured.
+      served from the prompt cache on the second run (`cr=4061`). Current
+      figures, up to a 135 KB request: [Benchmark](#benchmark).
 - [ ] **M6 - Building on the DOS PC**: better tools for Claude writing programs on
       the DOS PC itself (Turbo C, assemblers), from what the CGA demo and WarGames
       sessions of 2026-10-25/26 showed (the bridge's JSONL logs of that time). Details below.
@@ -104,6 +105,58 @@ is in [API.md](API.md).
 - [ ] **M7 - Foundation**: grow `lib/` (input line editor, windows/menus, the
       HTTP client for other web APIs through the same tunnel) and a launcher for
       ClawDOS apps.
+
+## Benchmark
+
+`python3 scripts/bench.py` (`make bench`, about half an hour) runs
+`image/tests/bench.bat` in 86Box against the mock API: the mock's `!bench` has
+CLAWDOS.EXE do 20 `read`s of a 4 KB file, one `run` of `VER` with
+`full_memory` (a real relaunch) and a 3.9 KB reply. Per round: `gap` the
+seconds since the previous round ended (the tool call, its result written to
+the history, the request's length counted), `len` the request body, `up` the
+time to send it, `ttft-up` the wait for the (mock) API, `total` the round.
+Taken 2026-11-10 at `f521559`, 86Box IBM PC 5160 (8088 4.77 MHz, NE1000 on
+SLiRP). Later changes rerun it and compare; the scenario and the format stay.
+
+| round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | - | 12926 | 2530 | 5.0 | 1210 | 4235 |
+| 1 | 67 | 19063 | 2970 | 6.3 | 1100 | 4620 |
+| 2 | 68 | 25200 | 3355 | 7.3 | 1100 | 5005 |
+| 3 | 69 | 31337 | 3630 | 8.4 | 1155 | 5335 |
+| 4 | 68 | 37474 | 4070 | 9.0 | 1155 | 5775 |
+| 5 | 69 | 43613 | 4565 | 9.3 | 1100 | 6215 |
+| 6 | 68 | 49752 | 4950 | 9.8 | 1155 | 6655 |
+| 7 | 69 | 55891 | 5225 | 10.4 | 1155 | 6985 |
+| 8 | 69 | 62030 | 5610 | 10.8 | 1155 | 7370 |
+| 9 | 69 | 68169 | 6050 | 11.0 | 1155 | 7810 |
+| 10 | 70 | 74309 | 6435 | 11.3 | 1155 | 8195 |
+| 11 | 69 | 80449 | 6875 | 11.4 | 1210 | 8635 |
+| 12 | 69 | 86589 | 7205 | 11.7 | 1155 | 8965 |
+| 13 | 71 | 92729 | 7645 | 11.8 | 1210 | 9405 |
+| 14 | 69 | 98869 | 8030 | 12.0 | 1210 | 9845 |
+| 15 | 71 | 105009 | 8470 | 12.1 | 1100 | 10175 |
+| 16 | 70 | 111149 | 8800 | 12.3 | 1210 | 10615 |
+| 17 | 71 | 117289 | 9240 | 12.4 | 1210 | 11000 |
+| 18 | 71 | 123429 | 9680 | 12.5 | 1155 | 11440 |
+| 19 | 70 | 129569 | 10065 | 12.6 | 1155 | 11825 |
+| 20 | 72 | 135709 | 10395 | 12.7 | 1155 | 12155 |
+| 21 | 32 | 137848 | 10945 | 12.3 | 1210 | 33880 |
+| all | | 1698402 | 146740 | 11.3 | | 206140 |
+
+The turn took 1627 s from the first request to the last reply.
+
+Final round: 3948 characters streamed in 21725 ms after the first, 182 characters/s (stop=end_turn).
+Relaunch round trip: program 3.1 s, CLAWDOS away 25.7 s.
+Stack: used 1347 of 4027 bytes; used 1557 of 4055 bytes (one line per HARNESS.EXE).
+
+Upload runs at 5 KB/s for the first request and 12-13 KB/s for big ones, so
+the 136 KB request of round 20 takes 10 s before the API sees it. The biggest
+cost is outside the requests, though: about 68 s per `read` round (the run
+round, with a short result, has ~6 s besides the relaunch), most likely the
+4 KB tool_result going into the history a character at a time
+(`json_escape_cp437` into `hist_write`, an `lseek` and a `write` per
+character). The stack never came within 2.4 KB of its end.
 
 ## M6.2: full-memory run
 
@@ -167,7 +220,8 @@ it is: most of it is the output capture's buffers and the C runtime that
 shell.c's formatting needs. Still to do: timing on the real PC, and building
 WarGames with stock headers and MAKE through `full_memory`.
 
-First live runs on the 86Box 8088 (2026-10-31): a 35 s `dir /s | find` kept
+First live runs on the 86Box 8088 (2026-10-31, before buffered upload; the
+relaunch's current cost is in [Benchmark](#benchmark)): a 35 s `dir /s | find` kept
 CLAWDOS away 46 s, so a relaunch costs about 11 s there (the 133 KB EXE reloads,
 reconnects and reopens the history); `TCC -c VOYAGER.C` reported "Available
 memory 215298" and TLINK ran, where the in-process run had no room. Two faults

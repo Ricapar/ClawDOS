@@ -356,7 +356,8 @@ void Chat::logRound(int round)
     sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
             prov->id, as.model[0] ? as.model : prov->model, round,
             firstText ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
-            upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
+            upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?",
+            as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
     ui->log(line);
 }
 

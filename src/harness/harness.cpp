@@ -1058,9 +1058,9 @@ static void handleKey(unsigned key)
 /* --- main ------------------------------------------------------------------ */
 
 /* The stack's high-water mark. Overflow checks are off (-s), so nothing tells
-   us how close the 4 KB stack comes to the heap. At startup the free part is
-   filled with a pattern; at exit the words the pattern survived in are the
-   ones never used. The timer, keyboard and packet interrupts run on this
+   us how close the 4 KB stack comes to the static data below it. At startup
+   the free part is filled with a pattern; at exit the words the pattern
+   survived in are the ones never used. The timer, keyboard and packet interrupts run on this
    stack too, so the mark includes them. */
 extern "C" unsigned _STACKLOW, _STACKTOP;   /* the C runtime's stack bounds, offsets in SS */
 #define STACK_FILL 0x5AA5u
