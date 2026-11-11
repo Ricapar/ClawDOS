@@ -3,6 +3,8 @@
 # targets just run one. Works with the GNU Make 3.81 macOS ships.
 #
 #   make build TUNNEL=172.16.0.100:8443   set the DOS PC's tunnel address (remembered)
+#   make update IMG=/path/CLAWDOS.IMG ARGS=--dry-run   bring an existing image up to date in place
+#   make tunnel ARGS="--key-file ~/clawdos.key --allow 172.16.0.55"   the tunnel supplies the API key
 #   make boot TEST=image/tests/net.bat     one boot test in DOSBox-X
 #   make tunnel ARGS="--map 8444=openrouter.ai:443"   extra tunnel flags
 #   make bench ARGS=--dosbox               the benchmark in DOSBox-X (a quick check)
@@ -16,7 +18,7 @@ endif
 BOOTTEST := $(PYTHON) scripts/boottest.py --no-build
 
 .DEFAULT_GOAL := help
-.PHONY: help setup build compiledb clean test check boot boottests boottests-online test8088 \
+.PHONY: help setup build update compiledb clean test check boot boottests boottests-online test8088 \
         bench run dosbox shot tunnel mock
 
 help:
@@ -32,6 +34,10 @@ setup: ## fetch the toolchains into tools/
 build: ## build the apps and build/CLAWDOS.IMG (TUNNEL=host:port sets the address)
 	$(PYTHON) scripts/build.py $(if $(TUNNEL),--tunnel $(TUNNEL))
 
+update: ## build, then update an existing image in place, keeping its memories, chats, log and config (IMG=path; ARGS=--dry-run --memories --cfg --no-backup --no-key)
+	@[ -n "$(IMG)" ] || { echo "usage: make update IMG=path/to/CLAWDOS.IMG [ARGS=--dry-run]"; exit 2; }
+	$(PYTHON) scripts/build.py --update "$(IMG)" $(if $(TUNNEL),--tunnel $(TUNNEL)) $(ARGS)
+
 compiledb: ## write build/compile_commands.json for clangd
 	$(PYTHON) scripts/build.py --compiledb
 
@@ -41,8 +47,10 @@ clean: ## delete build/ except settings.json (the remembered tunnel address)
 
 # --- tests --------------------------------------------------------------------
 
-test: ## host unit tests: the mock API and the benchmark's table (fast, no emulator)
+test: ## host unit tests: the mock API, the tunnel, the image updater and the benchmark's table (fast, no emulator)
 	$(PYTHON) tunnel/test_mockapi.py
+	$(PYTHON) tunnel/test_tunnel.py
+	$(PYTHON) scripts/test_imgupdate.py
 	$(PYTHON) scripts/test_bench.py
 
 check: test boottests ## everything offline: the mock API tests and the offline DOSBox-X boot tests
@@ -122,8 +130,8 @@ dosbox: build ## boot the image in DOSBox-X with networking (faster, less exact)
 shot: ## screenshot 86Box to build/shot.png
 	$(PYTHON) scripts/shot.py
 
-tunnel: ## run the TLS tunnel the DOS PC talks through (ARGS=--map PORT=HOST:443 ...)
+tunnel: ## run the TLS tunnel the DOS PC talks through (ARGS=--map PORT=HOST:443 --allow ADDR --key-file PATH ...)
 	$(PYTHON) tunnel/tunnel.py $(ARGS)
 
-mock: ## run the mock Messages API (plain HTTP on 18023) instead of the real one
+mock: ## run the mock Messages API (plain HTTP on 18023, 127.0.0.1; ARGS=--listen 0.0.0.0 for a real PC) instead of the real one
 	$(PYTHON) tunnel/mockapi.py $(ARGS)

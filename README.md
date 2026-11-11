@@ -82,7 +82,7 @@ sends and expects is in [docs/API.md](docs/API.md).
 |---|---|
 | **To try it** | A Mac (with Homebrew) or a Windows PC, with Python 3. Everything runs in an emulator. |
 | **For real hardware** | An 8088 IBM PC (or compatible) with CGA and a PicoMEM card: it provides the disk (an image on a microSD card) and WiFi (NE2000). |
-| **For the AI** | An Anthropic API key, or the offline mock API for a look around. Use a dedicated key with a spending limit: it sits on the DOS PC's disk and crosses your LAN in clear on its way to the tunnel. |
+| **For the AI** | An Anthropic API key, or the offline mock API for a look around. Use a dedicated key with a spending limit: unless the tunnel holds it (below), it sits on the DOS PC's disk and crosses your LAN in clear on its way to the tunnel. |
 
 ## Run it locally (emulator)
 
@@ -115,6 +115,18 @@ networking. It is faster but less exact (it emulates an 80186).
    ```
    The address is remembered. On the DOS PC it is the `tunnel` line of
    `C:\CLAWDOS\CLAWDOS.CFG`, next to the API key; edit the file there to change either.
+   **The key is on the SD card and in clear on your LAN.** Anyone who can read the
+   card or sniff the WiFi has it, so use a dedicated key with a spending limit. To keep
+   it off the DOS PC altogether, let the tunnel hold it: put the key alone in a file
+   next to the tunnel, build with `python scripts/build.py --no-key` (the image has
+   `auth tunnel` and no key) and start
+   `python3 tunnel/tunnel.py --key-file ~/clawdos.key --allow 172.16.0.55` (the DOS
+   PC's address). The tunnel then adds `x-api-key` to every request it forwards to
+   `api.anthropic.com` and drops any key the client sent. Without `--key-file` it
+   stays a plain byte copy that knows nothing about HTTP. `--allow` (repeatable)
+   restricts who may connect, and `--key-file` refuses to start without it unless
+   `--listen` is a loopback address, because a tunnel that adds your key serves
+   whoever reaches it. The key file is never logged; protect it (`chmod 600`).
 2. **Run the tunnel** on that PC (or a Raspberry Pi): `python3 tunnel/tunnel.py`,
    or without our code, `socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443`.
    The DOS PC connects in on TCP port 8443, so allow it through the firewall.
@@ -124,6 +136,20 @@ networking. It is faster but less exact (it emulates an 80186).
    New-NetFirewallRule -DisplayName ClawDOSTunnel -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
    ```
 3. **Copy `CLAWDOS.IMG`** into the `HDD` folder on the PicoMEM's microSD card.
+   Next time, do not replace the card's image (that loses the PC's memories, chats and
+   log): update it in place with `python scripts/build.py --update /path/to/CLAWDOS.IMG`
+   (`make update IMG=/path/to/CLAWDOS.IMG`). It builds as usual, copies the old image to
+   `CLAWDOS.IMG.bak`, then replaces or adds every file the build ships and nothing else:
+   everything under `MEMORY\`, `CLAWDOS\CHATS\`, `CLAWDOS.LOG`, `CLAWDOS.CFG`, the
+   relaunch state files and any file the build does not ship (your own programs) stay as
+   they are, and it says so for each shipped file it left alone. It lists the files it
+   added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists
+   the template's `[anthropic]` settings the image's copy lacks so you can add them.
+   `--dry-run` shows all that and changes nothing; `--memories` also replaces the memory
+   files the build ships (not your others); `--cfg` replaces `CLAWDOS.CFG` with the
+   build's (tunnel address and key line included); `--no-backup` skips the `.bak`. Quit
+   CLAWDOS and keep the card out of the PC while you update. It refuses an image with no
+   `CLAWDOS` directory.
 4. **Configure the PicoMEM**: in its BIOS menu pick the image as HDD0 (Disk) and
    make sure NE2000 is enabled (Other). The card's WiFi settings are its own;
    see the PicoMEM documentation.

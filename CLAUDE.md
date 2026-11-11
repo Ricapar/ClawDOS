@@ -11,6 +11,15 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `make boottests` (the DOSBox-X tests that run offline), `make boottests-online` (those that need the internet:
   clock.bat), `make check` (test and boottests, all offline), `make bench` (the 86Box benchmark), `make run`,
   `make tunnel`, `make mock`. Keep it in step with them.
+- Update a real PC's image in place instead of replacing it: `python scripts/build.py --update PATH/CLAWDOS.IMG [--dry-run]
+  [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). It copies
+  the old image to IMG.bak, then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
+  nothing else: MEMORY/ (`--memories`: only the memory files the build ships), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
+  (`--cfg`), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
+- The API key can stay off the DOS PC: `build.py --no-key` (image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
+  --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
+  copies bytes and knows nothing of HTTP; docs/API.md "The tunnel"). Tests: `python3 tunnel/test_tunnel.py` against a local
+  stand-in upstream, never the internet. `mockapi.py --listen` defaults to 127.0.0.1 (the emulators reach it as 10.0.2.2).
 - Build everything: `python scripts/build.py [--tunnel host:port]` (apps -> build/*.EXE, disk -> build/CLAWDOS.IMG).
   The image's C:\CLAWDOS\CLAWDOS.CFG gets the tunnel address (remembered in build/settings.json) and the API key from
   `.env` (`ANTHROPIC_API_KEY=...`, gitignored); the test images boottest.py and test8088.py build get no key (the

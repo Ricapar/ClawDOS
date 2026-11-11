@@ -9,12 +9,12 @@ stream it reads and how the history stays valid.
 
 | File | What |
 |---|---|
-| `C:\CLAWDOS\CLAWDOS.CFG` | Settings and providers (below). The image build fills in the tunnel address and the key from `.env` (not in the test images `boottest.py` and `test8088.py` build: the mock needs no key). |
+| `C:\CLAWDOS\CLAWDOS.CFG` | Settings and providers (below). The image build fills in the tunnel address and the key from `.env` (with `build.py --no-key`, no key and `auth tunnel`; not in the test images `boottest.py` and `test8088.py` build: the mock needs no key). |
 | `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the conversation's cache settings (`cache`, `cachettl`) and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Esc while the memories are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
-| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev= th=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event, `th` what that attempt did with message threads (`create`, `cont` or `none`; below). A line per notable event (retries, `connection #n`, errors, `relaunch:`, `progress note:` with the first 60 characters of each progress note drawn, `thread <error_code>: replaying the conversation`), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
+| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev= th=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event, `th` what that attempt did with message threads (`create`, `cont` or `none`; below). A line per notable event (retries, `connection #n`, errors, `relaunch:`, `progress note:` with the first 60 characters of each progress note drawn, `thread <error_code>: replaying the conversation`, `leaving: <why>`, the reason the harness left its main loop), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). |
 
 ### CLAWDOS.CFG
@@ -31,7 +31,8 @@ type anthropic              # the only type: a host that speaks the Messages API
 tunnel 192.168.1.10:8443    # where the TLS tunnel listens (a host on the command line replaces it)
 host api.anthropic.com      # the Host header
 path /v1/messages           # default
-auth x-api-key              # default; "bearer" sends Authorization: Bearer instead
+auth x-api-key              # default; "bearer" sends Authorization: Bearer instead;
+                            # "tunnel" sends no key header (the tunnel adds it: tunnel.py --key-file)
 key sk-ant-...              # or: keyfile C:\CLAWDOS\ANTHROP.KEY
 model claude-opus-5-5
 effort low                  # omitted: no output_config is sent; F5 cycles it
@@ -55,7 +56,9 @@ carries them across a relaunch (`fixed P D C T H`). An edit to them, or a
 switch to a provider with other values, applies from the next conversation.
 
 A section without a key still works against the mock API; against the real one
-the API answers 401, which is shown. `tunnel`, `host` and `model` are required.
+the API answers 401, which is shown (and the harness warns at startup). With
+`auth tunnel` no key is needed or sent, and there is no warning: the tunnel in key mode
+supplies it (below), and a `key` line in such a section is ignored. `tunnel`, `host` and `model` are required.
 
 ## The request
 
@@ -265,10 +268,38 @@ battery clock and NETUP.BAT sets the time by SNTP (see CLAUDE.md).
 
 ## The tunnel
 
-`python3 tunnel/tunnel.py [--map PORT=HOST[:443]]...` (default
-`8443=api.anthropic.com:443`): for each client connection, a TLS connection to
+`python3 tunnel/tunnel.py [--map PORT=HOST[:443]]... [--listen ADDR] [--allow ADDR]... [--key-file PATH]`
+(default `8443=api.anthropic.com:443`): for each client connection, a TLS connection to
 the mapped host and two byte pumps. It logs connections and byte counts, never
-content. Equivalents:
+content. By default it knows nothing about HTTP and copies bytes exactly.
+
+`--allow ADDR` (repeatable, single IPv4/IPv6 addresses, not networks) lets only those
+clients connect on any map; others are closed at once and logged by address.
+
+**Key mode** (`--key-file PATH`, opt-in) is the one place the tunnel reads the API, so
+that the DOS PC need not hold the key (`build.py --no-key`; the provider has
+`auth tunnel`, and the harness sends no key header and does not warn about a missing
+key). The file holds one key, whitespace around it stripped; an unreadable or empty
+file, or one with anything but visible ASCII, is a start-up error. For every request
+on a map to `api.anthropic.com` (never another map: a second provider's port is still
+a byte copy, and `--key-file` without an `api.anthropic.com` map is an error) it:
+
+- finds the request head (up to the blank line, at most 64 KB), drops every
+  `x-api-key` and `authorization` header the client sent (with any folded continuation
+  lines) and puts `x-api-key: <key>` first among the headers;
+- forwards exactly `Content-Length` bytes of body unread and unchanged, then looks for
+  the next request head on the same connection (keep-alive; pipelined requests work);
+- copies responses back unread, as before.
+
+Limits: only Content-Length framing. A request with `Transfer-Encoding`, `Upgrade` or
+`CONNECT` (501), a bad or repeated `Content-Length`, a bare CR/LF/NUL in the head or a
+malformed header line (400), or a head over 64 KB (431) is answered with that status and
+the connection closed, never forwarded. A refusal may interleave with an upstream
+response if the client pipelined. The key and the requests are never logged, only
+addresses, byte counts and the number of requests; the key is held in the tunnel's
+memory. `--key-file` refuses to start without an `--allow`, unless `--listen` is a
+loopback address, so that the tunnel never adds your key for whoever reaches the port.
+Equivalents of the default mode:
 
 ```
 socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443
@@ -281,7 +312,7 @@ accept = 8443
 connect = api.anthropic.com:443
 ```
 
-`python3 tunnel/mockapi.py [--port 18023] [--speed 1] [--tools FILE] [--thread-ttl 300]` fakes the API on plain
+`python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1] [--tools FILE] [--thread-ttl 300]` fakes the API on plain
 HTTP for tests and offline use: `CLAWDOS 10.0.2.2:18023` from an emulator, then
 `!help` for its scenarios. It checks every request against the rules below and
 answers a violation with HTTP 400 (`invalid_request_error`, naming the problem

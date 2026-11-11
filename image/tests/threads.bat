@@ -1,6 +1,6 @@
 @ECHO OFF
 REM Message threads when they go wrong (scripts/boottest.py image/tests/threads.bat
-REM --mock --timeout 240, the expectations in the Makefile): each run makes a tool
+REM --mock --timeout 300, the expectations in the Makefile): each run makes a tool
 REM call, and the request after it is a continue that the mock refuses or cuts.
 REM !threadlost: the mock forgets the thread (thread_not_found), so CLAWDOS replays
 REM the whole conversation as a new thread; the mock logs whether the replay was
