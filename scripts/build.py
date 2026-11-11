@@ -63,7 +63,7 @@ APPS = {
                                'src/harness/chatui.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
-                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/shot.c', 'lib/shotpng.c',
+                               'lib/memory.c', 'lib/ems.c', 'lib/runmem.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/shot.c', 'lib/shotpng.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/chatfile.c', 'lib/net.cpp', 'lib/http.cpp'],
@@ -72,6 +72,8 @@ APPS = {
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c',
                                 'lib/chatfile.c', 'lib/shotpng.c'],
                     'model': 'l', 'defines': ['DOSUNIT']},
+    # Test-only: leaves a chosen amount of memory free and runs a program at that edge (C:\TESTS\EATMEM.EXE).
+    'eatmem.exe': {'sources': ['tests/unit/eatmem.c'], 'model': 's'},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini', '.bas', '.asm', '.c', '.h'}

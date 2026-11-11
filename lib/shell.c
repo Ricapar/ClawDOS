@@ -272,6 +272,22 @@ static const char *direct(const char *cmd, char *prog)
 
 #define WHY_MAX 120                   /* "could not start ...: ..." */
 
+/* The largest free block FreeCOM 0.86 (the image's COMMAND.COM) needs to run
+   a command, with a margin. It loads with about 72 KB, but below 100,096
+   bytes it cannot load its strings and asks on the keyboard for another
+   COMMAND.COM to take them from: with standard input on NUL nobody answers,
+   and the PC hangs (tests/unit/eatmem.c measured it, in steps of 256 bytes). */
+#define SHELL_NEEDS 102400UL
+
+static unsigned long largestFree(void)
+{
+    union REGS r;
+    r.h.ah = 0x48;
+    r.x.bx = 0xFFFF;                  /* more than there is: DOS says how much */
+    intdos(&r, &r);
+    return (unsigned long)r.x.bx * 16;
+}
+
 /* Run one command, capturing its output. The exit code, or -1 if it couldn't
    start (why is in `why`, WHY_MAX bytes). */
 static int runOne(const char *cmd, char *why)
@@ -285,14 +301,20 @@ static int runOne(const char *cmd, char *why)
     teletype("C:\\> ");
     teletype(cmd);
     teletype("\n");
-
     headLen = tailStart = tailLen = 0;
     total = 0;
+    args = direct(cmd, prog);
+    if (args == NULL && largestFree() < SHELL_NEEDS) {
+        snprintf(why, WHY_MAX, "not enough memory for COMMAND.COM (%luK needed, %luK free): set full_memory",
+                 SHELL_NEEDS / 1024, largestFree() / 1024);
+        teletype(why);
+        teletype("\n");
+        return -1;
+    }
     /* Ctrl-C stays with the network stack's handler, which ignores it, as in
        mTCP's own shell-outs: the program can't be stopped with Ctrl-C unless
-       it installs its own handler. */
-    args = direct(cmd, prog);
-    /* The program inherits our handles. Nobody can type into it, so give it
+       it installs its own handler.
+       The program inherits our handles. Nobody can type into it, so give it
        NUL as standard input: a program that reads stdin (FIND with no file,
        MORE, a prompt) gets end-of-file and exits instead of waiting forever. */
     nul = open("NUL", O_RDONLY);

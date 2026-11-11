@@ -16,9 +16,13 @@ static int lastKey = -1;            /* offset of the newest key */
 
 static char outBuf[TOOL_OUT_MAX + 1];
 
+char *(*targ_buffer)(void);
+
 void targ_reset(void)
 {
-    if (store == NULL)
+    if (targ_buffer)                   /* asked again each call: it may have moved */
+        store = targ_buffer();
+    else if (store == NULL)
         store = (char *)malloc(TOOL_ARGS_MAX);
     used = 0;
     lastKey = -1;

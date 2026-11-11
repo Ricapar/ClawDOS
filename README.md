@@ -215,8 +215,10 @@ runs them and shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `
 that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
 playing music and memories never ask. `-unsafe` starts with it off, and `-q`
 quits once the `-m` message is answered (both for unattended tests). Esc
-during a tool stops the reply. Programs started by `run` can't use the network
-or be stopped with Ctrl-C. `run` starts a plain program directly, and only loads
+during a tool stops the reply. Programs started by `run` can't use the network,
+and inside the harness they can't be stopped with Ctrl-C (a `full_memory` one can,
+unless it was given `shot_at`: the launcher ignores Ctrl-C while its timer hook is in).
+`run` starts a plain program directly, and only loads
 a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
 The chat comes back as soon as the last command ends; the last six lines of its
 output (or of the screen it left) stay in the transcript, dim under the call,
@@ -224,21 +226,33 @@ after a line counting the ones above them. The model gets the whole output.
 
 ### Memory for programs
 
-HARNESS.EXE holds about 310K while it runs (mTCP, the API buffers, the code),
-which would leave a program started by `run` about 190K. So **`CLAWDOS.EXE`**,
-the command you type, is a 50K launcher: it starts HARNESS.EXE, and a `run`
-with `full_memory` set makes the harness save its state and exit, the launcher
-run the commands with about 450K free, and the harness start again on the same
-conversation with the program's output as the tool result. That costs a reload
-and a reconnect (under a second in DOSBox-X; about 11 s on the 8088), so Claude
-sets it for compilers, linkers, the programs it builds and batch files
-(the run tool's schema and `image/skills/DEVTOOLS.TXT` say when), and leaves it
-off for DIR, TYPE and quick checks, which run beside the harness. The screen and
-the Up/Down input history come back with the harness. If the harness cannot come back (the tunnel or the
-network is down), fix that and type `CLAWDOS -resume`: the conversation carries
-on from the program's output. Running `HARNESS` directly keeps programs inside
-its memory. The files behind it are in `lib/relaunch.h`;
-`image/tests/relaunch.bat` exercises it.
+A program `run` starts inside the harness shares memory with it. While the
+program runs the harness keeps its code, mTCP and its buffers, the C heap
+(about 35K) and the chat screen (in EMS when there is some), and lends DOS its
+other buffers, about 80K (the event buffer, the tool input, the argument store,
+the HTTP buffers: `lib/runmem.h`), taking them back afterwards. Measured in
+DOSBox-X (`image/tests/runmem.bat`, MEM's largest executable program size), a
+program gets about 200K started directly and 130K through COMMAND.COM under
+CLAWDOS.EXE (250K and 180K with HARNESS.EXE alone). A command that needs
+COMMAND.COM is refused, with a note telling Claude to set `full_memory`, when
+less than 100K is free: below that FreeCOM stops at a prompt for its strings
+that nobody can answer. If a program stays resident and keeps the memory the
+harness lent, the turn ends after its result (restart the PC to get it back).
+
+For more, **`CLAWDOS.EXE`**, the command you type, is a 44K launcher: it starts
+HARNESS.EXE, and a `run` with `full_memory` set makes the harness save its state
+and exit, the launcher run the commands with about 450K free, and the harness
+start again on the same conversation with the program's output as the tool
+result. That costs a reload and a reconnect (under a second in DOSBox-X; about
+11 s on the 8088), so Claude sets it for compilers, linkers, the programs it
+builds and batch files (the run tool's schema and `image/skills/DEVTOOLS.TXT`
+say when), and leaves it off for DIR, TYPE and quick checks, which run beside
+the harness. The screen and the Up/Down input history come back with the
+harness. If the harness cannot come back (the tunnel or the network is down),
+fix that and type `CLAWDOS -resume`: the conversation carries on from the
+program's output. Running `HARNESS` directly keeps programs inside its memory.
+The files behind it are in `lib/relaunch.h`; `image/tests/relaunch.bat`
+exercises it.
 
 With the mock API, `!tool NAME key=value ...` calls any tool (e.g.
 `!tool read path=C:\AUTOEXEC.BAT`), `!play` is a demo, and

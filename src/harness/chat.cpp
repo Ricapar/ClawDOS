@@ -19,10 +19,11 @@
 #include "convo.h"
 #include "dosfs.h"
 #include "chatfile.h"
+#include "runmem.h"
 
-#define SSE_MAX        16384u
-#define TOOL_INPUT_MAX 16384u
-#define RX_MAX         2048u
+#define SSE_MAX        RM_SSE_BYTES
+#define TOOL_INPUT_MAX RM_TOOLIN_BYTES
+#define RX_MAX         RM_RX_BYTES
 #define READ_TIMEOUT   300          /* seconds without a byte: the link is dead */
 #define MAX_ROUNDS     25           /* tool rounds per user message */
 #define PROMPT_PATH    "C:\\CLAWDOS\\PROMPT.TXT"
@@ -32,9 +33,8 @@
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 #define CALL_LOST      "Error: no result: ClawDOS stopped before this call finished, and the chat was reopened later."
 
-Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
-               rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
-               upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE), repairCut(0)
+Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), err(""), reasked(0), streamRc(0), textShown(0),
+               reqStart(0), firstText(0), upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE), repairCut(0)
 {
     addr[0] = path[0] = prePath[0] = desc[0] = 0;
     th.id[0] = 0;
@@ -42,6 +42,20 @@ Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), to
     ctxTokens = 0;
     turnsDone = 0;
     convo_init(&convo);
+}
+
+/* The scratch apistream asks for at each stream (runmem's). */
+static char *scratch(void)
+{
+    return runmem_slot(RM_SCRATCH);
+}
+
+/* The HTTP buffers are runmem's, held again after a run: handed over before
+   each use, since the block may come back elsewhere. */
+void Chat::useBuffers(void)
+{
+    http.useBuffers(runmem_slot(RM_HTTP_RX), runmem_slot(RM_HTTP_HEAD), runmem_slot(RM_HTTP_TX));
+    apistream_scratch = scratch;
 }
 
 /* What init and resume share: the provider, the buffers. */
@@ -64,16 +78,11 @@ int8_t Chat::setup(Cfg *c, const char *providerId, const char *hostOverride, Cha
         err = errBuf;
         return -1;
     }
-    if (!sseBuf)
-        sseBuf = (char *)malloc(SSE_MAX);
-    if (!toolInput)
-        toolInput = (char *)malloc(TOOL_INPUT_MAX);
-    if (!rxBuf)
-        rxBuf = (char *)malloc(RX_MAX);
-    if (!sseBuf || !toolInput || !rxBuf) {
+    if (runmem_take()) {
         err = "Out of memory for the API buffers.";
         return -1;
     }
+    useBuffers();
     http.idle = ui->idle;
     return 0;
 }
@@ -490,7 +499,7 @@ void Chat::drain(void)
 {
     int n, guard = 0;
     while (!http.bodyDone() && guard++ < 64) {
-        n = http.read(rxBuf, RX_MAX, 2);
+        n = http.read(runmem_slot(RM_RX), RX_MAX, 2);
         if (n <= 0) {
             if (n != 0)
                 http.close();
@@ -503,14 +512,12 @@ void Chat::drain(void)
    and its error.details.error_code (the thread errors have one). */
 void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max, char *code, unsigned codeMax)
 {
-    static char *body;
+    char *body = runmem_slot(RM_ERRBODY);
     unsigned len = 0;
     const char *v;
     unsigned vlen;
     int n;
 
-    if (!body)
-        body = (char *)malloc(1600);
     sprintf(msg, "API error %d", h->status);
     code[0] = 0;
     if (!body)
@@ -583,11 +590,12 @@ void Chat::replayThread(ApiReq *r, const char *code)
 
 int8_t Chat::stream(void)
 {
+    char *rxBuf = runmem_slot(RM_RX);
     int n;
 
-    sse_init(&sse, sseBuf, SSE_MAX);
+    sse_init(&sse, runmem_slot(RM_SSE), SSE_MAX);
     sse.big = onBig;
-    apistream_init(&as, toolInput, TOOL_INPUT_MAX);
+    apistream_init(&as, runmem_slot(RM_TOOLIN), TOOL_INPUT_MAX);
     as.text = onText;
     as.thinking = onThinking;
     as.hist = onHist;
@@ -641,6 +649,15 @@ int8_t Chat::request(int noTools)
     int attempt = 0, threadErrors = 0;
     int fresh, wait;
 
+    /* The buffers were lent to the last run's program (tools.cpp). Not had
+       back, a program that stayed resident keeps the memory: the turn stops,
+       the file ending with that call's result, which the next text joins. */
+    if (runmem_take()) {
+        warn("Not enough memory came back after the run (did a program stay resident?): the turn stops."
+             " Restart the PC to free it.");
+        return -1;
+    }
+    useBuffers();
     switch (preparePrefix()) {
     case 0:
         break;

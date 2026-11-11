@@ -1,0 +1,1 @@
+@C:\DOS\MEM.EXE %1

@@ -63,7 +63,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
 	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "STDINEOF under COMMAND.COM: ok" --expect "progress note: Tour step 1 of" \
-	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" --reject "VALIDATION:"
+	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" \
+	    --expect "tool tour MEM through COMMAND.COM: largest program" --reject "largest program None" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/notes.bat --mock --expect "progress note: Two lines" --expect "stop=end_turn" \
 	    --expect "tool header column: 0 (PASS)" --expect "headercol exit code 0" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/threads.bat --mock --timeout 300 --expect "thread replay after thread_not_found: PASS" \
@@ -136,7 +137,13 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --reject '"content":"!refuse"' --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" \
-	    --expect "bigrun: the result came by thread continue" --reject "VALIDATION:"
+	    --expect "bigrun: the result came by thread continue" \
+	    --expect "tool tour MEM through COMMAND.COM: largest program" --reject "largest program None" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/runmem.bat --mock --timeout 240 --expect "(floors 235520, 163840): PASS" \
+	    --expect "(floors 180224, 107520): PASS" --reject ": FAIL" --expect "memshort: PASS" --expect "HARNESS.EXE memrun exit code 0" --expect "CLAWDOS.EXE memrun exit code 0" \
+	    --expect "Not enough memory came back after the run" \
+	    --expect "reopened gone: 3 messages: user[text] assistant[thinking,text,tool_use] user[tool_result,text]" \
+	    --expect "gone exit code 0" --expect "memshort exit code 0" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/fixed.bat --mock --timeout 150 --expect "tool run -> ok" --expect "CLAWDOS.EXE exit code 0" \
 	    --expect "1 messages, last role user, thinking none, cache 1h" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \

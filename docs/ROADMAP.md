@@ -361,6 +361,53 @@ that a program's free memory (e.g. `MEM`) is above the goal. Then the 86Box
 8088 (`scripts/test8088.py`) and the real PC, building WarGames with
 stock headers and MAKE.
 
+### Memory for in-harness runs (2026-11-11)
+
+The runs `full_memory` leaves inside the harness had fallen to 157K started
+directly and 86K through COMMAND.COM (HARNESS.EXE alone, first message), and a
+COMMAND.COM run short of memory hung the PC instead of failing. Now:
+
+- **The hang** was FreeCOM's: below 100,096 bytes free (measured in 256-byte
+  steps with `tests/unit/eatmem.c`, outside the harness) it cannot load its
+  strings and asks on the keyboard where to find another copy; with standard
+  input on NUL nobody answers. From about 72K (where EXEC fails cleanly) up to
+  that it stops there. lib/shell.c now refuses a command that needs
+  COMMAND.COM with under 100K free and tells the model to set `full_memory`;
+  a program started directly that does not fit fails with DOS's own "Not
+  enough memory". The launcher-size "cliff" of Task 11 was the same prompt.
+- **Where the memory was** (MEM /D inside a run): the harness's block was its
+  code plus a full 64K DGROUP, because Open Watcom's startup keeps the near
+  heap that the large model's malloc never uses (28K; now given back at
+  startup but for 2K that the C library's spawn needs), and two 64K far-heap
+  segments holding everything else: the four 16K API buffers, the HTTP
+  buffers, mTCP's, the screen save.
+- **Lent around a run** (lib/runmem.h): the buffers whose contents nothing
+  needs while a program runs (event 16K, tool input 16K, argument store 16K and
+  its decode buffer 16K, network read 2K, HTTP 6.5K, stream scratch 2K, error
+  text 4K and error body 1.6K: 79K) are one DOS block taken last-fit at the top
+  of memory and freed before the program starts, so it joins the free block
+  below it; it is taken again after. The commands run from a small copy, the
+  screen save is a DOS block (not the C heap, which would keep it), and the C
+  heap's free tail goes back first (`_fheapshrink`). If the block cannot come
+  back (a program stayed resident), the turn ends after the result.
+
+MEM's largest executable program size from inside a run, DOSBox-X:
+
+| | started directly | through COMMAND.COM |
+|---|---|---|
+| before the plan (`7723879`), HARNESS.EXE alone | 176K (180,240) | 105K (107,808) |
+| before this (`9139304`), HARNESS.EXE alone | 149K (152,528) | 78K (80,096) |
+| near heap given back, screen save a DOS block | 169K (173,872) | 99K (101,440) |
+| + the API buffers lent | 242K (247,936) | 171K (175,504) |
+| + the HTTP, scratch and error buffers lent | 250K (255,872) | 179K (183,440) |
+| the same under CLAWDOS.EXE | 198K (202,832) | 127K (130,400) |
+| under CLAWDOS.EXE, late in the tool tour | | 127K (130,400) |
+| `full_memory` (the launcher alone) | 446K (456,240) | |
+
+`image/tests/runmem.bat` checks these (floors 230K/160K alone, 176K/105K
+under the launcher), the refusal and the turn that ends when the memory does
+not come back.
+
 ## Repo layout
 
 See the README.

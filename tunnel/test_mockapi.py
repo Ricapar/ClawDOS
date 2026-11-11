@@ -569,6 +569,51 @@ class TailScreenTest(unittest.TestCase):
         self.assertEqual(mockchat.screen_rows(vram)[0].rstrip(), '> two')
 
 
+class MemRunTest(unittest.TestCase):
+    """!memrun's and !memshort's verdicts from MEM's and the harness's text (image/tests/runmem.bat)."""
+
+    MEM = ('Memory accessible using Int 15h         0K (      0 bytes)\n'
+           'Largest executable program size       242K (247,936 bytes)\n')
+
+    def answer(self, gen, results):
+        """Drive a scenario, answering its calls in turn; returns what it printed."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            item = next(gen)
+            try:
+                while True:
+                    if isinstance(item, mockchat.ToolCall):
+                        item.result = mockchat.ToolResult(*results.pop(0))
+                    item = next(gen)
+            except StopIteration:
+                pass
+        return out.getvalue()
+
+    def test_mems_largest_program(self):
+        self.assertEqual(mockchat.largest_program('exit code 0\n' + self.MEM), 247936)
+        self.assertIsNone(mockchat.largest_program('exit code 0\nnot enough memory'))
+
+    def test_memrun_checks_both_floors(self):
+        chat = mockchat.MockChat(0)
+        shell = self.MEM.replace('242K (247,936', '171K (175,504')
+        log = self.answer(chat._cmd_memrun('!memrun 230 160'), [('ok', self.MEM), ('ok', shell)])
+        self.assertIn('memrun: direct 247936, shell 175504 (floors 235520, 163840): PASS', log)
+        log = self.answer(chat._cmd_memrun('!memrun 230 172'), [('ok', self.MEM), ('ok', shell)])
+        self.assertIn(': FAIL', log)
+        log = self.answer(chat._cmd_memrun('!memrun'), [('ok', self.MEM), ('error', 'not enough memory')])
+        self.assertIn('shell None (floors 0, 0): FAIL', log)
+
+    def test_memshort_wants_a_refusal_and_dos_error(self):
+        refused = 'not enough memory for COMMAND.COM (100K needed, 90K free): set full_memory\n'
+        log = self.answer(mockchat.MockChat(0)._cmd_memshort('!memshort'),
+                          [('ok', 'EATMEM: largest free 92160 bytes'), ('error', refused), ('ok', self.MEM),
+                           ('error', 'could not start C:\\TESTS\\DOSUNIT.EXE: Not enough memory\n')])
+        self.assertIn('memshort: PASS', log)
+        log = self.answer(mockchat.MockChat(0)._cmd_memshort('!memshort'),
+                          [('ok', ''), ('ok', 'FreeCom version 0.86'), ('ok', self.MEM), ('error', 'x')])
+        self.assertIn('memshort: FAIL', log)
+
+
 class ValidatorTest(unittest.TestCase):
     """The strict request check, rule by rule: each has a request it accepts and one it rejects."""
 

@@ -25,6 +25,7 @@
 #include <i86.h>
 #include <fcntl.h>
 #include <io.h>
+#include <malloc.h>
 #include <sys/stat.h>
 
 #include "types.h"
@@ -1316,6 +1317,24 @@ static unsigned stackPointer(void);
 static unsigned stackSegment(void);
 #pragma aux stackSegment = "mov ax, ss" value [ax] modify exact [ax];
 
+/* Open Watcom's startup keeps DGROUP at a full 64 KB for a near heap, but in
+   the large model malloc takes far memory: the 28 KB past the stack would be
+   held, unused, from every program run. Only the C library's own spawn and
+   startup code use the near heap (the child's environment and command line),
+   so NEAR_KEEP bytes stay, held open by a small block allocated after them,
+   and the rest goes back to DOS. Before the first malloc: the far heap's
+   blocks then come right after the program, with no hole below them. */
+#define NEAR_KEEP 2048
+
+static void trimNearHeap(void)
+{
+    void __near *keep = _nmalloc(NEAR_KEEP);
+
+    _nmalloc(16);                     /* the end of the near heap from now on */
+    _nfree(keep);
+    _nheapshrink();
+}
+
 /* Inline code and a plain loop: no call pushes onto the words being filled. */
 static void stackFill(void)
 {
@@ -1574,6 +1593,7 @@ int main(int argc, char *argv[])
     int i, bad, openMemories = 0;
 
     stackFill();
+    trimNearHeap();
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-unsafe")) {
             unsafe = 1;

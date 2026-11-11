@@ -19,7 +19,10 @@ enum { TS_OK, TS_ERROR, TS_DENIED, TS_STOPPED, TS_RELAUNCH };
 #define TOUT_RESERVE  100     /* kept free by tout_line for the lines that end a result */
 #define TOOL_ARGS_MAX 16384u
 
-/* Arguments of the current call, kept in a far buffer of TOOL_ARGS_MAX bytes. */
+/* Arguments of the current call, kept in a far buffer of TOOL_ARGS_MAX bytes:
+   from the heap, or, when targ_buffer is set, the buffer it returns, asked
+   for at every targ_reset (the harness lends it to run programs, runmem.h). */
+extern char *(*targ_buffer)(void);
 void        targ_reset(void);
 /* Set key to the UTF-8 text (n bytes), converted to CP437 with tabs kept.
    -1 if the store is full. */

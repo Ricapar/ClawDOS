@@ -14,6 +14,7 @@
 #include <i86.h>
 #include <dos.h>
 #include <io.h>
+#include <malloc.h>
 
 #include "toolapi.h"
 #include "dosfs.h"
@@ -32,6 +33,7 @@
 #include "tools.h"
 #include "ui.h"
 #include "json.h"
+#include "runmem.h"
 
 #define PEEK_MAX  256
 
@@ -170,12 +172,15 @@ static int toolTextart(ToolCtx *t)
 
 /* Somewhere to keep the chat screen while a tool has the display: an EMS page
    when there is EMS (one page is exactly the CGA's 16 KB), so a program run
-   meanwhile gets that conventional memory, or else the heap. */
+   meanwhile gets that conventional memory, or else a DOS block given back
+   afterwards (the C heap would keep the 16 KB from every later program). */
 unsigned short __far *tools_save_screen(void)
 {
     unsigned short __far *save = (unsigned short __far *)ems_page();
-    if (save == NULL)
-        save = (unsigned short __far *)malloc(SCR_SAVE_BYTES);
+    unsigned seg;
+
+    if (save == NULL && _dos_allocmem(SCR_SAVE_BYTES / 16, &seg) == 0)
+        save = (unsigned short __far *)MK_FP(seg, 0);
     if (save != NULL)
         scr_suspend(save);
     return save;
@@ -186,8 +191,14 @@ void tools_restore_screen(unsigned short __far *save)
     unsigned short __far *page = (unsigned short __far *)ems_page();   /* remap it */
     scr_resume(save);
     if (save != page)
-        free(save);
+        _dos_freemem(FP_SEG(save));
     ui_redraw();
+}
+
+/* The argument store is runmem's: lent to run programs like the rest. */
+static char *argsBuffer(void)
+{
+    return runmem_slot(RM_ARGS);
 }
 
 static int launched;                  /* started by CLAWDOS.EXE: runs go to it */
@@ -302,7 +313,7 @@ static int toolRun(ToolCtx *t)
     const char *cmd = targ("command");
     unsigned short __far *save;
     ShotInfo shot;
-    unsigned ticks;
+    unsigned ticks, n, copySeg = 0;
     int status, big, want;
 
     if (targ_bool(t, "full_memory", &big))
@@ -320,18 +331,38 @@ static int toolRun(ToolCtx *t)
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
         return TS_RELAUNCH;
     }
-    if ((save = tools_save_screen()) == NULL)
-        return tool_fail(t, "not enough memory to save the screen");
-    if (want && ticks)
-        shot_arm(ticks);
-    status = shell_run(t, cmd);
-    if (want) {
-        shot_disarm();
-        if (status == TS_OK)
-            shotAttached = shotResult(t, &shot, shot_frame(&shot));
-        shot_release();
+    /* While the commands run, runmem's block is lent to DOS, so they get that
+       memory too (runmem.h). The commands are in the argument store, which
+       goes with it: they run from a copy in a DOS block of their own. The C
+       heap's free space at its end goes back to DOS first, and the blocks for
+       this run are taken after the lending, so they all lie at one end of the
+       free memory. Whether runmem's block came back is for the next request
+       to find out (chat.cpp): the result is written either way. */
+    _fheapshrink();
+    n = cmd ? strlen(cmd) + 1 : 0;
+    if (n && _dos_allocmem((n + 15) / 16, &copySeg) == 0) {
+        cmd = (const char *)memcpy(MK_FP(copySeg, 0), cmd, n);
+        runmem_lend();
+    }                                 /* no room even for that: they run without the lending */
+    if ((save = tools_save_screen()) == NULL) {
+        status = tool_fail(t, "not enough memory to save the screen");
+    } else {
+        if (want && ticks)
+            shot_arm(ticks);
+        status = shell_run(t, cmd);
+        if (want) {
+            shot_disarm();
+            if (status == TS_OK)
+                shotAttached = shotResult(t, &shot, shot_frame(&shot));
+            shot_release();
+        }
+        tools_restore_screen(save);
     }
-    tools_restore_screen(save);
+    if (copySeg) {
+        _dos_freemem(copySeg);
+        runmem_take();
+        targ_reset();                 /* the store's contents went with it */
+    }
     if (big && !launched)
         tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
                      " so the program ran beside it)\n");
@@ -400,6 +431,7 @@ static int __far criticalError(unsigned deverr, unsigned errcode, unsigned __far
 void tools_init(int safeMode)
 {
     safe = safeMode;
+    targ_buffer = argsBuffer;
     _harderr(criticalError);
 }
 
@@ -589,7 +621,7 @@ void tools_show_result(int status, const ToolCtx *t)
    booleans 1/0, null skipped. */
 static int setArg(void *ctx, const char *key, unsigned klen, const char *val, unsigned vlen, int type)
 {
-    static char *decoded;
+    char *decoded = runmem_slot(RM_DECODE);
     char k[16];
     int *overflow = (int *)ctx;
     unsigned n;
@@ -604,8 +636,6 @@ static int setArg(void *ctx, const char *key, unsigned klen, const char *val, un
         return targ_set(k, type == JSON_TRUE ? "1" : "0", 1) ? (*overflow = 1, 1) : 0;
     if (type != JSON_STRING)
         return targ_set(k, val, vlen) ? (*overflow = 1, 1) : 0;
-    if (decoded == NULL)
-        decoded = (char *)malloc(TOOL_ARGS_MAX);
     if (decoded == NULL) {
         *overflow = 1;
         return 1;
@@ -654,7 +684,7 @@ void tools_show_call(const char *name, const char *input, unsigned len)
 
 const char *tools_result_text(int status, const ToolCtx *t)
 {
-    static char *errText;
+    char *errText = runmem_slot(RM_ERRTEXT);   /* RM_ERRTEXT_BYTES = TOOL_OUT_MAX + 16 */
     switch (status) {
     case TS_OK:
         return t->out;
@@ -663,9 +693,7 @@ const char *tools_result_text(int status, const ToolCtx *t)
     case TS_STOPPED:
         return "Interrupted by the user.";
     default:
-        if (errText == NULL)
-            errText = (char *)malloc(TOOL_OUT_MAX + 8);
-        if (errText == NULL)
+        if (errText == NULL)          /* not had back after a run: the turn ends after this result */
             return "Error";
         sprintf(errText, "Error: %s", t->out);
         return errText;

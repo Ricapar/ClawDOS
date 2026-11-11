@@ -70,7 +70,12 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   max_tokens cutoff; `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
   for the resume, whose request continues the thread: `bigrun: the result came by thread continue`, then the tour and
-  `resume state consumed`); `runrefuse.bat --timeout 120` a refusal on the round after a
+  `resume state consumed`; the tour's stdin step also runs MEM through COMMAND.COM, logged as `tool tour MEM through
+  COMMAND.COM: largest program N`); `runmem.bat --timeout 240` memory for in-harness runs (`!memrun 230 160` and,
+  under CLAWDOS.EXE, `!memrun 176 105`: MEM directly and through C:\TESTS\MEMSHELL.BAT against floors in KB; `!memgone`
+  and `!memshort` use C:\TESTS\EATMEM.EXE, tests/unit/eatmem.c, which stays resident with memory taken (`KB /K`; `/F`
+  frees it): the turn ends when the lent buffers cannot come back, a COMMAND.COM run is refused, DOSUNIT fails to
+  start); `runrefuse.bat --timeout 120` a refusal on the round after a
   relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser; tests/unit/shotunit.c the screenshot PNGs against tests/unit/pngref.py's, which the build puts in C:\TESTS, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
   which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
@@ -96,6 +101,13 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   files between them are in lib/relaunch.h (a screenshot's capture goes in SHOT.RAW, lib/shot.h: the launcher only
   copies the screen, the resumed harness makes the PNG); RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
   retries one that failed. `HARNESS.EXE` run on its own keeps programs inside its memory (the boot tests do that).
+  Around such an in-harness run the harness lends DOS the buffers it does not need meanwhile (lib/runmem.h: one
+  block taken last-fit at the top of memory, so freed it joins the child's free block; owners ask runmem_slot each
+  time, never keep a pointer across a run). Memory lessons: DOS gives a program the largest free block, so where a
+  freed block lies matters, not the total; Open Watcom's startup keeps DGROUP at 64 KB for a near heap the large
+  model never uses (harness.cpp's trimNearHeap gives it back but for the 2 KB the C library's spawn takes);
+  FreeCOM below 100,096 bytes free asks on the keyboard for its strings and, with stdin on NUL, hangs: lib/shell.c
+  refuses a COMMAND.COM run under 100 KB (SHELL_NEEDS).
   A relaunch lesson: a fresh process must not
   reuse the local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's
   tick count). mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far

@@ -3,16 +3,18 @@ All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
 source with the write tool, then build and run it with the run tool. Working
 examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
 
-MEMORY: a run gets about 190 KB (what sysinfo shows). Set full_memory true
-and ClawDOS steps out of memory while it runs, giving about 450 KB, but each
-such run costs several seconds on the 8088 (ClawDOS reloads and reconnects).
+MEMORY: a run gets about 200 KB (more than sysinfo's largest free block:
+ClawDOS lends the program its buffers). Set full_memory true and ClawDOS
+steps out of memory while it runs, giving about 450 KB, but each such run
+costs several seconds on the 8088 (ClawDOS reloads and reconnects).
 Use it for TCC, TLINK, MAKE, the assemblers, programs you just built, .BAT
 files, and anything that said "out of memory"; leave it off for DIR, TYPE
 and quick checks. Give run a program and its arguments (TCC -c X.C): that
 starts it directly. A .BAT file, redirection (> <) or a built-in (DIR, TYPE,
-CD) loads a second COMMAND.COM and costs 70 KB. There is no & or &&: put the
-steps on separate lines of one run call instead (compile, compile, link);
-they stop at the first that fails.
+CD) loads a second COMMAND.COM and costs 70 KB (refused with under 100 KB
+free: set full_memory). There is no & or &&: put the steps on separate lines
+of one run call instead (compile, compile, link); they stop at the first
+that fails.
 
 EDITING: change a few lines with edit (old text -> new text) instead of
 rewriting the whole file with write; find things with search, not FIND.

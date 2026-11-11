@@ -99,10 +99,8 @@ class Chat {
     ChatUi *ui;
     Http http;
     Sse sse;
-    ApiStream as;
-    char *sseBuf;
-    char *toolInput;
-    char *rxBuf;
+    ApiStream as;                          /* its buffers are lib/runmem.h's, lent to run programs */
+    void useBuffers(void);
     char addr[48];
     char path[40];
     char prePath[40];                      /* the conversation's prefix file (apireq.h) */

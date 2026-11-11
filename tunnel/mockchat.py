@@ -126,6 +126,10 @@ SCENARIOS = {
     '!redacted': 'a redacted_thinking block, a tool call, then a check that the block came back',
     '!history': 'what the mock remembers of this conversation',
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
+    '!rundump': '!run with the whole result in the mock\'s log: !rundump MEM /D',
+    '!memrun': 'MEM in the harness, started directly and through COMMAND.COM, against floors in KB: !memrun 176 105',
+    '!memshort': 'EATMEM leaves 90 KB and stays: a COMMAND.COM run is refused, MEM runs, DOSUNIT cannot start',
+    '!memgone': 'EATMEM keeps all but 1 KB of what the harness lent: the turn ends after the result',
     '!bigrun': 'the same with full_memory (under CLAWDOS.EXE the harness steps out of memory): !bigrun MEM /C',
     '!tool': 'call one DOS tool: !tool read path=C:\\AUTOEXEC.BAT ("k=v w" quotes spaces)',
     '!tooltour': 'call every DOS tool in turn and check the results',
@@ -146,6 +150,17 @@ SCENARIOS = {
     '!tailscreen': 'peeks CGA memory for a reopened chat\'s transcript: each earlier message\'s first row, in order',
     '!reopened': 'logs the messages a reopened chat sent (!reopened NAME labels the line)',
 }
+
+# A batch file that runs MEM, so COMMAND.COM is between the harness and it (!memrun).
+MEM_BATCH = 'C:\\TESTS\\MEMSHELL.BAT'
+# Takes memory from DOS and can stay resident with it (tests/unit/eatmem.c; !memshort, !memgone).
+EATMEM = 'C:\\TESTS\\EATMEM.EXE'
+
+def largest_program(text):
+    """MEM's "Largest executable program size" in bytes, from a run's result; None if it is not there."""
+    found = re.search(r'Largest executable program size\s+\S+\s+\(\s*([\d,]+) bytes\)', text)
+    return int(found.group(1).replace(',', '')) if found else None
+
 
 # The tool headers' titles (src/harness/tools.cpp), for !tailscreen.
 TOOL_TITLES = {'sysinfo': 'SysInfo', 'dir': 'Dir', 'read': 'Read', 'peek': 'Peek', 'search': 'Search',
@@ -263,9 +278,11 @@ def tour_steps():
         ('memory_read', {'name': 'dostour'}, 'ok', 'Second line.'),
         ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
         # a program that reads standard input gets end-of-file, not a hang: STDINEOF.COM
-        # (tests/unit/stdineof.asm), started directly (no COMMAND.COM), reads to the end and says so
-        ('run', {'command': 'C:\\TESTS\\STDINEOF.COM'}, 'ok',
-         lambda r: 'STDIN EOF after 0 bytes' in r and 'exit code 0' in r),
+        # (tests/unit/stdineof.asm), started directly (no COMMAND.COM), reads to the end and says so;
+        # then, late in a long turn, MEM through COMMAND.COM inside the harness still has room (the
+        # harness lends its big buffers to the run; the tour logs what MEM saw)
+        ('run', {'command': 'C:\\TESTS\\STDINEOF.COM\n' + MEM_BATCH}, 'ok',
+         lambda r: 'STDIN EOF after 0 bytes' in r and 'Largest executable program size' in r),
         # a list of commands stops at the first that fails; full_memory makes it a
         # relaunch under CLAWDOS.EXE (HARNESS.EXE alone runs it in place and says so)
         ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never', 'full_memory': True}, 'ok',
@@ -617,6 +634,59 @@ class MockChat:
     def _cmd_run(self, text):
         yield from self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''})
 
+    def _cmd_rundump(self, text):
+        """!run, with the whole result in the mock's log (MEM /D and the like, for looking at memory)."""
+        call = ToolCall('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else ''})
+        yield call
+        print(f'rundump {call.result.status}:\n{call.result.text}', flush=True)
+        yield f'Run -> {call.result.status}.'
+
+    def _cmd_memrun(self, text):
+        """What an in-harness run gets: MEM's largest program started directly, then through COMMAND.COM (a
+        batch file), each against a floor in KB (!memrun 176 105). Logs `memrun: direct N, shell M: PASS`."""
+        floors = [int(w) * 1024 for w in text.split()[1:3] if w.isdigit()] + [0, 0]
+        sizes = []
+        for command in ('MEM', MEM_BATCH):
+            call = ToolCall('run', {'command': command})
+            yield call
+            sizes.append(largest_program(call.result.text))
+        ok = None not in sizes and sizes[0] >= floors[0] and sizes[1] >= floors[1]
+        print(f'memrun: direct {sizes[0]}, shell {sizes[1]} (floors {floors[0]}, {floors[1]}): '
+              f'{"PASS" if ok else "FAIL"}', flush=True)
+        yield f'Largest program: {sizes[0]} started directly, {sizes[1]} through COMMAND.COM.'
+
+    def _cmd_memshort(self, _text):
+        """Memory made short inside the harness (EATMEM stays resident and leaves 90 KB): a command that needs
+        COMMAND.COM is refused rather than hanging the PC, MEM started directly still runs, and a program
+        too big to start fails with DOS's own error. Logs `memshort: PASS`."""
+        calls = [ToolCall('run', {'command': EATMEM + ' 90 /K'}), ToolCall('run', {'command': 'VER'}),
+                 ToolCall('run', {'command': 'MEM'}), ToolCall('run', {'command': 'C:\\TESTS\\DOSUNIT.EXE'})]
+        yield 'Making memory short, then three runs.'
+        for call in calls:
+            yield call
+        eat, shell, mem, big = (c.result for c in calls)
+        print(f'memshort: COMMAND.COM run {shell.status} {shell.text[:100]!r}', flush=True)
+        print(f'memshort: MEM direct {mem.status}, largest program {largest_program(mem.text)}', flush=True)
+        print(f'memshort: too big a program {big.status} {big.text[:80]!r}', flush=True)
+        ok = (eat.status == 'ok' and shell.status == 'error' and 'set full_memory' in shell.text
+              and mem.status == 'ok' and largest_program(mem.text) is not None
+              and big.status == 'error' and 'Not enough memory' in big.text)
+        print(f'memshort: {"PASS" if ok else "FAIL"}', flush=True)
+        yield f'COMMAND.COM run: {shell.status}; MEM: {mem.status}; DOSUNIT: {big.status}.'
+
+    def _cmd_memgone(self, _text):
+        """EATMEM stays resident with all but 1 KB of the memory the harness lent the run: the harness cannot
+        take its buffers back, so the turn must end after the result is written, with no further request."""
+        yield 'Taking the memory away.'
+        yield ToolCall('run', {'command': EATMEM + ' 1 /K'})
+        last = self.messages[-1]['content'] if self.messages else []
+        said = [b['text'] for b in last if b.get('type') == 'text'] if isinstance(last, list) else []
+        if said and said[-1].startswith('!reopened'):    # the chat reopened later, the text joining the result
+            yield from self._cmd_reopened(said[-1])
+            return
+        print('memgone: FAIL (the turn went on without the memory)', flush=True)
+        yield 'This text is never sent.'
+
     def _cmd_bigrun(self, text):
         yield from self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else '',
                                      'full_memory': True})
@@ -672,9 +742,8 @@ class MockChat:
                      {'command': 'MEM'}):
             call = ToolCall('run', args)
             yield call
-            found = re.search(r'Largest executable program size\s+\S+\s+\(\s*([\d,]+) bytes\)', call.result.text)
             if args['command'] == 'MEM':
-                sizes.append(int(found.group(1).replace(',', '')) if found else None)
+                sizes.append(largest_program(call.result.text))
         ok = None not in sizes and sizes[1] >= sizes[0]
         print(f'shotmem: largest program {sizes[0]} before, {sizes[1]} after: {"PASS" if ok else "FAIL"}', flush=True)
         yield f'Largest program before {sizes[0]}, after {sizes[1]}.'
@@ -816,6 +885,8 @@ class MockChat:
             call = ToolCall(name, args)
             yield call
             got = call.result
+            if MEM_BATCH in args.get('command', ''):
+                print(f'tool tour MEM through COMMAND.COM: largest program {largest_program(got.text)}', flush=True)
             ok = got.status == status and (want is None or (want(got.text) if callable(want) else want in got.text))
             self.progress_note = (f'Tour step {i + 1} of {len(steps)}: {steps[i][0]}.' if i < len(steps)
                                   else 'Tour done; the verdict next.')

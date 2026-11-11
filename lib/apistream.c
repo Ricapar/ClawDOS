@@ -12,6 +12,8 @@ enum { B_NONE, B_TEXT, B_THINKING, B_REDACTED, B_TOOL };
 static char *raw8;             /* unescaped UTF-8 of a delta */
 static char *cp;               /* its CP437 form */
 
+char *(*apistream_scratch)(void);
+
 static int emitHist(ApiStream *a, const char *p, unsigned n)
 {
     return a->hist ? a->hist(a->ctx, p, n) : 0;
@@ -55,6 +57,11 @@ void apistream_init(ApiStream *a, char *toolInputBuf, unsigned max)
     a->toolInputMax = max;
     if (toolInputBuf && max)
         toolInputBuf[0] = 0;
+    if (apistream_scratch) {          /* asked again each time: it may have moved */
+        raw8 = apistream_scratch();
+        cp = raw8 ? raw8 + SCRATCH : NULL;
+        return;
+    }
     if (!raw8)
         raw8 = (char *)malloc(SCRATCH);
     if (!cp)
