@@ -40,7 +40,9 @@ whoever answers):
   connect = api.anthropic.com:443
   verifyChain = yes
   checkHost = api.anthropic.com
-  CAfile = /etc/ssl/certs/ca-certificates.crt   ; where stunnel does not find the system's CAs
+  ; the CA bundle, where stunnel does not find the system's (stunnel takes a
+  ; comment only on a line of its own)
+  CAfile = /etc/ssl/certs/ca-certificates.crt
 
 Stdlib only.
 """

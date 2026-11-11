@@ -296,6 +296,20 @@ def fs_problems(fs):
     return out
 
 
+def check_target(img, prefix=''):
+    """open_target, then fs_problems: the FatFS of an image safe to update, or UpdateError (prefix first)."""
+    fs = open_target(img)
+    try:
+        damage = fs_problems(fs)
+    except fatimg.FatError as e:
+        damage = [str(e)]
+    if damage:
+        raise UpdateError(f'{prefix}its file system is damaged ({"; ".join(damage[:3])}). Boot the PC and run '
+                          'CHKDSK C: /F (C:\\DOS\\CHKDSK.EXE, on images built since it shipped), then copy the image '
+                          'back and update again.')
+    return fs
+
+
 def all_files(fs):
     """{PATH: (path, bytes)} of every file on an image."""
     return {norm(p): (p.lstrip('/'), fs.read_file(p.lstrip('/'))) for p, e in fs.walk() if not e.is_dir}
@@ -362,17 +376,10 @@ def update_image(path, fresh_path, memories=False, cfg=False, backup=True, dry_r
         raise UpdateError('the image to update is the one just built')
     with open(path, 'rb') as f:
         img = bytearray(f.read())
-    target = open_target(img)
+    target = check_target(img, f'{path} is unchanged: ')
+    old_files = all_files(target)
     with open(fresh_path, 'rb') as f:
         fresh_img = bytearray(f.read())
-    try:
-        damage = fs_problems(target)
-        old_files = all_files(target)
-    except fatimg.FatError as e:
-        damage = [str(e)]
-    if damage:
-        raise UpdateError(f'{path} is unchanged: its file system is damaged ({"; ".join(damage[:3])}). '
-                          'Run CHKDSK /F on the PC (or check it on another machine) first.')
     try:
         fresh = fatimg.open_fs(fresh_img)
         rep = update_fs(target, fresh, memories, cfg, dry_run)

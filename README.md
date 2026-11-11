@@ -161,7 +161,9 @@ networking. It is faster but less exact (it emulates an 80186).
    replaces the old one it is read back: every file written must read back as built,
    every other file must be there unchanged and the FAT copies must agree, or the old
    image stays; an image whose file system is already damaged (cross-linked files,
-   FATs that differ) is refused, with a word to run CHKDSK first. Run `--dry-run`
+   FATs that differ) is refused before the build starts, with a word to boot the PC and
+   run `CHKDSK C: /F` first (FreeDOS's, `C:\DOS\CHKDSK.EXE`, on images built since it
+   shipped). Run `--dry-run`
    first, and keep the first `.bak` until the PC has booted and reopened an old chat.
    It lists the files it
    added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists
@@ -224,8 +226,8 @@ Everything here is tested against the offline mock API, in DOSBox-X and in 86Box
   never met the live API. If the first message ends in a 400 naming
   `thinking-display-updates` or `display`, `thinking-binding-controls` or
   `block_binding`, or `message-threads` or `thread`, set `progress`, `dropthinking`
-  or `threads` to 0 in `C:\CLAWDOS\CLAWDOS.CFG` and press F2 (a conversation keeps
-  the settings it started with). An image brought up to date with `--update` keeps
+  or `threads` to 0 in `C:\CLAWDOS\CLAWDOS.CFG` and start CLAWDOS again (the file is
+  read at startup, and a conversation keeps the settings it started with). An image brought up to date with `--update` keeps
   its own CLAWDOS.CFG, so it has them off until you add the lines it lists.
 - **Threads and the cache.** In `C:\CLAWDOS\CLAWDOS.LOG` each `api` line after a
   chat's first should say `th=cont` with `cr=` (cache reads) above 0; after a pause
@@ -250,6 +252,8 @@ Everything here is tested against the offline mock API, in DOSBox-X and in 86Box
   `full_memory` run with and without `shot_at`; Del on a chat waiting for
   `CLAWDOS -resume` (it must refuse); F6 and the dim progress notes on the real CGA.
 - **`--update` on your card's image:** `--dry-run` first, on a copy if you can.
+- **Old images in `build/`** made before this version (`CLAUDEXT.IMG`, `memshot.img`,
+  `memtest.img`) were built with your key in them: `make clean` removes them.
 
 ## Reference
 

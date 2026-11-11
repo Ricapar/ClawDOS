@@ -55,7 +55,8 @@ take 0 or 1 (anything else is an error naming the line). `cache`, `cachettl`,
 they are taken from the provider in use when the conversation's prefix is
 written (its first request that gets that far) and kept through F5, a relaunch
 (RESUME.TXT carries them: `fixed P D C T H`) and `/model` within the section.
-An edit to them applies from the next conversation. `/model` to another
+An edit to them applies from the first conversation after CLAWDOS is started
+again (the file is read once, at startup). `/model` to another
 section chooses them again from that section (lib/apireq.c `api_fixed_switch`):
 the thread is dropped, so the next request is a create with the whole
 conversation (or no thread), and the `.PRE`'s system block gets that section's
@@ -65,7 +66,8 @@ conversation keeps the file's marker, so the two markers still agree. The API
 binds thinking blocks and the prompt cache to the system prompt and tools, not
 to their markers. If a request with the shipped settings is refused with a 400
 naming a beta, `thinking` or `thread` (none of them has met the live API yet),
-set that line to 0 and start a new conversation (F2).
+set that line to 0 and start CLAWDOS again (CLAWDOS.CFG is read once, at
+startup; the new conversation takes the new settings).
 
 A section without a key still works against the mock API; against the real one
 the API answers 401, which is shown (and the harness warns at startup). With
@@ -397,13 +399,16 @@ socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443
 ```
 
 ```
-[anthropic]            ; stunnel
+; stunnel (a comment only ever on a line of its own: after a value it is part of it)
+[anthropic]
 client = yes
 accept = 8443
 connect = api.anthropic.com:443
-verifyChain = yes      ; check the certificate chain...
-checkHost = api.anthropic.com   ; ...and that it is api.anthropic.com's
-CAfile = /etc/ssl/cert.pem      ; the CA bundle, where stunnel does not find the system's
+; check the certificate chain, and that it is api.anthropic.com's
+verifyChain = yes
+checkHost = api.anthropic.com
+; the CA bundle, where stunnel does not find the system's
+CAfile = /etc/ssl/cert.pem
 ```
 
 Without `verifyChain` and `checkHost` (stunnel checks neither by default) the
@@ -450,7 +455,8 @@ responses each open with a progress note naming the next step. Its log line per
 request names the thinking options, the cache ttl (the system block's in
 brackets), the thread kind and the body's length (`request: N messages, last
 role user, thinking updates+drop_block, cache 5m (system 5m), thread continue (1
-sent), 659 bytes`; N counts the whole conversation, a continue's stored messages
+sent), 659 bytes, betas message-threads-2026-08-12,...`, the anthropic-beta values
+by name or `none`; N counts the whole conversation, a continue's stored messages
 included), and, when the request carries a key header, `auth: x-api-key, N
 characters` (never the key). The boot tests run a second mock beside it with
 `boottest.py --mock2` (port 18024, its ids counted from 1001: another provider

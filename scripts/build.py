@@ -549,7 +549,7 @@ def main(argv=None):
     a = parse_args(argv)
     if a.update:
         try:     # fail before the long build, not after
-            imgupdate.open_target(bytearray(open_image(a.update)))
+            imgupdate.check_target(bytearray(open_image(a.update)))     # a damaged image too
             imgupdate.check_not_built(a.update, os.path.join(BUILD, IMAGE_NAME))
         except imgupdate.UpdateError as e:
             sys.exit(f'build: {a.update}: {e}')

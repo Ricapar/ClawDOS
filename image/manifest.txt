@@ -26,6 +26,7 @@ DOS/                fdpkg:BASE/TREE.ZIP!BIN/TREE.COM
 DOS/                fdpkg:BASE/XCOPY.ZIP!BIN/XCOPY.EXE
 DOS/                fdpkg:BASE/DELTREE.ZIP!BIN/DELTREE.COM
 DOS/                fdpkg:BASE/ATTRIB.ZIP!BIN/ATTRIB.COM
+DOS/                fdpkg:BASE/CHKDSK.ZIP!BIN/CHKDSK.EXE
 DOS/FORMAT.EXE      fdpkg:BASE/FORMAT.ZIP!BIN/format.exe
 DOS/                fdpkg:BASE/FDISK.ZIP!BIN/FDISK.EXE
 DOS/                fdpkg:BASE/KERNEL.ZIP!BIN/SYS.COM

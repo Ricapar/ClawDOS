@@ -896,8 +896,9 @@ class Handler(BaseHTTPRequestHandler):
                                                                  'details': {'error_code': e.code}}})
             return
         messages = req['messages']
+        betas = ','.join(sorted(betas_of({k.lower(): v for k, v in self.headers.items()}))) or 'none'
         print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}, {settings_of(req)}, '
-              f'{use.describe()}, {len(body)} bytes', flush=True)
+              f'{use.describe()}, {len(body)} bytes, betas {betas}', flush=True)
         for name in ('x-api-key', 'authorization'):    # the boot tests send none; the key itself is never logged
             for value in self.headers.get_all(name) or ():
                 print(f'auth: {name}, {len(value)} characters', flush=True)
