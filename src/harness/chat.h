@@ -65,8 +65,8 @@ class Chat {
     /* Carry the turn on with the launcher's result for the pending call: the
        tool_result message, then the remaining rounds, with the provider's
        settings as they are now, except the effort the turn began with
-       (effort; "" for the provider's: an F5 during the turn applies from
-       the next message). Returns as turn(). */
+       (effort; "-" for none, "" for the provider's: an F5 during the turn
+       applies from the next message). Returns as turn(). */
     int8_t continueTurn(int round, const char *toolId, int status, ToolCtx *t, const char *effort = "");
     const char *turnEffort(void) { return req.p.effort; }   /* for the relaunch state */
 

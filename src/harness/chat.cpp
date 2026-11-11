@@ -232,9 +232,10 @@ int8_t Chat::newConversation(void)
 }
 
 /* An earlier conversation becomes the current one (docs/API.md, "Reopening
-   a chat"). Its prefix file is kept, and with it the cache marker it was
-   written with; the other fixed settings are the provider's as it is now (a
-   thread is never assumed: the first request creates one). Without a prefix
+   a chat"). Its prefix file is kept; the fixed settings are the provider's as
+   it is now, its cache marker rewritten to match if it differs, as /model to
+   that section would (a thread is never assumed: the first request creates
+   one). Without a prefix
    file the first request renders one, as for a new conversation. Whatever the
    file ends with, the next user text must keep the roles alternating: a call
    left without its result (the PC went off while it ran) gets one now. */
@@ -326,11 +327,15 @@ int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind
     ctxTokens = 0;
     fixedSet = 0;
     if (fs_size(prePath) > 0) {
-        api_fixed_from(&fix, prov);
-        if (api_prefix_cache(prePath, &fix.cache, &fix.ttl1h) == 0) {
+        /* the settings of the provider in use, as /model to it would choose
+           them: a chat that visited a cache 0 section gets its marker back */
+        int rc = api_fixed_switch(&fix, prov, prePath);
+        if (fs_size(prePath) > 0) {
             fixedSet = 1;
-        } else {                      /* its settings unknown: made afresh, as if missing */
-            remove(prePath);
+            if (rc)
+                ui->log(rc > 0 ? "prefix: cache marker rewritten for this provider"
+                               : "prefix: cache marker could not be rewritten; kept as it was");
+        } else {                      /* unreadable, so removed: made afresh, as if missing */
             ui->log("prefix unreadable: rendered afresh at the first request");
         }
     }
@@ -880,8 +885,8 @@ int8_t Chat::continueTurn(int round, const char *toolId, int status, ToolCtx *t,
 
     reasked = 0;
     api_req_settings(&req, prov);
-    if (effort && effort[0])
-        strcpy(req.p.effort, effort);
+    if (effort && effort[0])          /* "-": the turn began with none */
+        strcpy(req.p.effort, strcmp(effort, "-") ? effort : "");
     rc = finishTool(round, toolId, status, t);
     if (rc == -2)
         rc = rounds(round + 1);

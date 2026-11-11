@@ -270,8 +270,10 @@ first 160 bytes of each file.
 
 The conversation's `.PRE` file is kept, so `system` and `tools` are the bytes
 its thinking blocks were made under. The fixed settings are the provider's as
-it is now, except the cache marker, which is read back from the `.PRE` (the
-top-level `cache_control` must carry the system block's ttl); a `.PRE` that is
+it is now, chosen as `/model` to that section would (`api_fixed_switch`): if
+the `.PRE`'s cache marker differs it is rewritten to match, so a chat that
+visited a `cache 0` section is cached again (if the rewrite fails the file's
+marker is kept and the top-level one follows it); a `.PRE` that is
 missing is rendered afresh at the first request, with today's prompt,
 memories, skills and settings (its thinking blocks then no longer match the
 prefix: with `dropthinking` the API drops them, without it the API answers

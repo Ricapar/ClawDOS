@@ -1407,7 +1407,9 @@ static int writeState(void)
     fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\neffort %s\nticks %lu\n",
             tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
-    fprintf(f, "turneffort %s\ntokens %ld\nturns %d\n", chat.turnEffort(), chat.contextTokens(), chat.turns());
+    /* the turn's effort, "-" for none (an empty value would read back as "the provider's") */
+    fprintf(f, "turneffort %s\ntokens %ld\nturns %d\n", chat.turnEffort()[0] ? chat.turnEffort() : "-",
+            chat.contextTokens(), chat.turns());
     if ((fx = chat.fixed()) != NULL)  /* not the provider's: /model may have moved on */
         fprintf(f, "fixed %d %d %d %d %d\n", fx->progress, fx->dropThinking, fx->cache, fx->ttl1h, fx->threads);
     if ((th = chat.thread()) != NULL) /* continued if the run is back within its lifetime */
