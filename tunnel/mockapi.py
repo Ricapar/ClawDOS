@@ -1,6 +1,6 @@
 """A fake Anthropic Messages API for testing HARNESS.EXE offline.
 
-  python3 tunnel/mockapi.py [--port 18023] [--speed 1.0] [--tools image/clawdos/TOOLS.JSN] [--thread-ttl 300]
+  python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1.0] [--tools image/clawdos/TOOLS.JSN] [--thread-ttl 300]
 
 Serves POST /v1/messages over plain HTTP (no tunnel needed) with the real
 API's streaming shape: chunked transfer encoding carrying server-sent events
@@ -1069,16 +1069,19 @@ def make_server(port, speed=1.0, tools_path=DEFAULT_TOOLS, host='0.0.0.0', threa
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--port', type=int, default=18023)
+    ap.add_argument('--listen', default='127.0.0.1',
+                    help='address to listen on (default 127.0.0.1: the emulators reach it as 10.0.2.2; '
+                         '0.0.0.0 lets a real PC on the LAN use it)')
     ap.add_argument('--speed', type=float, default=1.0, help='scale the delays (0: none)')
     ap.add_argument('--tools', default=DEFAULT_TOOLS, help='TOOLS.JSN, to check requests and the tool tour against')
     ap.add_argument('--thread-ttl', type=float, default=THREAD_TTL,
                     help='seconds a message thread stays continuable after its last request')
     a = ap.parse_args()
     try:
-        server = make_server(a.port, a.speed, a.tools, thread_ttl=a.thread_ttl)
+        server = make_server(a.port, a.speed, a.tools, host=a.listen, thread_ttl=a.thread_ttl)
     except (OSError, ValueError) as e:
         sys.exit(f'mockapi: cannot start ({a.tools} must be readable JSON): {e}')
-    print(f'mock Messages API on port {a.port} (speed {a.speed})', flush=True)
+    print(f'mock Messages API on port {a.port} (speed {a.speed})', flush=True)   # scripts/boottest.py waits for this line
     try:
         server.serve_forever()
     except KeyboardInterrupt:
