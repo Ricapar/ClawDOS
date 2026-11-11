@@ -329,6 +329,26 @@ static void testConsole(void)
     con_init();
     con_write("a\tb");
     CHECK_STR("console: a tab is drawn as spaces", gridRow(0), "  a    b");
+
+    /* ui_tool_header after reply text: the blank line is made after the margin
+       goes to 0, so the header row starts at column 0; made before it, the
+       row starts at the reply's margin */
+    con_init();
+    con_write("reply");
+    con_margins(0, SCR_COLS - 1);
+    con_ensure_blank_line();
+    con_newline();
+    con_putc('*');
+    CHECK_STR("console: a header after reply text starts at column 0", gridRow(2), "*");
+    con_margins(2, SCR_COLS - 1);
+    con_init();
+    con_write("reply");
+    con_ensure_blank_line();
+    con_newline();
+    con_margins(0, SCR_COLS - 1);
+    con_putc('*');
+    CHECK_STR("console: the margin set after the newline is too late", gridRow(2), "  *");
+    con_margins(2, SCR_COLS - 1);
 }
 
 /* --- edit and search ------------------------------------------------------------ */
