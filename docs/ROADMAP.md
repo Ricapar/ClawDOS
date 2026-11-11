@@ -211,6 +211,53 @@ waits before it answers; the rest is unexplained. The final round streams at
 222 characters/s (182 before), most likely because the reply's deltas now go
 to the history through the buffer instead of a seek and a write each.
 
+### Message threads (`21e4a9c`, 2026-11-11)
+
+| round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | - | 11926 | 715 | 16.3 | 1045 | 2200 |
+| 1 | 3 | 4537 | 330 | 13.4 | 990 | 1815 |
+| 2 | 2 | 4537 | 275 | 16.1 | 990 | 1760 |
+| 3 | 3 | 4537 | 330 | 13.4 | 990 | 1815 |
+| 4 | 2 | 4537 | 330 | 13.4 | 990 | 1815 |
+| 5 | 2 | 4538 | 275 | 16.1 | 1045 | 1815 |
+| 6 | 3 | 4539 | 275 | 16.1 | 990 | 1760 |
+| 7 | 2 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 8 | 3 | 4539 | 330 | 13.4 | 990 | 1870 |
+| 9 | 2 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 10 | 2 | 4539 | 385 | 11.5 | 935 | 1870 |
+| 11 | 3 | 4539 | 385 | 11.5 | 990 | 1870 |
+| 12 | 2 | 4539 | 385 | 11.5 | 990 | 1870 |
+| 13 | 3 | 4539 | 385 | 11.5 | 990 | 1870 |
+| 14 | 2 | 4539 | 385 | 11.5 | 990 | 1870 |
+| 15 | 3 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 16 | 2 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 17 | 3 | 4539 | 440 | 10.1 | 990 | 1925 |
+| 18 | 3 | 4539 | 440 | 10.1 | 1045 | 1980 |
+| 19 | 2 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 20 | 3 | 4539 | 385 | 11.5 | 990 | 1870 |
+| 21 | 25 | 572 | 55 | 10.2 | 1045 | 19030 |
+| all | | 103269 | 7865 | 12.8 | | 58465 |
+
+The turn took 136 s from the first request to the last reply.
+
+Final round: 3948 characters streamed in 17930 ms after the first, 220 characters/s (stop=end_turn).
+Relaunch round trip: program 2.0 s, CLAWDOS away 24.0 s.
+Stack: used 1443 of 4027 bytes; used 1615 of 4055 bytes (one line per HARNESS.EXE).
+
+The turn takes 136 s instead of 211 s, and `len` stays flat: after the
+11.9 KB create of round 0, every `read` round sends 4.5 KB (its 4 KB tool
+result and the fixed fields, no `system`, no `tools`, no earlier messages)
+where it grew from 17.9 KB to 133.9 KB before; the round after the
+`full_memory` relaunch is a 572-byte continue carried over in RESUME.TXT, not
+a 136 KB replay. In all 103 KB go up instead of 1,666 KB, and upload time
+falls from 84.8 s to 7.9 s. The gaps between rounds (2-3 s: the tool call and
+its result written) and the wait for the mock (~1 s) are unchanged, so they
+are now most of a round; small requests upload at 10-16 KB/s, below the
+19-20 KB/s of big ones, since the fixed costs of a request weigh more. The
+final round and the relaunch are as before. The stack peak rose by about 50
+bytes (1,615 of 4,055).
+
 ## M6.2: full-memory run
 
 **Problem.** HARNESS.EXE stays resident while the `run` tool's program runs:
