@@ -30,12 +30,17 @@ Any TLS forwarder is a drop-in replacement, e.g.
 
   socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443
 
-or an stunnel client stanza:
+or an stunnel client stanza, which must be told to check the server (stunnel
+checks neither the chain nor the name by default, and would hand the API key to
+whoever answers):
 
   [anthropic]
   client = yes
   accept = 8443
   connect = api.anthropic.com:443
+  verifyChain = yes
+  checkHost = api.anthropic.com
+  CAfile = /etc/ssl/certs/ca-certificates.crt   ; where stunnel does not find the system's CAs
 
 Stdlib only.
 """

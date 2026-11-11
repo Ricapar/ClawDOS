@@ -89,7 +89,9 @@ is in [API.md](API.md).
         the PicoMEM 2's battery clock (ASTCLOCK) and SNTP in NETUP.BAT, which
         failed before on DNS and mTCP's DHCP lease check.
   - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
-        640 KB instead of ~285 KB. See [M6.2](#m62-full-memory-run) below.
+        640 KB instead of ~285 KB (October's figure). `full_memory` gives them
+        446K and an in-harness run 250K; the goal of ~560K is not met, so this
+        stays open. See [M6.2](#m62-full-memory-run) below.
   - [x] **M6.3 - Screenshots**: Claude sees what its programs draw. `run`
         takes `screenshot` (the screen as the last program left it, taken
         before the chat comes back) or `shot_at` (seconds after the first
@@ -305,12 +307,12 @@ show. The bench's one run is a `full_memory` relaunch, so the lending around
 an in-harness run (two DOS calls and a heap trim, [M6.2](#memory-for-in-harness-runs-2026-11-11))
 is not in it; the harness's startup trim of its near heap and the buffers'
 new home are. Round 0 is 2.3 KB longer than in `21e4a9c` because TOOLS.JSN
-grew (the screenshot arguments, and this task's memory notes). The stack peak
+grew (the screenshot arguments, and the memory notes of `65df948`). The stack peak
 is 1,629 bytes (1,615 before).
 
 ## M6.2: full-memory run
 
-**Problem.** HARNESS.EXE stays resident while the `run` tool's program runs:
+**Problem** (as of 2026-10). HARNESS.EXE stays resident while the `run` tool's program runs:
 about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
 (Stage 1 memory, `dc21363`, already won ~90 KB). On the DOS PC this cost:
 
@@ -322,7 +324,7 @@ about 355 KB of it (mTCP and its buffers, the chat, the heap), leaving ~285 KB
 - Batch files and MAKE are out: a second COMMAND.COM costs ~71 KB.
 - Claude's memories (TCCMEM, DEMOGUID, WARGAMES) are full of these workarounds.
 
-**Goal.** A program `run` starts has at least ~560 KB free, so stock Turbo C
+**Goal** (not met: `full_memory` gives 446K, see the table below). A program `run` starts has at least ~560 KB free, so stock Turbo C
 compiles with its own headers, spawns TLINK itself, and Turbo C's MAKE.EXE
 (already on the image in C:\TC) can drive builds. CLAWDOS comes back afterwards
 on the same conversation with the program's output as the tool result, the chat
@@ -358,8 +360,9 @@ state) and exits with code 200. The launcher runs the commands exactly as the
 in-process tool would, writes RUN.OUT and starts `HARNESS -resume`, which
 reopens the history file, restores the screen, shows the result under the Run
 header and continues the rounds (lib/relaunch.h, Chat::resume/continueTurn).
-Measured in DOSBox-X (`image/tests/relaunch.bat`): a program gets 449 KB,
-against 220 KB in-process; the launcher's block is 50 KB; the harness is away
+Measured in DOSBox-X in the spike (`image/tests/relaunch.bat`, 2026-10; today's
+figures are in the table under "Memory for in-harness runs"): a program got 449 KB,
+against 220 KB in-process; the launcher's block was 50 KB; the harness was away
 1.7 s for a 1.0 s program. Only a `run` with `full_memory: true` goes through
 the launcher (the model decides: TOOLS.JSN and DEVTOOLS.TXT say to set it for
 compilers, linkers, assemblers, freshly built programs and batch files); the
@@ -407,8 +410,9 @@ stock headers and MAKE.
 
 ### Memory for in-harness runs (2026-11-11)
 
-The runs `full_memory` leaves inside the harness had fallen to 157K started
-directly and 86K through COMMAND.COM (HARNESS.EXE alone, first message), and a
+The runs `full_memory` leaves inside the harness had fallen to 149K started
+directly and 78K through COMMAND.COM (HARNESS.EXE alone, first message, at
+`9139304`; the table below), and a
 COMMAND.COM run short of memory hung the PC instead of failing. Now:
 
 - **The hang** was FreeCOM's: below 100,096 bytes free (measured in 256-byte
@@ -418,7 +422,10 @@ COMMAND.COM run short of memory hung the PC instead of failing. Now:
   that it stops there. lib/shell.c now refuses a command that needs
   COMMAND.COM with under 100K free and tells the model to set `full_memory`;
   a program started directly that does not fit fails with DOS's own "Not
-  enough memory". The launcher-size "cliff" of Task 11 was the same prompt.
+  enough memory". The "cliff" for which the launcher's timed screenshot copy
+  had once been kept out of EMS (CLAWDOS.EXE grown past a size, the run hanging)
+  was the same prompt. (The copy has since left EMS for another reason: a
+  program may map its own pages into the frame the interrupt handler writes.)
 - **Where the memory was** (MEM /D inside a run): the harness's block was its
   code plus a full 64K DGROUP, because Open Watcom's startup keeps the near
   heap that the large model's malloc never uses (28K; now given back at
@@ -440,7 +447,7 @@ MEM's largest executable program size from inside a run, DOSBox-X:
 
 | | started directly | through COMMAND.COM |
 |---|---|---|
-| before the plan (`7723879`), HARNESS.EXE alone | 176K (180,240) | 105K (107,808) |
+| before the threads and screenshots work (`7723879`), HARNESS.EXE alone | 176K (180,240) | 105K (107,808) |
 | before this (`9139304`), HARNESS.EXE alone | 149K (152,528) | 78K (80,096) |
 | near heap given back, screen save a DOS block | 169K (173,872) | 99K (101,440) |
 | + the API buffers lent | 242K (247,936) | 171K (175,504) |
@@ -451,7 +458,10 @@ MEM's largest executable program size from inside a run, DOSBox-X:
 
 `image/tests/runmem.bat` checks these (floors 230K/160K alone, 176K/105K
 under the launcher), the refusal and the turn that ends when the memory does
-not come back.
+not come back. The lending costs about 165 ms before the commands and 220 ms
+after them on the 86Box 8088 (`shot8088.bat`'s `run:` line for a plain
+in-harness run, `77cce24`); the benchmark's one run is a relaunch, so it is not
+in the tables above.
 
 ## Repo layout
 

@@ -9,13 +9,15 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
 - The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (host unit tests: the mock API, the tunnel, the image updater, bench.py's table),
   `make boottests` (the DOSBox-X tests that run offline), `make boottests-online` (those that need the internet:
-  clock.bat), `make check` (test and boottests, all offline), `make bench` (the 86Box benchmark), `make run`,
+  clock.bat), `make check` (test and boottests, offline: no connection beyond the mocks on the host), `make bench` (the 86Box benchmark), `make run`,
   `make tunnel`, `make mock`. Keep it in step with them.
 - Update a real PC's image in place instead of replacing it: `python scripts/build.py --update PATH/CLAWDOS.IMG [--dry-run]
   [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). Unless nothing would change, it copies
   the old image to IMG.bak (never overwritten: .bak.2, .bak.3, ...), then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
   nothing else (SKILLS/ is the build's, replaced like any shipped file): MEMORY/ (`--memories`: only the memory files the build ships, none now; a memory named like a shipped skill, left by an older build, gets a note saying it can go with F4; a skill in SKILLS/ the build no longer ships gets a note too, and stays), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
-  (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV/SHOT.RAW/SHOT.PNG and files the build does not ship stay. Never test it on the real SD-card image.
+  (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV/SHOT.RAW/SHOT.PNG and files the build does not ship stay. The new image is
+  read back before it replaces the old (`verify`: written files as shipped, every other file unchanged, FATs agreeing, no
+  cross-links); a damaged image is refused (`fs_problems`). Never test it on the real SD-card image.
 - The API key can stay off the DOS PC: `build.py --no-key` (remembered, `--key` undoes it; image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
   --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
   copies bytes and knows nothing of HTTP; docs/API.md "The tunnel"). Tests: `python3 tunnel/test_tunnel.py` against a local
@@ -27,64 +29,32 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Code navigation: the clangd-lsp and pyright-lsp plugins are enabled for this project (.claude/settings.json;
   clangd and pyright-langserver must be on PATH). clangd reads build/compile_commands.json, written by every build
   or by `python scripts/build.py --compiledb`; scripts/clangd/ holds the shims that let clang parse Watcom code.
-- Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1
-  and end with `TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1` so CLAWDOS's own notes (retries, lost links, errors) reach the log;
-  `image/tests/net.bat` checks networking. `--mock` runs the mock Messages API (tunnel/mockapi.py) alongside on port 18023, so
-  tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log; the test fails if that mock cannot start,
-  say the port is taken (the message names the holder), or dies during the run). A boot test (and test8088.py) holds
-  build/boottest.lock while it runs, so one started meanwhile waits instead of sharing build/ and the port.
-  `--expect TEXT` fails unless TEXT is in the
-  serial or mock log and `--reject TEXT` fails if it is. The mock checks every request against its own list of rules
-  (docs/API.md, "The tunnel": headers, fields, the thinking object and its beta headers, cache markers agreeing on their
-  ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical, the message
-  thread rules) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
-  that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
-  every DOS tool (its stdin step runs C:\TESTS\STDINEOF.COM, from tests/unit/stdineof.asm, started directly: it must
-  read end-of-file from the NUL the run tool gives it; a second run starts C:\TESTS\STDINEOF.BAT, so COMMAND.COM is its
-  parent: `STDINEOF under COMMAND.COM: ok`; and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
-  that every request after the first continued a message thread, each small); `notes.bat` a progress note's blank
-  lines trimmed and its break joined (`progress note: Two lines`), and a tool header after reply text starting in
-  column 0 (`!headercol` peeks CGA memory: `tool header column: 0 (PASS)`); `threads.bat --timeout 300` a thread lost, a
-  continue whose link drops (resent; with `burn` refused, then replayed), `thread_unsupported_request`, a refused
-  replay ending the turn, a 529 or an overload answering a continue (the same continue again), a plain 404 or 400
-  (the turn ends), and a relaunch that finds its thread gone (`thread replay after CODE: PASS` lines, and each run's
-  `exit code`);
-  `fixed.bat` a conversation keeping its thinking and cache settings across a relaunch whose run changed CLAWDOS.CFG
-  (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `skills.bat`
-  the system prompt listing C:\SKILLS (not as memories) and a skill read in two parts with `read` (`skills: PASS`); `clock.bat` (in
-  `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
-  (`trying again`); `chats.bat --timeout 240` the chat list and reopening (`tail screen: PASS`: `!tailscreen` peeks
-  CGA memory for the reopened transcript; `-k` types keys into the BIOS buffer to drive the list, whose rows go to
-  CLAWDOS.LOG as `chat list:` lines); `chatends.bat` chats the PC left mid-turn, reopened with `-c` and continued
-  (`reopened unans: ...` from the mock's `!reopened`); `shot.bat --timeout 400` the run tool's screenshots of
-  C:\TESTS\QUADS.COM (tests/unit/quads.asm: mode 4 quadrants and a diagonal; QUADT.COM sets text mode again, so only
-  `shot_at` sees it; QUAD6.COM is mode 6, TEXT40.COM a 40-column text screen) in the harness and through the launcher (the mock checks each PNG, saves it as
-  build/mockshot-N.png and logs `image ok 320x200 (the call): palette ..., pixels CRC`; open the files to look), a
-  text screen, `shot_mode`, `shot_color`, bad arguments refused, the first image ending its thread, and `!shotmem`
-  (MEM in the harness before and after a launcher screenshot); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
-  errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
-  boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
-  and echoed back whole (`big signature round trip: PASS`); `loop.bat` the 25-round cap (`!loop` calls a tool until a request says
-  `tool_choice` none); `think.bat` thinking_delta text in the history, and `!ping` events; `thinktool.bat` thinking text with a quote, a backslash and accents sent back whole; `redacted.bat` a redacted_thinking block
-  echoed back (`redacted thinking round trip: PASS`); `busy.bat` three 529s so the retries run out; `ends.bat` a refusal and a
-  max_tokens cutoff; `relaunch.bat --timeout 150` the run
-  tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
-  for the resume, whose request continues the thread: `bigrun: the result came by thread continue`, then the tour and
-  `resume state consumed`; the tour's stdin step also runs MEM through COMMAND.COM, logged as `tool tour MEM through
-  COMMAND.COM: largest program N`); `runmem.bat --timeout 240` memory for in-harness runs (`!memrun 230 160` and,
-  under CLAWDOS.EXE, `!memrun 176 105`: MEM directly and through C:\TESTS\MEMSHELL.BAT against floors in KB; `!memgone`
-  and `!memshort` use C:\TESTS\EATMEM.EXE, tests/unit/eatmem.c, which stays resident with memory taken (`KB /K`; `/F`
-  frees it): the turn ends when the lent buffers cannot come back, a COMMAND.COM run is refused, DOSUNIT fails to
-  start; `!mr b` after F4 and F6 must match `!mr a`, `memrun again b: SAME`; then an environment of about 900 bytes); `runrefuse.bat --timeout 120` a refusal on the round after a
-  relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
-  (every lib/ parser; tests/unit/shotunit.c the screenshot PNGs against tests/unit/pngref.py's, which the build puts in C:\TESTS, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
-  which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+- Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. The Makefile's `boottests` target is
+  the list of tests and what each must log; each batch file's REM header says what it checks. How a test reports: it
+  writes to COM1 (build/serial.log), ends with `TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1` (CLAWDOS's own notes: retries,
+  lost links, errors) and `ECHO CLAWDOS-TEST-DONE > COM1`, and echoes `HARNESS.EXE exit code %ERRORLEVEL%`, which the
+  Makefile expects. `--expect TEXT` fails unless TEXT is in the serial or a mock's log, `--reject TEXT` if it is;
+  `--timeout` (default 90 s) is in the test's header and its Makefile line. `--mock` runs tunnel/mockapi.py on port
+  18023 (tests pass `10.0.2.2:18023`; log build/mock.log; the test fails if it cannot start, the message naming the
+  port's holder, or dies); `--mock2` a second, separate mock on 18024 (a second provider section: provider.bat);
+  `--key-tunnel` tunnel.py's key mode on 18025 in front of the first, over plain TCP with a made-up key
+  (keytunnel.bat). The mock checks every request against its rules (docs/API.md, "The tunnel") and answers a
+  violation with a 400 and a `VALIDATION:` line, so every mock test rejects that text; a task that adds a request
+  field adds its rule to tunnel/mockapi.py. Every test calls `NETUP NOCLOCK` (DHCP, no NTP) and reaches nothing but
+  the mocks: boottest.py fails one whose image has C:\NET\SNTP.LOG unless `--online` (clock.bat, the one test in
+  `boottests-online`). A boot test (and test8088.py) holds build/boottest.lock, so one started meanwhile waits.
+  `units.bat` runs DOSUNIT.EXE (tests/unit/dosunit.c with shotunit.c, memunit.c and apiunit.c, modules of their own
+  for room in the code segment), built with `DOSUNIT` defined for test seams such as lib/history.c's full disk. To
+  add a test: a batch file in image/tests, a line in the Makefile's `boottests`, a sentence here only if it needs
+  a new switch. Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;
-  `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023). The screenshot timer hook
-  on the real CPU: `python3 scripts/test8088.py image/tests/shot8088.bat --mock --timeout 1500 --expect "pixels B5BCA4D2"`
-  (at exit, `shot_at` in the harness and through the launcher; DOSUNIT prints how long the PNG took).
+  `--mock`, `--expect` and `--reject` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023). The screenshot
+  timer hook on the real CPU: `python3 scripts/test8088.py image/tests/shot8088.bat --mock --timeout 1500 --expect
+  "shot_at=1.5): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" --expect "shot_at=1.5, full_memory=True): palette
+  0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" --reject "VALIDATION:"` (at exit, `shot_at` in the harness and through
+  the launcher; DOSUNIT prints how long the PNG took).
 - Benchmark: `python scripts/bench.py` (`make bench`, about six minutes) runs image/tests/bench.bat in 86Box: the mock's
   `!bench` (20 reads of 4 KB, a `full_memory` run, a 4 KB reply) through CLAWDOS.EXE, then a table from CLAWDOS.LOG's
   `api` lines (`up=` upload ms, `len=` body bytes), the relaunch and the `stack:` high-water mark. docs/ROADMAP.md's
@@ -99,7 +69,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `run` tool call with `full_memory` makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
   memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The
   files between them are in lib/relaunch.h (a screenshot's capture goes in SHOT.RAW, lib/shot.h: the launcher only
-  copies the screen, the resumed harness makes the PNG); RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
+  copies the screen, the resumed harness makes the PNG; the `shot_at` copy from INT 1Ch goes to a DOS block held
+  for the run, in both programs, never to EMS: the program may map its own pages into the frame); RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
   retries one that failed. `HARNESS.EXE` run on its own keeps programs inside its memory (the boot tests do that).
   Around such an in-harness run the harness lends DOS the buffers it does not need meanwhile (lib/runmem.h: one
   block taken last-fit at the top of memory, so freed it joins the child's free block; owners ask runmem_slot each
@@ -116,7 +87,10 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   lib/apireq.c renders PROMPT.TXT (with the memories and the skills) and TOOLS.JSN once per conversation into CHATS\*.PRE, the frozen
   `system` and `tools` a conversation's creating requests send, and writes each request from that and the history file
   (with `threads 1`, a continue request sends only the history since the last reply: docs/API.md "Threads"), whose writes
-  lib/history.c buffers; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
+  lib/history.c buffers; a request is written from the turn's copy of the provider's settings (`api_req_settings`),
+  since the socket's flushes handle keys and F5 must change nothing already counted: it applies from the next message;
+  `/model` to another provider section chooses the conversation's fixed settings again from it, drops the thread and
+  rewrites only the `.PRE`'s cache marker (`api_fixed_switch`), within a section only the model changes; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
   C:\CLAWDOS\CHATS\*.JSN in the API's own message format, notes and per-round usage in C:\CLAWDOS\CLAWDOS.LOG.
   F6 or `/chats` (src/harness/chatui.cpp) lists them; reopening one (also `-c NAME`) goes through
@@ -128,7 +102,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   the mock reads it too); executors dispatched by src/harness/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
   after the `-m` reply, `-p NAME` picks a provider section.
 - The clock is the boot scripts' job, not the harness's: AUTOEXEC.BAT loads ASTCLOCK.COM /R (the PicoMEM 2's
-  battery clock), NETUP.BAT sets the time by SNTP (log in C:\NET\SNTP.LOG) and, after a big jump, takes a fresh DHCP
+  battery clock), NETUP.BAT sets the time by SNTP (log in C:\NET\SNTP.LOG; `NETUP NOCLOCK` skips it) and, after a big jump, takes a fresh DHCP
   lease (mTCP refuses to run on a lease stamped with the old clock). DOSBox-X's DNS fails when the host's first
   nameserver is IPv6, hence NETUP's fallback NTP address.
 - ISRs (e.g. lib/shell.c's INT 10h hook) run on foreign stacks: don't call our own functions from them, and make

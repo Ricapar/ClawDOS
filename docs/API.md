@@ -14,7 +14,7 @@ stream it reads and how the history stays valid.
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}`, `{memories}` and `{skills}` as they were then), the conversation's cache settings (`cache`, `cachettl`) and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) and a reopened chat (F6, `-c`) use it as it is; if it is missing it is rendered again. Esc while the memories or skills are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
-| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev= th=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event, `th` what that attempt did with message threads (`create`, `cont` or `none`; below). A line per notable event (retries, `connection #n`, errors, `relaunch:`, `progress note:` with the first 60 characters of each progress note drawn, `thread <error_code>: replaying the conversation`, `leaving: <why>`, the reason the harness left its main loop), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
+| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev= th=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event, `th` what that attempt did with message threads (`create`, `cont` or `none`; below). A line per notable event (retries, `connection #n`, errors, `relaunch:`, `run: N ms for the commands, N ms before them, N ms after` for each run inside the harness (the lending of its buffers around it), `progress note:` with the first 60 characters of each progress note drawn, `thread <error_code>: replaying the conversation`, `prefix <file>: N bytes` when a `.PRE` is rendered, `opened <file>: ...` for a reopened chat, `model: [section] settings: ...` after `/model` to another section, `chats: deleted NAME`, with `-k` (the boot tests) `chat list:` and the list's rows as video memory shows them, `leaving: <why>`, the reason the harness left its main loop), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). The image ships none. |
 | `C:\SKILLS\*.TXT` | Skills: knowledge the build ships (`image/skills/`), listed in the prompt and read with `read`; the memory tools never reach them. |
 
@@ -49,12 +49,23 @@ threads 1                   # message threads: later requests send only what is 
 
 `progress`, `dropthinking` and `threads` are off when absent; the shipped
 `[anthropic]` section turns all three on (another host that speaks the API is
-unlikely to have the betas). `cache`, `cachettl`, `progress`, `dropthinking`
-and `threads` are the conversation's fixed settings: they are taken from the
-provider in use when the conversation's prefix is written (its first request
-that gets that far) and kept to its end, through `/model` and F5; RESUME.TXT
-carries them across a relaunch (`fixed P D C T H`). An edit to them, or a
-switch to a provider with other values, applies from the next conversation.
+unlikely to have the betas). `cache`, `progress`, `dropthinking` and `threads`
+take 0 or 1 (anything else is an error naming the line). `cache`, `cachettl`,
+`progress`, `dropthinking` and `threads` are the conversation's fixed settings:
+they are taken from the provider in use when the conversation's prefix is
+written (its first request that gets that far) and kept through F5, a relaunch
+(RESUME.TXT carries them: `fixed P D C T H`) and `/model` within the section.
+An edit to them applies from the next conversation. `/model` to another
+section chooses them again from that section (lib/apireq.c `api_fixed_switch`):
+the thread is dropped, so the next request is a create with the whole
+conversation (or no thread), and the `.PRE`'s system block gets that section's
+cache marker, rewritten in place (written as `.PR$` and renamed) with the
+prompt and tools left byte for byte; if it cannot be rewritten the
+conversation keeps the file's marker, so the two markers still agree. The API
+binds thinking blocks and the prompt cache to the system prompt and tools, not
+to their markers. If a request with the shipped settings is refused with a 400
+naming a beta, `thinking` or `thread` (none of them has met the live API yet),
+set that line to 0 and start a new conversation (F2).
 
 A section without a key still works against the mock API; against the real one
 the API answers 401, which is shown (and the harness warns at startup). With
@@ -75,8 +86,13 @@ no header when there is nothing to send),
 attempt, straight into the socket: a few fields from the provider's settings,
 then the conversation's `.PRE` file and the history file streamed from disk
 (lib/apireq.c). `Content-Length` is the sum of their sizes, known before a byte
-is sent. `system` and `tools` are the `.PRE` file's bytes, the same on every
-request of a conversation (through `/model`, F5 and a relaunch): the model's
+is sent. The provider's settings are a copy taken when the turn began
+(`api_req_settings`): the socket's flushes handle keys, and an F5 handled while
+a request is written or waits changes none of its bytes, its length or its
+thread fingerprint; it applies from the next message (across a relaunch too,
+RESUME.TXT's `turneffort`). `system` and `tools` are the `.PRE` file's bytes,
+the same on every request of a conversation (through `/model`, F5 and a
+relaunch; `/model` to another section rewrites only the marker): the model's
 thinking blocks are bound to the exact prefix that produced them, and the
 prompt cache keys on it.
 
@@ -105,8 +121,8 @@ between tool calls arrive as thinking text (without it the text is empty), which
 is shown (below). `block_binding` `drop_block` is the safety net for a prefix
 that had to change: the API then drops the thinking blocks bound to the old one
 instead of answering 400. `effort` is the control for how hard it thinks: F5
-cycles it through low, medium, high, xhigh and max for the session, which costs
-one uncached request after a change. No `fallbacks` is sent. One tool call per round keeps one arguments buffer
+cycles it through low, medium, high, xhigh and max for the session, from the
+next message, which costs one uncached request after a change. No `fallbacks` is sent. One tool call per round keeps one arguments buffer
 enough and runs the tools in the order the user sees them.
 
 ## Threads
@@ -127,7 +143,7 @@ history since it:
 ```
 
 A tool round then uploads its tool result and the fields, under 1 KB in the
-tool tour, instead of the 12 KB prefix and the whole history. The history file
+tool tour, instead of the 14 KB prefix and the whole history. The history file
 stays the complete conversation, so a create from it (a replay) is always
 possible, and is what happens whenever a continue is not certain to be right.
 The next request continues only when all of these hold; otherwise it creates a
@@ -141,8 +157,9 @@ thread with the whole conversation:
   a rollback, a reopened message, a truncation at open), and there is a new
   message after it;
 - the fixed fields are the same: `thinking`, the cache markers and the betas
-  are fixed per conversation already (above), so what can change is the
-  provider and its `betas` line or model (`/model`), the effort (F5) and
+  are fixed per conversation already (above; `/model` to another section drops
+  the thread anyway), so what can change is the provider and its `betas` line
+  or model (`/model`), the effort (F5, from the next message) and
   `tool_choice` (the round cap's `none`, so the 26th round of a turn is a
   create); a hash of these is kept with the thread;
 - the turn before ended normally: a turn cut short (Esc, a lost link given up
@@ -162,10 +179,9 @@ conversation instead (no `thread`, no beta). `thread_fingerprint_mismatch`
 means the fixed fields were wrong, a bug, and is replayed the same way. If the
 replay is refused with a thread error too, the turn ends with the message.
 A 404 without a thread code (an unknown model) is an ordinary error.
-Threads are a fixed setting, so after `/model` to a provider whose host lacks
-the beta, mid-conversation, the requests still carry `thread` and the
-threads beta (and the other fixed settings): that host's plain 400 ends each
-turn until a new conversation (F2) takes that provider's settings. A lost
+`/model` to a provider section whose host lacks the beta takes that section's
+`threads` (and its other fixed settings) for the rest of the conversation, so
+no `thread` or threads beta goes there (image/tests/provider.bat). A lost
 link, a 529 or an overload in the stream during a continue resends the same
 continue (the retry rules below); if the API answers that it was already
 continued or is in flight, that is a thread error and is replayed.
@@ -225,9 +241,11 @@ and whenever the file is read, cut or completed: each finished message is
 written out and committed (INT 21h function 68h) before anything else happens,
 a rollback writes nothing it would cut, and the request copies the file only
 after everything is on disk. A write that fails (a full disk) ends the turn
-with "Cannot write the conversation file.": the message is rolled back, and a
-call left unanswered gets a short error result, or if even that cannot be
-written the turn is rolled back.
+with "Cannot write the conversation file." (also when it fails while a reply
+streams): the message is rolled back, and a call left unanswered gets a short
+error result, or if even that cannot be written the turn is rolled back. A cut
+(a rollback) is committed as well, so a PC switched off after one leaves the
+file as cut, and a reopen does not send what was dropped.
 
 ## Reopening a chat
 
@@ -246,7 +264,8 @@ string), then from there to the end to draw them as the live transcript did
 (the typed text after `> `, reply text after a bullet, a header per tool call;
 thinking blocks and results are not drawn; a text block is cut after 1,000 bytes
 of its JSON string, before an escape or a UTF-8 letter the cut would split, and
-ends with ` ...`; at most the last 48 KB is drawn). The list itself reads only the
+ends with ` ...`; at most the last 48 KB is drawn; the round cap's note beside a
+turn's last result is not drawn as typed). The list itself reads only the
 first 160 bytes of each file.
 
 The conversation's `.PRE` file is kept, so `system` and `tools` are the bytes
@@ -329,7 +348,9 @@ CLAWDOS.LOG (`progress note: ...`).
 ## The clock
 
 CLAWDOS leaves the clock alone. At boot ASTCLOCK.COM reads the PicoMEM 2's
-battery clock and NETUP.BAT sets the time by SNTP (see CLAUDE.md).
+battery clock and NETUP.BAT sets the time by SNTP (see CLAUDE.md); `NETUP
+NOCLOCK`, which every boot test but `clock.bat` uses, stops after DHCP, so the
+tests reach no server but the mock on the host.
 
 ## The tunnel
 
@@ -378,9 +399,20 @@ socat TCP-LISTEN:8443,fork,reuseaddr OPENSSL:api.anthropic.com:443
 client = yes
 accept = 8443
 connect = api.anthropic.com:443
+verifyChain = yes      ; check the certificate chain...
+checkHost = api.anthropic.com   ; ...and that it is api.anthropic.com's
+CAfile = /etc/ssl/cert.pem      ; the CA bundle, where stunnel does not find the system's
 ```
 
-`python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1] [--tools FILE] [--thread-ttl 300]` fakes the API on plain
+Without `verifyChain` and `checkHost` (stunnel checks neither by default) the
+stanza sends the API key through TLS to whoever answers on the way; `CAfile`
+(or `CApath`) must name the system's CA certificates where stunnel is not built
+to use them (its path differs: `/etc/ssl/certs/ca-certificates.crt` on Debian
+and Raspberry Pi OS, `/etc/ssl/cert.pem` on macOS). socat's `OPENSSL:` verifies
+the certificate by default (`verify=1`), and tunnel.py uses Python's default
+context, which checks the chain and the host name.
+
+`python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1] [--tools FILE] [--thread-ttl 300] [--first-id 1]` fakes the API on plain
 HTTP for tests and offline use: `CLAWDOS 10.0.2.2:18023` from an emulator, then
 `!help` for its scenarios. It checks every request against the rules below and
 answers a violation with HTTP 400 (`invalid_request_error`, naming the problem
@@ -388,28 +420,40 @@ and the message index) and a `VALIDATION:` line in its log, which the boot tests
 reject; it is not the whole of the real API's validation, and a task that adds a
 request field adds its rule. The rules: the `anthropic-version`, `content-type` and
 `Content-Length` headers (a length that does not match the body is a 400 within 10 s,
-the connection closed); valid JSON whose top-level fields are the ones in "The
+the connection closed); `anthropic-beta` values it knows (the three above: a
+mistyped `betas` line is a 400); valid JSON whose top-level fields are the ones in "The
 request" above (others are rejected) with `model`, `max_tokens`, `messages` and
 `stream` true; `tools` equal to TOOLS.JSN (which must be readable at startup); the
-`tool_choice` shapes; a `thinking` object of type `adaptive` with at most
+`tool_choice` shapes; `output_config` holding only an `effort` of `low`, `medium`,
+`high`, `xhigh` or `max`; a `thinking` object of type `adaptive` with at most
 `display` `updates` (which needs the `thinking-display-updates-2026-08-18`
 beta header) and `block_binding` `drop_block` (which needs
 `thinking-binding-controls-2026-08-01`), as the real API checks; cache
 markers `{"type":"ephemeral"}` with an optional `ttl` of `5m` or `1h`, the
 top-level one and the system block's agreeing; the first message from the user, alternating roles, no empty
 text blocks, known block types; each `tool_use` answered by exactly one
-`tool_result` in the next message, ahead of any text block; and, in a conversation
+`tool_result` in the next message, ahead of any text block; an image block in a
+`tool_result` a base64 PNG that decodes as 320x200 at 2 bits or 640x200 at 1
+(the mock logs `image ok WxH (the call): palette ..., pixels <digest>` and saves
+it as `build/mockshot-N.png`); and, in a conversation
 the mock saw begin (a request of one message starts one), every assistant message
 being a reply the mock sent, its thinking or redacted_thinking block coming back
 byte-identical and first; and `system`, `tools`, `thinking` and the top-level
-`cache_control` the same on every request of a conversation. With `tool_choice`
+`cache_control` the same on every request of a conversation (`system` and
+`tools` compared without their `cache_control` markers, which invalidate
+nothing on the real API). With `tool_choice`
 none the mock makes no tool call. With the binding beta its `message_start`
 carries `input_transformations: []`; with `display` `updates` the tool tour's
 responses each open with a progress note naming the next step. Its log line per
-request names the thinking options, the cache ttl, the thread kind and the
-body's length (`request: N messages, last role user, thinking
-updates+drop_block, cache 5m, thread continue (1 sent), 659 bytes`; N counts the
-whole conversation, a continue's stored messages included).
+request names the thinking options, the cache ttl (the system block's in
+brackets), the thread kind and the body's length (`request: N messages, last
+role user, thinking updates+drop_block, cache 5m (system 5m), thread continue (1
+sent), 659 bytes`; N counts the whole conversation, a continue's stored messages
+included), and, when the request carries a key header, `auth: x-api-key, N
+characters` (never the key). The boot tests run a second mock beside it with
+`boottest.py --mock2` (port 18024, its ids counted from 1001: another provider
+section), and `--key-tunnel` puts tunnel.py's key mode in front of the first on
+port 18025, over plain TCP, adding a made-up key.
 
 Threads in the mock (tunnel/mockapi.py `Threads`): each reply that reaches
 `message_stop` with `end_turn` or `tool_use` is stored by its id with the whole

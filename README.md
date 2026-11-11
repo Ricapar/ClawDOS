@@ -43,8 +43,10 @@ runs the tools.
 The one thing a 1980s CPU can't do is TLS, so the only piece off the PC is a
 **dumb tunnel**: a program that accepts a plain TCP connection and copies the
 bytes into an HTTPS connection to `api.anthropic.com`. It knows nothing about
-the API. `tunnel/tunnel.py` is 100 lines of standard-library Python; `socat` or
-`stunnel` do the same job.
+the API (unless you let it hold the key, below). `tunnel/tunnel.py` is about 330
+lines of standard-library Python, most of them for that optional key mode;
+`socat` or `stunnel` do the plain job (docs/API.md has an stunnel stanza that
+verifies the server).
 
 ```mermaid
 flowchart LR
@@ -121,7 +123,9 @@ networking. It is faster but less exact (it emulates an 80186).
    next to the tunnel, build with `python scripts/build.py --no-key` (the image has
    `auth tunnel` and no key) and start
    `python3 tunnel/tunnel.py --key-file ~/clawdos.key --allow 172.16.0.55` (the DOS
-   PC's address). The tunnel then adds `x-api-key` to every request it forwards to
+   PC's address; the PC gets it by DHCP, so reserve it in your router: on a new
+   lease the tunnel refuses the PC, and whoever is handed the old address is
+   served with your key). The tunnel then adds `x-api-key` to every request it forwards to
    `api.anthropic.com` and drops any key the client sent. Without `--key-file` it
    stays a plain byte copy that knows nothing about HTTP. `--allow` (repeatable)
    restricts who may connect, and `--key-file` refuses to start without it unless
@@ -151,7 +155,15 @@ networking. It is faster but less exact (it emulates an 80186).
    `TC\TURBOC.CFG`, the programs) are replaced, and survive only in the backup. An existing
    backup is never overwritten: the next one is `CLAWDOS.IMG.bak.2`, then `.bak.3`, and the
    output names the one written. A run that would add and change nothing writes nothing
-   (no backup, no new image). It lists the files it
+   (no backup, no new image), but through `build.py` that hardly happens: HARNESS.EXE
+   carries the build's time, so every update writes, and leaves another 32 MB backup
+   beside the image (on the SD card, if the image is there). Before the new image
+   replaces the old one it is read back: every file written must read back as built,
+   every other file must be there unchanged and the FAT copies must agree, or the old
+   image stays; an image whose file system is already damaged (cross-linked files,
+   FATs that differ) is refused, with a word to run CHKDSK first. Run `--dry-run`
+   first, and keep the first `.bak` until the PC has booted and reopened an old chat.
+   It lists the files it
    added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists
    the template's `[anthropic]` settings the image's copy lacks so you can add them.
    `--dry-run` shows all that and changes nothing; `--memories` also replaces the memory
@@ -171,11 +183,11 @@ networking. It is faster but less exact (it emulates an 80186).
 
 Enter sends. Esc stops a reply or clears the input. Arrows, Home, End and Del
 edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
-chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), F6 earlier chats, F10 quit. `CLAWDOS host:port` replaces the tunnel address
+chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session, from the next message), F6 earlier chats, F10 quit. `CLAWDOS host:port` replaces the tunnel address
 (plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
 a message at startup, `-i text` pre-fills the input box and `-c NAME` reopens
 the chat `CHATS\NAME.JSN` (a name as F6 lists it, not a path). Type `/model` to list the providers in `CLAWDOS.CFG`
-and switch.
+and switch, mid-conversation too (see [Other providers](#other-providers)).
 
 While Claude works through a run of tool calls it says what it is about to do:
 those progress notes appear dim, above the tool call they lead to (`progress`
@@ -202,14 +214,50 @@ takes your next one after it, and a tool call that never finished is answered
 with an error result. Until the first reply the box above the input shows only
 the reopened chat's turns; the reply brings its size in tokens.
 
+### Before you rely on it
+
+Everything here is tested against the offline mock API, in DOSBox-X and in 86Box's
+8088. These are the things only the real PC or a live API call can confirm:
+
+- **The three betas on your first message.** A fresh image's `[anthropic]` section
+  turns on `progress`, `dropthinking` and `threads`, whose names and fields have
+  never met the live API. If the first message ends in a 400 naming
+  `thinking-display-updates` or `display`, `thinking-binding-controls` or
+  `block_binding`, or `message-threads` or `thread`, set `progress`, `dropthinking`
+  or `threads` to 0 in `C:\CLAWDOS\CLAWDOS.CFG` and press F2 (a conversation keeps
+  the settings it started with). An image brought up to date with `--update` keeps
+  its own CLAWDOS.CFG, so it has them off until you add the lines it lists.
+- **Threads and the cache.** In `C:\CLAWDOS\CLAWDOS.LOG` each `api` line after a
+  chat's first should say `th=cont` with `cr=` (cache reads) above 0; after a pause
+  over five minutes one `thread ...: replaying` line is normal. `cachettl 1h`: a
+  message sent ten minutes after the last should still show `cr=` above 0.
+- **A screenshot in a result.** Ask Claude to run `C:\TESTS\QUADS.COM` with a
+  screenshot and describe it (four coloured quadrants); compare the colours with
+  your monitor, and try `shot_at` on a program that ends in text mode.
+- **A chat from before this version** (no `.PRE` beside it): F6, Enter, one message.
+- **The key in the tunnel** (`--no-key`, `--key-file`, `--allow`): offline,
+  `image/tests/keytunnel.bat` sends a tool round through it to the mock; with the
+  real API, one message shows whether the key gets there.
+- **EMS on the real PC.** The PicoMEM's EMS driver means the chat screen saved
+  around a run, and a `full_memory` screenshot on its way to the PNG, go to EMS
+  pages; no emulator here has EMS. Ask Claude to run `MEM` and check the chat
+  comes back whole, then the same with `full_memory` and a screenshot.
+- **Memory and timing.** Ask Claude to run `MEM` directly, through a `.BAT` file
+  and with `full_memory`: the DOSBox-X figures above will be lower beside the
+  PicoMEM's drivers. `relaunch:` and `run:` lines in the log time a `full_memory`
+  run and an in-harness one; `make bench` is the 86Box reference.
+- **By hand:** Ctrl-Break during `CLAWDOS -m ... -q`; Ctrl-C during a
+  `full_memory` run with and without `shot_at`; Del on a chat waiting for
+  `CLAWDOS -resume` (it must refuse); F6 and the dim progress notes on the real CGA.
+- **`--update` on your card's image:** `--dry-run` first, on a copy if you can.
+
 ## Reference
 
 ### Tools on DOS
 
-HARNESS.EXE offers the model a fixed set of tools (`C:\CLAWDOS\TOOLS.JSN`),
-runs them and shows each call in the transcript (`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`):
-
-
+HARNESS.EXE offers the model a fixed set of tools (`C:\CLAWDOS\TOOLS.JSN`, listed
+[at the top](#available-tools)), runs them and shows each call in the transcript
+(`● Read(C:\AUTOEXEC.BAT)` / `└ 24 lines`).
 
 **Safe mode** (on at startup, F3 toggles it, shown in the bottom row): tools
 that change files, memory or ports ask `Allow ...? (y/n)` first; looking,
@@ -223,6 +271,14 @@ a second COMMAND.COM (about 70K) for batch files, redirection and built-in comma
 The chat comes back as soon as the last command ends; the last six lines of its
 output (or of the screen it left) stay in the transcript, dim under the call,
 after a line counting the ones above them. The model gets the whole output.
+
+**Screenshots** (`run` with `screenshot` or `shot_at`) are of CGA graphics
+modes 4, 5 and 6 as a PNG (a text screen comes back as its text), read from
+video memory offset 0, so a moved CRTC start address, a page flip or a raster
+effect is not in the picture. `shot_at` copies the screen from the timer
+interrupt into a 16 KB DOS block held for that run. Each picture adds about
+22 KB to the conversation, and the first one in a conversation ends its
+message thread, so that request sends the whole conversation again.
 
 ### Memory for programs
 
@@ -243,8 +299,9 @@ For more, **`CLAWDOS.EXE`**, the command you type, is a 44K launcher: it starts
 HARNESS.EXE, and a `run` with `full_memory` set makes the harness save its state
 and exit, the launcher run the commands with about 450K free, and the harness
 start again on the same conversation with the program's output as the tool
-result. That costs a reload and a reconnect (under a second in DOSBox-X; about
-11 s on the 8088), so Claude sets it for compilers, linkers, the programs it
+result. That costs a reload, a reconnect and reopening the chat (under a second
+in DOSBox-X; in the 86Box benchmark, with a 136 KB chat, CLAWDOS is away about
+25 s around a 2-3 s program: docs/ROADMAP.md, "Benchmark"), so Claude sets it for compilers, linkers, the programs it
 builds and batch files (the run tool's schema and `image/skills/DEVTOOLS.TXT`
 say when), and leaves it off for DIR, TYPE and quick checks, which run beside
 the harness. The screen and the Up/Down input history come back with the
@@ -309,7 +366,12 @@ the tunnel a second port for it (`python3 tunnel/tunnel.py --map 8443=api.anthro
 --map 8444=openrouter.ai:443`) and point the section's `tunnel` line at that
 port. On the DOS PC, `/model` lists the sections and `/model openrouter`,
 `/model openrouter:anthropic/claude-opus-5.5` or just `/model some-model` (on
-the current provider) switches mid-conversation; the history carries over.
+the current provider) switches mid-conversation; the history carries over. A
+switch to another section also takes that section's `progress`, `dropthinking`,
+`threads`, `cache` and `cachettl` for the rest of the conversation (a host
+without the betas would refuse the others), and the next request sends the whole
+conversation; the system prompt and tools stay as they were, only their cache
+marker follows. A switch within a section changes only the model.
 OpenAI-style `/chat/completions` hosts are not supported.
 
 ### The system prompt
@@ -321,7 +383,8 @@ assistant for DOS; `{name}` becomes the model behind it (`name` in the config) a
 (plain text, 80 columns, no Markdown). It is read when a conversation starts,
 together with `C:\CLAWDOS\TOOLS.JSN`, the memories and the skills, and the result is kept
 beside the chat (`CHATS\MMDDnnn.PRE`): every request of that conversation sends
-the same system prompt and tools, through `/model`, F5 and a relaunch, because
+the same system prompt and tools, through `/model` (to another section only the
+cache marker changes), F5 and a relaunch, because
 the model's thinking is bound to them (and the prompt cache wants them
 unchanged). So an edit on the DOS PC, by you or by ClawDOS, or a new or deleted
 memory or skill, applies from the next conversation (F2).
@@ -334,7 +397,8 @@ and done. F6 lists them to reopen or delete (above); `MMDDnnn.PRE` beside each
 is the system prompt and tools it was started with, and goes with it. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
 token, total, upload time and size, stop reason, tokens in/out, cache reads)
 and one per event worth knowing about (retries, lost links, errors, the start
-of each progress note shown).
+of each progress note shown, the time an in-harness run cost; docs/API.md lists
+them).
 `python3 scripts/bench.py` (`make bench`) times a fixed agent turn in 86Box
 against the mock API; the results are in docs/ROADMAP.md ("Benchmark").
 
@@ -344,7 +408,7 @@ against the mock API; the results are in docs/ROADMAP.md ("Benchmark").
 |---|---|
 | `src/harness/` | HARNESS.EXE, the chat client |
 | `src/clawdos/` | CLAWDOS.EXE, the launcher that runs it |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `shot` + `shotpng` (screenshots), `edit`, `search`, `ems`, `play` + `sound` (music) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `shot` + `shotpng` (screenshots), `edit`, `search`, `ems`, `play` + `sound` (music); the conversation's pieces: `convo` (the rules that keep the history valid), `chatfile` (reading a chat back to reopen it), `relaunch` (the files between launcher and harness), `runmem` (the buffers lent to a run's program) |
 | `tests/unit/` | DOSUNIT.EXE: unit tests for the hardware-free code (every parser above), run in DOSBox-X |
 | `tunnel/` | The TLS tunnel (`tunnel.py`) and the offline mock Messages API (`mockapi.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |

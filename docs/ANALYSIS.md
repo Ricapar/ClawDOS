@@ -1,5 +1,19 @@
 # ClawDOS analysis, November 2026
 
+**Status (2026-11-11).** Most of section 9's plan has since been built, on
+`main` from `7723879` on; the text below is left as it was written.
+Implemented: P1 (threads), P2 (the frozen prefix), P4 (buffered history), P8
+(the benchmark), R1, R3, R4, B1, B2, B4-B6, A1, A2, A5's `cachettl`, U1, U2, F1
+(reopening chats), F3 (screenshots), F4 (skills), F8's schema types, S1 and S2
+(the tunnel's key mode with `--allow`), S4 (the stunnel stanza now verifies the
+server), T2 (`build.py --update`, which also reads its result back), T3, T4
+(the mock's validator), T5's `--mock` for the 8088 runs, and section 8's drift.
+Decided against or deferred: P3, P5-P7, R2, R5-R7, B3, B7-B9, A4, U3-U6, F2
+(`/compact`, until sessions grow), F5, F6, T1's CI, T5's `wdis` gate, T6, T7.
+What the work measured is in docs/ROADMAP.md, "Benchmark" and "Memory for
+in-harness runs"; what only the real PC or a live API call can confirm is in
+the README, "Before you rely on it".
+
 A review of the whole repository (branch `relaunch` at `38fd49a`) looking for
 improvements in performance, reliability, user experience, functionality,
 security and tooling. It is meant to be argued with: every finding has an ID so
