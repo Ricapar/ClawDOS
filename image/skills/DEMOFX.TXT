@@ -30,8 +30,15 @@ RULES
    Write VRAM in 40-column text or graphics modes, or only in blanking.
 6. Prefer changing CRTC registers and the colour register (no snow, no
    VRAM bandwidth) over redrawing memory.
-7. Nobody can watch for you: have the program measure itself (PIT ticks
-   per frame, frames dropped) and print the numbers when it ends.
+7. Nobody can watch for you, but you can look: run with screenshot true
+   for a picture of the screen the program leaves, or shot_at N for one
+   N seconds into the run (a program that sets text mode on exit). It
+   is a PNG of video memory with the colours the BIOS set (modes 4, 5,
+   6); if you wrote 3D8h/3D9h yourself, give shot_mode and shot_color.
+   Per-line register changes (raster bars, splits) don't show in it.
+   Each picture adds ~22 KB to the chat: look when it matters. Also have
+   the program measure itself (PIT ticks per frame, frames dropped) and
+   print the numbers when it ends.
 8. Use full_memory for big tables or code (over ~150 KB).
 
 TOPICS (C:\DEVEL\DOC\DEMOFX\)

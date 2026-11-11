@@ -5,11 +5,15 @@ import http.client
 import io
 import json
 import os
+import base64
 import socket
+import struct
 import sys
+import tempfile
 import threading
 import time
 import unittest
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -17,6 +21,12 @@ import mockapi  # noqa: E402
 import mockchat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tests', 'unit'))
+import pngref  # noqa: E402
+
+# The pixel digest of QUADS.COM's picture (tests/unit/quads.asm) in the mock's `image ok` line: the
+# Makefile's shot.bat expectations name it, and ScreenshotTest checks it against pngref's drawing.
+QUADS_PIXELS = 'B5BCA4D2'
 
 
 def sse_events(body):
@@ -1109,6 +1119,136 @@ class ThreadTest(unittest.TestCase):
             tool_result(tool_block(blocks))]}], updates, betas)
         said, blocks, stop, _ = reply(events)
         self.assertEqual((blocks[0]['thinking'], said, stop), (mockchat.NOTE_TEXT, 'Text after the note.', 'end_turn'))
+
+
+def image_block(png):
+    return {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png',
+                                        'data': base64.b64encode(png).decode()}}
+
+
+def shot_result(block, png, text='exit code 0\n(screenshot: 320x200)'):
+    """A run's result as the PC writes one with a screenshot: the text, then the picture."""
+    return {'type': 'tool_result', 'tool_use_id': block['id'], 'is_error': False,
+            'content': [{'type': 'text', 'text': text}, image_block(png)]}
+
+
+def rechunk(png, kind, body):
+    """png with chunk `kind`'s body replaced (its CRC made right again)."""
+    at = 8
+    while at < len(png):
+        size = int.from_bytes(png[at:at + 4], 'big')
+        if png[at + 4:at + 8] == kind:
+            return png[:at] + pngref.chunk(kind, body) + png[at + 12 + size:]
+        at += 12 + size
+    raise KeyError(kind)
+
+
+class ScreenshotTest(unittest.TestCase):
+    """Images in tool results (the run tool's screenshot): the PNG check, the `image ok` line and the saved
+    file, and the thread the first image ends."""
+
+    QUADS = pngref.png_cga(pngref.quads_frame(), 2, pngref.REF320_PALETTE)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = mockapi.make_server(0, speed=0)
+        cls.port = cls.server.server_address[1]
+        cls.dir = tempfile.TemporaryDirectory()
+        cls.server.shot_dir = cls.dir.name
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.dir.cleanup()
+
+    post = ThreadTest.post
+    create = ThreadTest.create
+    cont = ThreadTest.cont
+    refused = ThreadTest.refused
+
+    def setUp(self):
+        self.log = io.StringIO()
+        self.threads = self.server.validator.threads
+
+    def test_the_reference_pngs_pass_and_describe_themselves(self):
+        frame = pngref.unit_frame()
+        self.assertEqual(mockapi.png_info(pngref.png_cga(frame, 2, pngref.REF320_PALETTE))[:3],
+                         (320, 200, ['0000AA', '55FF55', 'FF5555', 'FFFF55']))
+        self.assertEqual(mockapi.png_info(pngref.png_cga(frame, 1, pngref.REF640_PALETTE))[:3],
+                         (640, 200, ['000000', 'FFFF55']))
+        # zlib's own reading of the stored block agrees with the rows taken from the two banks
+        png = pngref.png_cga(frame, 2, pngref.REF320_PALETTE)
+        rows = pngref.rows_of(frame)
+        self.assertEqual(rows[1], frame[0x2000:0x2050])
+        self.assertEqual(rows[2], frame[80:160])
+        self.assertEqual(mockapi.png_info(png)[3], zlib.crc32(b''.join(rows)))
+
+    def test_quads_digest_is_the_one_the_boot_test_expects(self):
+        self.assertEqual(f'{mockapi.png_info(self.QUADS)[3]:08X}', QUADS_PIXELS)
+        rows = pngref.rows_of(pngref.quads_frame())
+        # top left blue (0) with the diagonal in 3; bottom right yellow (3) with it in 0
+        self.assertEqual((rows[0][0] >> 6, rows[0][0] >> 4 & 3, rows[0][79]), (3, 0, 0x55))
+        self.assertEqual((rows[199][49] & 3, rows[199][48], rows[199][0]), (0, 0xFF, 0xAA))
+
+    def test_bad_pngs_are_refused_with_what_is_wrong(self):
+        png = self.QUADS
+        ihdr = struct.pack('>IIBBBBB', 320, 200, 8, 3, 0, 0, 0)
+        bad_crc = png[:-5] + bytes([png[-5] ^ 1]) + png[-4:]
+        idat = pngref.rows_of(pngref.quads_frame())
+        raw = b''.join(b'\0' + r for r in idat)
+        z = b'\x78\x01\x01' + struct.pack('<HH', len(raw), len(raw) ^ 0xFFFF) + raw + b'\0\0\0\0'
+        filtered = b'\x01' + raw[1:]
+        z2 = b'\x78\x01\x01' + struct.pack('<HH', len(raw), len(raw) ^ 0xFFFF) + filtered
+        z2 += struct.pack('>I', zlib.adler32(filtered))
+        for broken, fragment in ((b'GIF89a' + png[6:], 'signature'), (bad_crc, 'CRC'),
+                                 (rechunk(png, b'IHDR', ihdr), 'want 320x200 at 2 bits'),
+                                 (rechunk(png, b'IDAT', z), 'zlib'),
+                                 (rechunk(png, b'IDAT', z2), 'filter 1'),
+                                 (rechunk(png, b'PLTE', b'\0' * 15), 'PLTE of 15 bytes'),
+                                 (png[:-12], 'IEND last'), (png[:200], 'cut short')):
+            with self.assertRaises(ValueError) as cm:
+                mockapi.png_info(broken)
+            self.assertIn(fragment, str(cm.exception), fragment)
+
+    def test_the_validator_takes_a_text_and_image_list_and_checks_the_image(self):
+        call = {'type': 'tool_use', 'id': 'toolu_9', 'name': 'run', 'input': {'command': 'QUADS'}}
+        good = [USER, assistant(call), {'role': 'user', 'content': [shot_result(call, self.QUADS)]}]
+        mockapi.check_messages(good)
+        for change, fragment in ((lambda b: b['source'].update(media_type='image/gif'), 'image/png'),
+                                 (lambda b: b['source'].update(type='url'), 'base64 source'),
+                                 (lambda b: b['source'].update(data='!!!'), 'not valid base64'),
+                                 (lambda b: b['source'].update(data=base64.b64encode(b'png').decode()), 'signature')):
+            block = shot_result(call, self.QUADS)
+            change(block['content'][1])
+            with self.assertRaises(mockapi.BadRequest) as cm:
+                mockapi.check_messages([USER, assistant(call), {'role': 'user', 'content': [block]}])
+            self.assertIn(fragment, str(cm.exception))
+
+    def test_the_first_image_ends_the_thread_and_the_replay_logs_and_saves_it_once(self):
+        prev, conv, (_, blocks, _) = self.create('!tool run command=C:\\TESTS\\QUADS.COM screenshot=true')
+        call = tool_block(blocks)
+        self.assertEqual(call['input'], {'command': 'C:\\TESTS\\QUADS.COM', 'screenshot': True})
+        new = [{'role': 'user', 'content': [shot_result(call, self.QUADS)]}]
+        self.refused(self.cont(prev, new), 404, 'thread_not_found')
+        self.assertIn('the first image in a thread that had none', self.log.getvalue())
+        status, events = self.post(conv + new, CREATE)
+        self.assertEqual(status, 200, events)
+        self.assertIn('thread replay after thread_not_found: PASS', self.log.getvalue())
+        self.assertIn(f'image ok 320x200 (run C:\\TESTS\\QUADS.COM, screenshot=True): palette 0000AA 55FF55 FF5555 '
+                      f'FFFF55, pixels {QUADS_PIXELS}', self.log.getvalue())
+        self.assertIn('tool run (screenshot: 320x200)', self.log.getvalue())
+        saved = [n for n in os.listdir(self.dir.name) if n.startswith('mockshot-')]
+        self.assertEqual(len(saved), 1)
+        with open(os.path.join(self.dir.name, saved[0]), 'rb') as f:
+            self.assertEqual(f.read(), self.QUADS)
+        # the thread now has an image: the next continue is fine, and the image is not logged again
+        status, _ = self.cont(message_id(events), [{'role': 'user', 'content': 'and then?'}])
+        self.assertEqual(status, 200)
+        self.assertEqual(self.log.getvalue().count('image ok'), 1)
+        self.assertNotIn('VALIDATION', self.log.getvalue())
 
 
 if __name__ == '__main__':

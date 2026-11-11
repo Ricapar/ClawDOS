@@ -24,7 +24,8 @@ MEMORY_DIR = 'MEMORY'                            # the model's memories (--memor
 CFG_FILE = 'CLAWDOS/CLAWDOS.CFG'                 # tunnel address, key, the user's edits (--cfg)
 PC_FILES = ('CLAWDOS/CLAWDOS.LOG',               # the log
             'CLAWDOS/RUN.TXT', 'CLAWDOS/RUN.OUT',        # relaunch state (lib/relaunch.h)
-            'CLAWDOS/RESUME.TXT', 'CLAWDOS/SCREEN.SAV')
+            'CLAWDOS/RESUME.TXT', 'CLAWDOS/SCREEN.SAV',
+            'CLAWDOS/SHOT.RAW', 'CLAWDOS/SHOT.PNG')      # a run's screenshot on its way (lib/shot.h)
 MTCP_CFG = 'NET/MTCP.CFG'              # shipped, but mTCP's DHCP writes the lease into it on the PC
 SKILLS_DIR = 'SKILLS'                  # shipped knowledge; earlier builds shipped the same files as memories
 

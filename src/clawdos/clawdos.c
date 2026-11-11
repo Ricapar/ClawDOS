@@ -7,7 +7,9 @@
  * program is left in memory: it runs the commands with lib/shell.c, exactly
  * as the harness's run tool would, writes the captured output and starts
  * HARNESS -resume, which carries the conversation on. Any other exit code is
- * the harness quitting, and CLAWDOS quits with it.
+ * the harness quitting, and CLAWDOS quits with it. A run that asks for a
+ * screenshot leaves the screen (or the copy taken at shot_at) in SHOT.RAW;
+ * the resumed harness makes the PNG, so the encoder never sits in here.
  */
 
 #include <stdio.h>
@@ -15,9 +17,12 @@
 #include <string.h>
 #include <process.h>
 #include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <dos.h>
 #include <i86.h>
 #include "shell.h"
+#include "shot.h"
 #include "relaunch.h"
 #include "ticks.h"
 
@@ -25,7 +30,7 @@
 
 static char exe[80];                  /* HARNESS.EXE, beside us */
 static char args[TAIL_MAX + 16];
-static char cmds[SHELL_CMDS_MAX * (SHELL_CMD_MAX + 2) + 1];
+static char cmds[SHELL_CMDS_MAX * (SHELL_CMD_MAX + 2) + 32];   /* and the shot line */
 
 /* Our command tail as DOS gave it to us, from the PSP: spawnl passes a single
    argument through unchanged, so CLAWDOS sees exactly what the user typed. */
@@ -53,6 +58,26 @@ static void findExe(const char *argv0)
     strcat(exe, "HARNESS.EXE");
 }
 
+/* The picture as the program left it (HARNESS sets its own mode later) or as
+   shot_at took it, after its ShotInfo, into SHOT_RAW for the resumed harness. */
+static int saveShot(ShotInfo *info)
+{
+    const unsigned char __far *frame = shot_frame(info);
+    int fd = open(SHOT_RAW, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, S_IREAD | S_IWRITE);
+    unsigned n1 = 0, n2 = 0;
+    int rc;
+
+    if (fd < 0)
+        return -1;
+    /* _dos_write: we are small model, and the frame is far */
+    rc = _dos_write(fd, (const void __far *)info, sizeof *info, &n1)
+         || _dos_write(fd, frame, SHOT_BYTES, &n2) || n1 != sizeof *info || n2 != SHOT_BYTES ? -1 : 0;
+    close(fd);
+    if (rc)
+        remove(SHOT_RAW);
+    return rc;
+}
+
 int main(int argc, char *argv[])
 {
     int code, resuming = 0;
@@ -77,14 +102,35 @@ int main(int argc, char *argv[])
         }
         {
             ToolCtx t;
-            int status;
+            ShotInfo shot;
+            int status, wantShot = 0;
+            unsigned ticks = 0;
+            const char *run = cmds;
             unsigned long start = TICKS_NOW;
 
             tout_reset(&t);
-            if (relaunch_read_run(cmds, sizeof cmds))
+            remove(SHOT_RAW);
+            if (relaunch_read_run(cmds, sizeof cmds)) {
                 status = tool_fail(&t, "CLAWDOS: no " RELAUNCH_RUN);
-            else
-                status = shell_run(&t, cmds);
+            } else {
+                if (!strncmp(cmds, RELAUNCH_SHOT, sizeof RELAUNCH_SHOT - 1)) {
+                    char *p = cmds + sizeof RELAUNCH_SHOT - 1;
+                    ticks = (unsigned)strtoul(p, &p, 10);
+                    shot.force = (unsigned char)strtoul(p, &p, 10);
+                    shot.color = (unsigned char)strtoul(p, &p, 10);
+                    wantShot = 1;
+                    run = cmds + strcspn(cmds, "\n");
+                    if (ticks)
+                        shot_arm(ticks);
+                }
+                status = shell_run(&t, run);
+            }
+            if (wantShot) {
+                shot_disarm();
+                if (status == TS_OK && saveShot(&shot))
+                    tout_puts(&t, "\n(no screenshot: CLAWDOS cannot write " SHOT_RAW ")\n");
+                shot_release();
+            }
             if (relaunch_write_out(status, ticks_elapsed(TICKS_NOW, start), &t))
                 printf("CLAWDOS: cannot write %s\n", RELAUNCH_OUT);
         }

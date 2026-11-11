@@ -192,6 +192,20 @@ Everything in it is UTF-8 JSON exactly as the API wants it. CLAWDOS writes:
   `boolean`, `string`); the executors also take `"true"`/`"false"`/`"1"`/`"0"`
   for a flag and digits in a string for a number, and fail the call naming
   the argument for anything else. Tabs in arguments stay tabs.
+- a `run` result with a screenshot (its `screenshot`, `shot_at`, `shot_mode` or
+  `shot_color` argument, on a graphics screen): the content is a list, the text
+  block then the picture,
+  `"content":[{"type":"text","text":"..."},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}}]`.
+  The PNG (C:\CLAWDOS\SHOT.PNG, about 16 KB: 320x200 at 2 bits or 640x200 at
+  1, indexed, one stored deflate block; lib/shotpng.h) is streamed into the
+  file as base64 (about 22 KB) a piece at a time and deleted. If it cannot be
+  read or written, the result is written again without it, with a text block
+  saying so. A text screen comes back as text in the result instead. A
+  full_memory run's screen goes from the launcher to the resumed harness in
+  C:\CLAWDOS\SHOT.RAW (a 6-byte `ShotInfo`, then the 16 KB; lib/shot.h). On
+  the real API the first image in a thread that had none makes the continue
+  fail with `thread_not_found`, and CLAWDOS replays the conversation (the mock
+  does the same); every later full replay carries every picture again.
 
 A turn remembers where it started. Anything that ends it early (Esc, a dropped
 link, an API error, a refusal) truncates the file back to the last complete

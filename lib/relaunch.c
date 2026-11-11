@@ -72,9 +72,9 @@ static void toTool(void *ctx, const char *p, unsigned n)
     }
 }
 
-int relaunch_write_run(const char *cmds)
+int relaunch_write_run(const char *head, const char *cmds)
 {
-    return writeFile(RELAUNCH_RUN, "", cmds, strlen(cmds));
+    return writeFile(RELAUNCH_RUN, head, cmds, strlen(cmds));
 }
 
 int relaunch_read_run(char *cmds, unsigned max)

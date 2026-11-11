@@ -13,6 +13,7 @@
 #include <conio.h>
 #include <i86.h>
 #include <dos.h>
+#include <io.h>
 
 #include "toolapi.h"
 #include "dosfs.h"
@@ -23,6 +24,8 @@
 #include "sysinfo.h"
 #include "sound.h"
 #include "shell.h"
+#include "shot.h"
+#include "shotpng.h"
 #include "relaunch.h"
 #include "screen.h"
 #include "console.h"
@@ -188,36 +191,180 @@ void tools_restore_screen(unsigned short __far *save)
 }
 
 static int launched;                  /* started by CLAWDOS.EXE: runs go to it */
+static char shotLine[40];             /* the transcript's line about the screenshot */
+static int shotAttached;              /* SHOT_PNG goes with the result */
 
 void tools_set_launched(int on) { launched = on; }
+
+const char *tools_result_image(void) { return shotAttached ? SHOT_PNG : NULL; }
+
+void tools_result_image_done(void)
+{
+    if (shotAttached)
+        remove(SHOT_PNG);
+    shotAttached = 0;
+}
+
+#define SHOT_AT_MAX 3000              /* tenths of a second: 5 minutes */
+
+/* The screenshot a run asks for: 1 (info's force and color set, *ticks to
+   wait, 0 for at exit), 0 none, -1 after failing the call over a bad
+   argument. Any of the shot arguments asks for one. */
+static int shotArgs(ToolCtx *t, ShotInfo *info, unsigned *ticks)
+{
+    const char *at = targ("shot_at"), *mode = targ("shot_mode");
+    int want;
+    long color;
+
+    info->force = SHOT_AUTO;
+    info->color = SHOT_NO_COLOR;
+    *ticks = 0;
+    if (targ_bool(t, "screenshot", &want))
+        return -1;
+    if (mode && *mode) {
+        if (!stricmp(mode, "320x200"))
+            info->force = SHOT_320;
+        else if (!stricmp(mode, "640x200"))
+            info->force = SHOT_640;
+        else if (!stricmp(mode, "text"))
+            info->force = SHOT_TEXT;
+        else
+            return tool_fail(t, "shot_mode must be 320x200, 640x200 or text"), -1;
+        want = 1;
+    }
+    if (targ("shot_color") && *targ("shot_color")) {
+        if (targ_long(t, "shot_color", 0, &color))
+            return -1;
+        if (color < 0 || color > 63)
+            return tool_fail(t, "shot_color must be 0-63 (the colour register's value)"), -1;
+        info->color = (unsigned char)color;
+        want = 1;
+    }
+    if (at && *at) {                  /* seconds, to a tenth: "2", "0.5" */
+        unsigned long tenths = 0;
+        const char *p = at;
+        while (*p >= '0' && *p <= '9' && tenths <= SHOT_AT_MAX)
+            tenths = tenths * 10 + (*p++ - '0');
+        tenths *= 10;
+        if (*p == '.' && p[1] >= '0' && p[1] <= '9')
+            tenths += *++p - '0';
+        if (*p == '.')
+            while (*++p >= '0' && *p <= '9')
+                ;
+        if (*p || p == at || tenths == 0 || tenths > SHOT_AT_MAX)
+            return tool_fail(t, "shot_at must be seconds after the first command starts, 0.1 to 300"), -1;
+        *ticks = (unsigned)((tenths * 182 + 50) / 100);
+        if (*ticks == 0)
+            *ticks = 1;
+        want = 1;
+    }
+    return want;
+}
+
+/* What the model gets from a captured frame (lib/shot.h): its text in the
+   result (a text mode), or SHOT_PNG made to go with it; shotLine gets the
+   transcript's line. 1 when SHOT_PNG is to be attached. */
+static int shotResult(ToolCtx *t, const ShotInfo *info, const unsigned char __far *frame)
+{
+    static const char *const names[] = { "", "320x200", "640x200" };
+    unsigned char rgb[12];
+    int kind = info->force;
+    unsigned colors;
+
+    if (kind == SHOT_AUTO)            /* the BIOS's modes 4 and 5, 6, 0 to 3 */
+        kind = info->mode == 4 || info->mode == 5 ? SHOT_320 : info->mode == 6 ? SHOT_640
+             : info->mode <= 3 ? SHOT_TEXT : SHOT_AUTO;
+    if (info->how == SHOT_LATE)
+        tout_puts(t, "\n(shot_at was not reached: this is the screen at exit)");
+    else if (info->how == SHOT_NOBUF)
+        tout_puts(t, "\n(no memory for the shot_at copy: this is the screen at exit)");
+    if (kind == SHOT_AUTO) {
+        tout_printf(t, "\n(no screenshot: video mode %u; give shot_mode)\n", info->mode);
+        strcpy(shotLine, "no screenshot: unknown video mode");
+        return 0;
+    }
+    if (kind == SHOT_TEXT) {
+        unsigned cols = info->mode <= 1 ? 40 : 80;
+        tout_printf(t, "\n(screenshot: text %ux25)\n", cols);
+        shell_screen_text(t, t->len < TOOL_OUT_MAX - 1 ? TOOL_OUT_MAX - 1 - t->len : 0, frame, cols);
+        sprintf(shotLine, "screenshot: text %ux25", cols);
+        return 0;
+    }
+    colors = shot_palette(info, kind, rgb);
+    if (png_write_cga(SHOT_PNG, frame, kind == SHOT_320 ? 2 : 1, rgb, colors)) {
+        tout_puts(t, "\n(no screenshot: cannot write " SHOT_PNG ")\n");
+        strcpy(shotLine, "no screenshot: cannot write the file");
+        return 0;
+    }
+    tout_printf(t, "\n(screenshot: %s, colour register %02Xh; the image follows)\n", names[kind],
+                info->color != SHOT_NO_COLOR ? info->color : info->colorReg);
+    sprintf(shotLine, "screenshot %s, 16 KB", names[kind]);   /* 16,280 bytes and the palette's */
+    return 1;
+}
 
 /* DOS commands on a plain DOS screen; the chat comes back afterwards. With
    full_memory under the launcher the commands are written out for it and the
    harness leaves, so the program gets the memory the harness held
-   (relaunch.h); otherwise they run here, beside the harness. */
+   (relaunch.h); otherwise they run here, beside the harness. A screenshot is
+   taken before the chat screen comes back (or at shot_at, by the timer hook)
+   and made into a PNG here. */
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
     unsigned short __far *save;
-    int status, big;
+    ShotInfo shot;
+    unsigned ticks;
+    int status, big, want;
 
     if (targ_bool(t, "full_memory", &big))
         return TS_ERROR;
+    if ((want = shotArgs(t, &shot, &ticks)) < 0)
+        return TS_ERROR;
     if (big && launched) {
+        char head[32];
         if (cmd == NULL)
             return tool_fail(t, "missing command");
-        if (relaunch_write_run(cmd))
+        head[0] = 0;
+        if (want)
+            sprintf(head, RELAUNCH_SHOT "%u %u %u\n", ticks, shot.force, shot.color);
+        if (relaunch_write_run(head, cmd))
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
         return TS_RELAUNCH;
     }
     if ((save = tools_save_screen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
+    if (want && ticks)
+        shot_arm(ticks);
     status = shell_run(t, cmd);
+    if (want) {
+        shot_disarm();
+        if (status == TS_OK)
+            shotAttached = shotResult(t, &shot, shot_frame(&shot));
+        shot_release();
+    }
     tools_restore_screen(save);
     if (big && !launched)
         tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
                      " so the program ran beside it)\n");
     return status;
+}
+
+void tools_resume_shot(int status, ToolCtx *t)
+{
+    ShotInfo shot;
+    unsigned char __far *frame;
+
+    shotLine[0] = 0;
+    shotAttached = 0;
+    if (access(SHOT_RAW, 0))
+        return;                       /* no screenshot asked for */
+    frame = status == TS_OK ? (unsigned char __far *)malloc(SHOT_BYTES) : NULL;
+    if (frame != NULL && shot_load_raw(&shot, frame) == 0)
+        shotAttached = shotResult(t, &shot, frame);
+    else if (status == TS_OK)
+        tout_puts(t, "\n(no screenshot: the launcher's copy of the screen could not be read)\n");
+    free(frame);
+    remove(SHOT_RAW);
 }
 
 static const ToolDef tools[] = {
@@ -425,6 +572,8 @@ static int execute(const char *name, int overflow, ToolCtx *t)
         ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
     showLastLines(t);
+    if (shotLine[0])
+        ui_tool_detail(shotLine);
     return status;
 }
 
@@ -436,6 +585,8 @@ void tools_show_result(int status, const ToolCtx *t)
         ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
     showLastLines(t);
+    if (shotLine[0])
+        ui_tool_detail(shotLine);
     ui_tool_done();
 }
 
@@ -478,6 +629,8 @@ int tools_call(const char *name, const char *input, unsigned len, ToolCtx *t)
 
     if (tool_idle)                    /* keep the connection alive before a long tool */
         tool_idle();
+    tools_result_image_done();        /* a picture never written (the turn ended) goes too */
+    shotLine[0] = 0;
     targ_reset();
     if (len && json_each(input, len, setArg, &overflow) < 0 && !overflow) {
         tout_reset(t);

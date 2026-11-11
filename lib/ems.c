@@ -6,8 +6,9 @@
 #include <i86.h>
 #include "ems.h"
 
-static int state;                 /* 0 untried, 1 have a page, -1 no EMS */
+static int state;                 /* 0 untried, 1 have pages, -1 no EMS */
 static unsigned handle;
+static unsigned pages;            /* allocated: 2, or 1 when EMS had no more */
 static unsigned frame;            /* page frame segment */
 
 static int ems(union REGS *r)
@@ -34,7 +35,7 @@ static int present(void)
     return vec != NULL && _fmemcmp(MK_FP(FP_SEG(vec), 10), "EMMXXXX0", 8) == 0;
 }
 
-void __far *ems_page(void)
+void __far *ems_map(unsigned n)
 {
     union REGS r;
 
@@ -49,21 +50,25 @@ void __far *ems_page(void)
         if (ems(&r))
             return NULL;
         frame = r.x.bx;
-        r.h.ah = 0x43;            /* allocate one page */
-        r.x.bx = 1;
-        if (ems(&r))
+        for (pages = 2; pages > 0; pages--) {
+            r.h.ah = 0x43;        /* allocate pages */
+            r.x.bx = pages;
+            if (ems(&r) == 0)
+                break;
+        }
+        if (pages == 0)
             return NULL;
         handle = r.x.dx;
         state = 1;
         atexit(release);
     }
-    if (state != 1)
+    if (state != 1 || n >= pages)
         return NULL;
-    r.h.ah = 0x44;                /* map logical page 0 to physical page 0 */
-    r.h.al = 0;
-    r.x.bx = 0;
+    r.h.ah = 0x44;                /* map logical page n to physical page n */
+    r.h.al = (unsigned char)n;
+    r.x.bx = n;
     r.x.dx = handle;
     if (ems(&r))
         return NULL;
-    return MK_FP(frame, 0);
+    return MK_FP(frame + n * (EMS_PAGE_BYTES / 16), 0);
 }

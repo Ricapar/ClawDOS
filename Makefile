@@ -91,8 +91,18 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "unans exit code 0" --expect "call exit code 0" --expect "result exit code 0" --expect "half exit code 0" \
 	    --expect "BIG.JSN: 206060 bytes (0 cut), 18 typed, ends 1" --expect "reopened big: 37 messages" --expect "big exit code 0" \
 	    --expect "NOTCHAT.JSN is not a chat file" --expect "notchat exit code 1" --expect "and its second line stays" \
-	    --expect "path exit code 1" --expect "AUTOEXEC.BAT still there" --expect "HALF.JSN: 46 bytes (66 cut)" \
+	    --expect "path exit code 1" --expect "AUTOEXEC.BAT still whole" --expect "HALF.JSN: 46 bytes (66 cut)" \
 	    --expect "NOSUCH.JSN (or it is empty)" --expect "nosuch exit code 1" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/shot.bat --mock --timeout 240 \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADS.COM, screenshot=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "image ok 640x200 (run C:\TESTS\QUADS.COM, shot_mode=640x200): palette 000000 0000AA, pixels B5BCA4D2" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADS.COM, screenshot=True, full_memory=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1, full_memory=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "graphics screen, video mode 4: no text" --expect "tool run (screenshot: text 80x25)" \
+	    --expect "tool run (shot_at was not reached" --expect "thread replay after thread_not_found: PASS" \
+	    --expect "launcher timed exit code 0" --expect "SHOT.RAW consumed" --expect "SHOT.PNG consumed" \
+	    --reject "replay after thread_not_found: FAIL" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/skills.bat --mock --expect "skills: PASS" --reject "VALIDATION:"

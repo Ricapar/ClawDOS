@@ -793,13 +793,13 @@ void Chat::dropTurn(void)
     convo_rollback_turn(&convo);
 }
 
-/* A tool_result into the history: 0, or -1 when it could not be written and
-   the turn ends (convo_tool_result has left the file valid: a short error
-   result, or the whole turn rolled back). */
-int8_t Chat::toolResult(const char *toolId, const char *text, int isError, const char *note)
+/* A tool_result into the history, with the PNG `image` when not NULL: 0, or
+   -1 when it could not be written and the turn ends (convo_tool_result has
+   left the file valid: a short error result, or the whole turn rolled back). */
+int8_t Chat::toolResult(const char *toolId, const char *text, int isError, const char *note, const char *image)
 {
     int replied = convo.assistantInTurn > 0;
-    if (convo_tool_result(&convo, toolId, text, isError, note) == 0)
+    if (convo_tool_result_image(&convo, toolId, text, isError, note, image) == 0)
         return 0;
     if (replied && convo.assistantInTurn == 0)
         turnsDone--;                  /* the turn went */
@@ -811,8 +811,11 @@ int8_t Chat::toolResult(const char *toolId, const char *text, int isError, const
    round, -1 the result could not be written. */
 int8_t Chat::finishTool(int round, const char *toolId, int status, ToolCtx *t)
 {
-    if (toolResult(toolId, tools_result_text(status, t), status != TS_OK,
-                   round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL))
+    int8_t rc = toolResult(toolId, tools_result_text(status, t), status != TS_OK,
+                           round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL,
+                           status == TS_OK ? tools_result_image() : NULL);
+    tools_result_image_done();
+    if (rc)
         return -1;
     if (status == TS_STOPPED)
         return 1;

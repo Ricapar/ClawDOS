@@ -38,6 +38,7 @@
 #include "toolapi.h"
 #include "ticks.h"
 #include "relaunch.h"
+#include "shot.h"
 #include "ui.h"
 #include "memui.h"
 #include "chatui.h"
@@ -777,6 +778,7 @@ static int openChat(const char *path)
         remove(RELAUNCH_SCREEN);
         remove(RELAUNCH_RUN);
         remove(RELAUNCH_OUT);
+        remove(SHOT_RAW);
         uiLog("resume state dropped: its chat was reopened");
     }
     con_init();
@@ -1543,6 +1545,7 @@ static void resumeTurn(void)
         status = TS_ERROR;
     }
     setState(WAITING);
+    tools_resume_shot(status, &t);
     tools_show_result(status, &t);
     secsText(a, progTicks);
     secsText(b, ticks_elapsed(TICKS_NOW, resumeState.ticks));
@@ -1623,7 +1626,7 @@ int main(int argc, char *argv[])
                     chatArg);
             return 1;
         }
-        sprintf(chatFile, CHATS_DIR "\\%.8s.JSN", chatArg);
+        sprintf(chatFile, CHATS_DIR "\\%.*s.JSN", (int)n, chatArg);
     }
     if (resumeMode) {                 /* the flags come from the CLAWDOS that left */
         if (readState(&resumeState)) {

@@ -15,7 +15,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). Unless nothing would change, it copies
   the old image to IMG.bak (never overwritten: .bak.2, .bak.3, ...), then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
   nothing else (SKILLS/ is the build's, replaced like any shipped file): MEMORY/ (`--memories`: only the memory files the build ships, none now; a memory named like a shipped skill, left by an older build, gets a note saying it can go with F4; a skill in SKILLS/ the build no longer ships gets a note too, and stays), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
-  (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
+  (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV/SHOT.RAW/SHOT.PNG and files the build does not ship stay. Never test it on the real SD-card image.
 - The API key can stay off the DOS PC: `build.py --no-key` (remembered, `--key` undoes it; image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
   --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
   copies bytes and knows nothing of HTTP; docs/API.md "The tunnel"). Tests: `python3 tunnel/test_tunnel.py` against a local
@@ -40,7 +40,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   thread rules) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
   that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool (its stdin step runs C:\TESTS\STDINEOF.COM, from tests/unit/stdineof.asm, started directly: it must
-  read end-of-file from the NUL the run tool gives it; and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
+  read end-of-file from the NUL the run tool gives it; a second run starts C:\TESTS\STDINEOF.BAT, so COMMAND.COM is its
+  parent: `STDINEOF under COMMAND.COM: ok`; and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
   that every request after the first continued a message thread, each small); `notes.bat` a progress note's blank
   lines trimmed and its break joined (`progress note: Two lines`), and a tool header after reply text starting in
   column 0 (`!headercol` peeks CGA memory: `tool header column: 0 (PASS)`); `threads.bat --timeout 300` a thread lost, a
@@ -55,7 +56,11 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (`trying again`); `chats.bat --timeout 240` the chat list and reopening (`tail screen: PASS`: `!tailscreen` peeks
   CGA memory for the reopened transcript; `-k` types keys into the BIOS buffer to drive the list, whose rows go to
   CLAWDOS.LOG as `chat list:` lines); `chatends.bat` chats the PC left mid-turn, reopened with `-c` and continued
-  (`reopened unans: ...` from the mock's `!reopened`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
+  (`reopened unans: ...` from the mock's `!reopened`); `shot.bat --timeout 240` the run tool's screenshots of
+  C:\TESTS\QUADS.COM (tests/unit/quads.asm: mode 4 quadrants and a diagonal; QUADT.COM sets text mode again, so only
+  `shot_at` sees it) in the harness and through the launcher (the mock checks each PNG, saves it as
+  build/mockshot-N.png and logs `image ok 320x200 (the call): palette ..., pixels CRC`; open the files to look), a
+  text screen, `shot_mode`, and the first image ending its thread; `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `loop.bat` the 25-round cap (`!loop` calls a tool until a request says
@@ -66,7 +71,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   for the resume, whose request continues the thread: `bigrun: the result came by thread continue`, then the tour and
   `resume state consumed`); `runrefuse.bat --timeout 120` a refusal on the round after a
   relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
-  (every lib/ parser, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
+  (every lib/ parser; tests/unit/shotunit.c the screenshot PNGs against tests/unit/pngref.py's, which the build puts in C:\TESTS, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
   which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
@@ -85,7 +90,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - CLAWDOS.EXE (src/clawdos) is the small launcher the user types: it runs HARNESS.EXE with `-launched`, and when a
   `run` tool call with `full_memory` makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
   memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The
-  files between them are in lib/relaunch.h; RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
+  files between them are in lib/relaunch.h (a screenshot's capture goes in SHOT.RAW, lib/shot.h: the launcher only
+  copies the screen, the resumed harness makes the PNG); RESUME.TXT stays until the resume has connected, so `CLAWDOS -resume`
   retries one that failed. `HARNESS.EXE` run on its own keeps programs inside its memory (the boot tests do that).
   A relaunch lesson: a fresh process must not
   reuse the local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's

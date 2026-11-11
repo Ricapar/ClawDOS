@@ -90,15 +90,21 @@ is in [API.md](API.md).
         failed before on DNS and mTCP's DHCP lease check.
   - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
         640 KB instead of ~285 KB. See [M6.2](#m62-full-memory-run) below.
-  - [ ] **M6.3 - Screenshots**: Claude sees what its programs draw. Capture
-        the CGA's 16 KB at exit (and optionally every few seconds into EMS
-        pages during the run) and send them as images. With no bridge, the
-        PNG has to be made on the DOS PC (a 16 KB CGA frame is small) and go
-        into the request as a base64 image block. The CGA's mode and palette
-        registers are write-only, so the mode comes from the BIOS data area
-        unless the tool call says (e.g. the mode 5 / 3D9h tricks WarGames
-        uses). 13 demo runs came back as "(screen text)"; fixes were "best
-        guess, untested visually".
+  - [x] **M6.3 - Screenshots**: Claude sees what its programs draw. `run`
+        takes `screenshot` (the screen as the last program left it, taken
+        before the chat comes back) or `shot_at` (seconds after the first
+        command starts, copied from the timer interrupt into an EMS page or a
+        16 KB block that exists for that run only, for programs that set text
+        mode again on exit). The mode comes from the BIOS data area (mode,
+        mode and colour register shadows) unless `shot_mode` / `shot_color`
+        say otherwise. The PC makes the PNG itself (indexed, rows taken from
+        both CGA banks, one stored deflate block, CRC-32 and Adler-32: about
+        16 KB, 22 KB as base64) and the `tool_result` carries it as an image
+        block after the text. Through the launcher the screen goes to the
+        resumed harness in SHOT.RAW, so the encoder stays out of CLAWDOS.EXE.
+        A raster effect that changes registers mid-frame cannot be captured
+        faithfully. Before this, 13 demo runs came back as "(screen text)";
+        fixes were "best guess, untested visually".
   - [ ] **M6.4 - Project history**: `snapshot`/`restore` tools on the DOS PC
         replace hand-made copies (XCOPY C:\WG C:\WG3 took 43 s); the
         conversation files in C:\CLAWDOS\CHATS already record what was written.

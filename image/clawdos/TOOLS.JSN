@@ -232,6 +232,27 @@
     "full_memory": {
      "type": "boolean",
      "description": "true: ClawDOS steps out of memory while the commands run, so they get about 450 KB instead of about 190 KB, at a cost of several seconds on the 8088 (ClawDOS reloads and reconnects). Use it for compilers, linkers and assemblers (TCC, TLINK, MAKE, NASM), for programs you just built, for .BAT files, and for anything that ran out of memory. Leave it out for DIR, TYPE, small tools and quick checks."
+    },
+    "screenshot": {
+     "type": "boolean",
+     "description": "true: the result also carries a picture of the screen as the last program left it (a 320x200 or 640x200 graphics screen as a PNG image; a text screen as its text). It adds about 22 KB to the conversation, which every later request carries again: ask for it when you need to see graphics, not on every run."
+    },
+    "shot_at": {
+     "type": "number",
+     "description": "Take the picture this many seconds after the first command starts (0.1 to 300) instead of at exit, for a program that sets text mode again before it ends. It is timed by the BIOS clock tick (18.2 a second): a program that takes over the timer interrupt without passing ticks on is never interrupted, and you get the screen at exit."
+    },
+    "shot_mode": {
+     "type": "string",
+     "enum": [
+      "320x200",
+      "640x200",
+      "text"
+     ],
+     "description": "What the screen is, when the program set the CGA's registers itself instead of through the BIOS (the picture otherwise follows the BIOS's video mode, palette and background). The picture is the video memory and the colour register at one moment: a raster effect that changes registers during the frame (per-line colours, split screens, tweaked modes) cannot be captured faithfully."
+    },
+    "shot_color": {
+     "type": "integer",
+     "description": "The colour register (3D9h) value to draw the picture with, 0-63, when the program wrote it itself: in 320x200 bits 0-3 are the background, bit 4 the bright foreground and bit 5 the palette (0 green/red/brown, 1 cyan/magenta/white); in 640x200 bits 0-3 are the foreground colour."
     }
    },
    "required": [

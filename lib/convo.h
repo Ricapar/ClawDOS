@@ -34,6 +34,12 @@ int  convo_assistant_done(Convo *c);
    end: the file then ends with a short error result for the call, or (when
    even that could not be written) the turn has been rolled back. */
 int  convo_tool_result(Convo *c, const char *id, const char *cp437Text, int isError, const char *note);
+/* The same with the PNG file `image` (NULL: none) after the text, as an image
+   block streamed from the file in base64. If the result cannot be written
+   with it (the file cannot be read, or a write failed), it is written without
+   it, with a note saying so; failing that as convo_tool_result. */
+int  convo_tool_result_image(Convo *c, const char *id, const char *cp437Text, int isError, const char *note,
+                             const char *image);
 /* The turn ended early. No assistant message yet: the whole turn is rolled
    back. Otherwise the file ends with a tool results message, which the next
    user text joins. Returns mergeNext: 0 the user's text or an assistant

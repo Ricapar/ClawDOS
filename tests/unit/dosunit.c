@@ -34,7 +34,7 @@ static int passed, failed;
 #define CHECK(name, cond) check((name), (cond), "")
 #define CHECK_STR(name, got, want) check_str((name), (got), (want))
 
-static void check(const char *name, int ok, const char *detail)
+void check(const char *name, int ok, const char *detail)
 {
     if (ok) {
         passed++;
@@ -2487,6 +2487,10 @@ static void testEndList(void)
           && t.out[t.len - 19] == '\n' && !strncmp(t.out + t.len - 18 - 34, "C:\\SKILLS\\S", 11));
 }
 
+
+void testShotPng(void);               /* shotunit.c: its own module, for room in the code segment */
+void testConvoImage(void);
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -2533,6 +2537,8 @@ int main(void)
     testConvoJoinText();
     testPrefixCache();
     testEndList();
+    testShotPng();
+    testConvoImage();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

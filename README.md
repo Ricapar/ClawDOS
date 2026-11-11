@@ -21,7 +21,7 @@ ClawDOS brings a modern AI coding agent experience to vintage hardware.
 | `sysinfo`, `dir`, `read`, `peek` | Look at the system, directories, files (text or hex) and memory |
 | `search` | Find text in files, with line numbers (much faster than running FIND) |
 | `write`, `edit`, `delete`, `mkdir`, `rename` | Common filesystem operations |
-| `run` | Run DOS commands read back what they printed: one per line, stopping at the first that fails |
+| `run` | Run DOS commands and read back what they printed: one per line, stopping at the first that fails. With `screenshot` (or `shot_at` seconds into the run) the result also carries a PNG of the CGA screen, made on the PC |
 | `poke`, `port` | Write memory, read or write I/O ports |
 | `play` | Play a GW-BASIC `PLAY` tune on the PC speaker |
 | `textart` | Print coloured CP437 text art into the chat |
@@ -330,7 +330,7 @@ against the mock API; the results are in docs/ROADMAP.md ("Benchmark").
 |---|---|
 | `src/harness/` | HARNESS.EXE, the chat client |
 | `src/clawdos/` | CLAWDOS.EXE, the launcher that runs it |
-| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `edit`, `search`, `ems`, `play` + `sound` (music) |
+| `lib/` | Reusable DOS pieces: `screen` (snow-free CGA, hardware scrolling, pinned footer), `console` (word-wrapping text stream with margins), the API client parts (`net` + `http` on mTCP, `apireq`, `apistream`, `sse`, `chunked`, `json`, `utf8`, `cfg`, `history`), and the tool executors: `toolapi`, `dosfs`, `memory`, `sysinfo`, `shell`, `shot` + `shotpng` (screenshots), `edit`, `search`, `ems`, `play` + `sound` (music) |
 | `tests/unit/` | DOSUNIT.EXE: unit tests for the hardware-free code (every parser above), run in DOSBox-X |
 | `tunnel/` | The TLS tunnel (`tunnel.py`) and the offline mock Messages API (`mockapi.py`) |
 | `src/boot/` | MBR and FreeDOS boot sector |

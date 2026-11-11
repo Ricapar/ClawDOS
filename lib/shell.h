@@ -21,6 +21,11 @@ extern "C" {
    command ends. The caller saves and restores the screen around this. */
 int shell_run(ToolCtx *t, const char *cmds);
 
+/* The text screen at vram (cols x 25 character and attribute words; 40 or
+   80 columns), right-trimmed and without trailing blank rows: as many of the
+   last rows as fit in `room` bytes. */
+void shell_screen_text(ToolCtx *t, unsigned room, const unsigned char __far *vram, unsigned cols);
+
 /* How many commands `cmds` holds, and its first one (trimmed) in `first`
    (SHELL_CMD_MAX + 1 bytes), for showing the call. */
 unsigned shell_count(const char *cmds, char *first);

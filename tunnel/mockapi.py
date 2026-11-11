@@ -28,6 +28,8 @@ so the boot tests can reject it. Stdlib only.
 
 import argparse
 import base64
+import binascii
+import hashlib
 import json
 import os
 import re
@@ -36,6 +38,7 @@ import socket
 import sys
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -68,6 +71,9 @@ THREAD_ERRORS = {'thread_not_found': (404, 'not_found_error'),
                  'thread_unsupported_request': (400, 'invalid_request_error'),
                  'thread_fingerprint_mismatch': (400, 'invalid_request_error')}
 CONTINUABLE = ('end_turn', 'tool_use')     # the stop reasons the harness continues after
+# The PNGs the PC's screenshots make (lib/shotpng.h): width -> bit depth, all 200 rows, indexed colour.
+CGA_SHAPES = {320: 2, 640: 1}
+SHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'build')
 
 
 class BadRequest(Exception):
@@ -120,6 +126,106 @@ def check_block(where, role, block):
         raise BadRequest(f'{where}: a tool_use block needs an id, a name and an input object')
     if kind == 'tool_result':
         check_tool_result(where, block)
+    if kind == 'image':
+        check_image(where, block)
+
+
+def check_image(where, block):
+    """Raise BadRequest unless an image block is a base64 PNG that decodes as one the PC makes."""
+    source = block.get('source')
+    if not isinstance(source, dict) or source.get('type') != 'base64':
+        raise BadRequest(f'{where}.source: must be a base64 source (the PC sends no URLs or files)')
+    if source.get('media_type') != 'image/png':
+        raise BadRequest(f'{where}.source.media_type: must be image/png, not {source.get("media_type")!r}')
+    data = source.get('data')
+    if not is_text(data):
+        raise BadRequest(f'{where}.source.data: required')
+    try:
+        png = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise BadRequest(f'{where}.source.data: not valid base64 ({e})') from e
+    try:
+        png_info(png)
+    except ValueError as e:
+        raise BadRequest(f'{where}.source.data: {e}') from e
+
+
+def png_info(png):
+    """(width, height, palette as RRGGBB strings, CRC-32 of the rows without their filter bytes) of a PNG
+    as the PC writes them; ValueError naming the first thing wrong. Checks the signature, every chunk's
+    CRC, IHDR against the CGA's two graphics modes, PLTE, the zlib stream (and so its Adler-32), the row
+    count and length, and IEND last."""
+    if png[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('not a PNG (bad signature)')
+    at, chunks = 8, []
+    while at < len(png):
+        if at + 12 > len(png):
+            raise ValueError(f'a chunk cut short at byte {at}')
+        size = int.from_bytes(png[at:at + 4], 'big')
+        kind, body = png[at + 4:at + 8], png[at + 8:at + 8 + size]
+        if len(body) != size or at + 12 + size > len(png):
+            raise ValueError(f'chunk {kind!r} cut short')
+        crc = int.from_bytes(png[at + 8 + size:at + 12 + size], 'big')
+        if zlib.crc32(kind + body) != crc:
+            raise ValueError(f'chunk {kind!r}: CRC {crc:08X}, should be {zlib.crc32(kind + body):08X}')
+        chunks.append((kind, body))
+        at += 12 + size
+    kinds = [k for k, _ in chunks]
+    if not chunks or kinds[0] != b'IHDR' or kinds[-1] != b'IEND' or kinds.count(b'IEND') != 1:
+        raise ValueError(f'chunks {[k.decode("latin-1") for k in kinds]}: IHDR must be first and IEND last')
+    ihdr = chunks[0][1]
+    if len(ihdr) != 13:
+        raise ValueError('IHDR must be 13 bytes')
+    width, height = int.from_bytes(ihdr[0:4], 'big'), int.from_bytes(ihdr[4:8], 'big')
+    depth, color, rest = ihdr[8], ihdr[9], ihdr[10:]
+    if height != 200 or CGA_SHAPES.get(width) != depth or color != 3 or rest != b'\0\0\0':
+        raise ValueError(f'IHDR {width}x{height}, depth {depth}, colour type {color}, options {list(rest)}: '
+                         f'want 320x200 at 2 bits or 640x200 at 1, indexed (3), no options')
+    plte = [b for k, b in chunks if k == b'PLTE']
+    if len(plte) != 1 or b'IDAT' not in kinds or kinds.index(b'PLTE') > kinds.index(b'IDAT'):
+        raise ValueError('one PLTE chunk must come before the image data')
+    if len(plte[0]) % 3 or not 0 < len(plte[0]) // 3 <= 1 << depth:
+        raise ValueError(f'PLTE of {len(plte[0])} bytes for {1 << depth} colours')
+    try:
+        raw = zlib.decompress(b''.join(b for k, b in chunks if k == b'IDAT'))
+    except zlib.error as e:
+        raise ValueError(f'the image data is not a good zlib stream ({e})') from e
+    row = width * depth // 8
+    if len(raw) != height * (row + 1):
+        raise ValueError(f'{len(raw)} bytes of image data, want {height} rows of 1 + {row}')
+    rows = [raw[y * (row + 1):(y + 1) * (row + 1)] for y in range(height)]
+    bad = [y for y, r in enumerate(rows) if r[0] != 0]
+    if bad:
+        raise ValueError(f'row {bad[0]} has filter {rows[bad[0]][0]}: the PC writes rows unfiltered (0)')
+    palette = [plte[0][i:i + 3].hex().upper() for i in range(0, len(plte[0]), 3)]
+    return width, height, palette, zlib.crc32(b''.join(r[1:] for r in rows))
+
+
+def images_of(messages):
+    """(the call it answers, the image block) for each image in messages: the call is the tool_use whose
+    tool_result carries it (None for an image the user sent)."""
+    found, calls = [], {}
+    for m in messages if isinstance(messages, list) else []:
+        content = m.get('content') if isinstance(m, dict) else None
+        for b in content if isinstance(content, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get('type') == 'tool_use':
+                calls[b.get('id')] = b
+            inner = b.get('content') if b.get('type') == 'tool_result' else [b]
+            call = calls.get(b.get('tool_use_id')) if b.get('type') == 'tool_result' else None
+            found += [(call, x) for x in inner if isinstance(inner, list) and isinstance(x, dict)
+                      and x.get('type') == 'image']
+    return found
+
+
+def describe_call(call):
+    """`run C:\\X.COM, screenshot=True` for a call (its first argument's value, then the others)."""
+    if not call:
+        return 'sent by the user'
+    args = list(call.get('input', {}).items())
+    first = [str(args[0][1])] if args else []
+    return ', '.join([f'{call.get("name")} {" ".join(first)}'.strip()] + [f'{k}={v}' for k, v in args[1:]])
 
 
 def check_tool_result(where, block):
@@ -135,6 +241,8 @@ def check_tool_result(where, block):
                 raise BadRequest(f'{where}.content.{k}: must be a text or image block')
             if inner['type'] == 'text' and not is_text(inner.get('text')):
                 raise BadRequest(f'{where}.content.{k}.text: text content blocks must contain non-whitespace text')
+            if inner['type'] == 'image':
+                check_image(f'{where}.content.{k}', inner)
     elif not isinstance(content, str):
         raise BadRequest(f'{where}.content: must be a string or a list of blocks')
 
@@ -539,6 +647,14 @@ class Threads:
                     raise BadRequest(f'{field}: must be absent on a continue request (the thread has it)')
             rec = self.previous(thread['previous_message_id'], req['messages'])
             self.check_continue(rec, fixed, req['messages'])
+            if images_of(req['messages']) and not images_of(rec.messages):
+                # as the real API does: the first image in a thread that had none ends it
+                prev = thread['previous_message_id']
+                del self.stored[prev]
+                self.gone.add(prev)
+                self.replay = ('thread_not_found', rec.messages + req['messages'])
+                raise ThreadError('thread_not_found', 'Thread not found (simulated: the first image in a thread '
+                                                      'that had none)')
             whole = {k: v for k, v in req.items() if k != 'thread'}
             whole['messages'] = rec.messages + req['messages']
             for field, value in (('system', rec.system), ('tools', rec.tools)):
@@ -745,6 +861,7 @@ class Handler(BaseHTTPRequestHandler):
         messages = req['messages']
         print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}, {settings_of(req)}, '
               f'{use.describe()}, {len(body)} bytes', flush=True)
+        self.server.note_images(messages)
         self.answer(req, conv, use, len(body))
 
     def drain(self):
@@ -828,6 +945,9 @@ class Handler(BaseHTTPRequestHandler):
                 print(f'redacted thinking round trip: {"PASS" if data in back else "FAIL"} '
                       f'({len(data)} bytes sent, {[len(x or "") for x in back]} back)', flush=True)
             print(f'tool {pending.call.name} -> {status}: {content[:100]!r}', flush=True)
+            for note in re.findall(r'\((?:no )?screenshot[^)]*\)|\(shot_at[^)]*\)|\(no memory for the shot_at[^)]*\)',
+                                   content):
+                print(f'tool {pending.call.name} {note}', flush=True)
             chat, gen = pending.chat, pending.gen
             self.resumed = pending.call
             server.pending = None
@@ -1061,6 +1181,31 @@ class MockServer(ThreadingHTTPServer):
         self.pending = None         # Pending tool call
         self._ids = 0
         self._lock = threading.Lock()
+        self.shot_dir = SHOT_DIR    # where the images that arrive are saved
+        self.images = {}            # (call id, digest of the base64) -> the file it was saved as
+
+    def note_images(self, messages):
+        """Log and save each image the first time it arrives (a replay sends them all again): the PNG
+        has passed check_image, so this says `image ok WxH (the call): ` with its palette and pixel
+        digest, and saves it as mockshot-N.png, N counting from 1 in the order they came."""
+        for call, block in images_of(messages):
+            data = block['source']['data']
+            key = ((call or {}).get('id'), hashlib.sha1(data.encode('ascii')).hexdigest())
+            with self._lock:
+                if key in self.images:
+                    continue
+                path = os.path.join(self.shot_dir, f'mockshot-{len(self.images) + 1}.png')
+                self.images[key] = path
+            png = base64.b64decode(data)
+            width, height, palette, pixels = png_info(png)
+            try:
+                os.makedirs(self.shot_dir, exist_ok=True)
+                with open(path, 'wb') as f:
+                    f.write(png)
+            except OSError as e:
+                path = f'not saved: {e}'
+            print(f'image ok {width}x{height} ({describe_call(call)}): palette {" ".join(palette)}, '
+                  f'pixels {pixels:08X}, {len(png)} bytes, {path}', flush=True)
 
     def next_id(self):
         with self._lock:

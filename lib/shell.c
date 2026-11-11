@@ -78,38 +78,48 @@ static void teletype(const char *s)
     }
 }
 
-/* The 80x25 text screen, right-trimmed, without trailing blank rows: as many
-   of the last rows as fit in `room` bytes. */
-static void snapshot(ToolCtx *t, unsigned room)
+void shell_screen_text(ToolCtx *t, unsigned room, const unsigned char __far *vram, unsigned cols)
 {
-    const unsigned short __far *vram = (const unsigned short __far *)MK_FP(0xB800, 0);
     char line[82];                    /* 80 columns, newline, NUL */
     unsigned char lens[25];
-    int row, first, last = -1, col, n;
-    unsigned used = 15;               /* "(screen text)\n" */
+    int row, first, last = -1;
+    unsigned col, n, used = 0;
 
     for (row = 0; row < 25; row++) {
         lens[row] = 0;
-        for (col = 0; col < 80; col++)
-            if ((vram[row * 80 + col] & 0xFF) > ' ')
+        for (col = 0; col < cols; col++)
+            if (vram[(row * cols + col) * 2] > ' ')
                 lens[row] = (unsigned char)(col + 1);
         if (lens[row])
             last = row;
     }
     for (first = last + 1; first > 0 && used + lens[first - 1] + 1 <= room; first--)
         used += lens[first - 1] + 1;
-    tout_puts(t, "(screen text)\n");
-    t->showFrom = t->len;             /* the transcript shows the rows, not the label */
     for (row = first; row <= last; row++) {
         n = lens[row];
         for (col = 0; col < n; col++) {
-            unsigned char c = (unsigned char)vram[row * 80 + col];
+            unsigned char c = vram[(row * cols + col) * 2];
             line[col] = c < ' ' ? ' ' : (char)c;
         }
         line[n] = '\n';
         line[n + 1] = 0;
         tout_puts(t, line);
     }
+}
+
+/* The screen's text when a program printed nothing through the BIOS. A
+   graphics screen has none: its bytes would read as rubbish. */
+static void snapshot(ToolCtx *t, unsigned room)
+{
+    unsigned char mode = *(const unsigned char __far *)MK_FP(0x40, 0x49);
+
+    if (mode > 3) {
+        tout_printf(t, "(graphics screen, video mode %u: no text; a screenshot shows it)\n", mode);
+        return;
+    }
+    tout_puts(t, "(screen text)\n");
+    t->showFrom = t->len;             /* the transcript shows the rows, not the label */
+    shell_screen_text(t, room > 15 ? room - 15 : 0, (const unsigned char __far *)MK_FP(0xB800, 0), 80);
 }
 
 /* Byte i of what was captured: the head, then the tail ring. */

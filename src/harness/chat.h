@@ -130,7 +130,7 @@ class Chat {
     int8_t setup(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
     int8_t rounds(int round);              /* the request/tool loop from this round on */
     int8_t finishTool(int round, const char *toolId, int status, ToolCtx *t);   /* -2: next round */
-    int8_t toolResult(const char *toolId, const char *text, int isError, const char *note);
+    int8_t toolResult(const char *toolId, const char *text, int isError, const char *note, const char *image = NULL);
     void   dropTurn(void);                 /* the whole turn rolled back, its count with it */
     int8_t connect(void);
     int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, 2 ask again, -1 failed */

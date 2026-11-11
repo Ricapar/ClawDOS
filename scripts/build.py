@@ -58,19 +58,19 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 APPS = {
     # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
-                             'lib/relaunch.c'], 'model': 's'},
+                             'lib/relaunch.c', 'lib/shot.c', 'lib/ems.c'], 'model': 's'},
     'harness.exe': {'sources': ['src/harness/harness.cpp', 'src/harness/chat.cpp', 'src/harness/tools.cpp', 'src/harness/memui.cpp',
                                'src/harness/chatui.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
-                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c',
+                               'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c', 'lib/shot.c', 'lib/shotpng.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/chatfile.c', 'lib/net.cpp', 'lib/http.cpp'],
                    'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
-    'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
+    'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'tests/unit/shotunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c',
-                                'lib/chatfile.c'],
+                                'lib/chatfile.c', 'lib/shotpng.c'],
                     'model': 'l', 'defines': ['DOSUNIT']},
 }
 
@@ -129,7 +129,7 @@ def run(cmd, show_output=True, **kw):
 
 
 def build_boot():
-    """Assemble the MBR, the FAT16 boot sector and the tour's stdin probe."""
+    """Assemble the MBR, the FAT16 boot sector and the test programs; write the reference PNGs."""
     os.makedirs(BUILD, exist_ok=True)
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'mbr.bin'),
          os.path.join(ROOT, 'src', 'boot', 'mbr.asm')])
@@ -139,6 +139,12 @@ def build_boot():
     # the tool tour's standard-input probe (C:\TESTS\STDINEOF.COM)
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'stdineof.com'),
          os.path.join(ROOT, 'tests', 'unit', 'stdineof.asm')])
+    # the screenshot tests' mode-4 picture (C:\TESTS\QUADS.COM, and QUADT.COM that restores text mode)
+    quads = os.path.join(ROOT, 'tests', 'unit', 'quads.asm')
+    run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'quads.com'), quads])
+    run([nasm(), '-f', 'bin', '-dRESTORE', '-o', os.path.join(BUILD, 'quadt.com'), quads])
+    # the PNGs DOSUNIT's encoder must reproduce byte for byte (C:\TESTS\REF320.PNG, REF640.PNG)
+    run([sys.executable, os.path.join(ROOT, 'tests', 'unit', 'pngref.py'), BUILD])
 
 
 # yyyymmdd.hhmm, local time, when this build ran.

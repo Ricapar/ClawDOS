@@ -41,7 +41,9 @@ ECHO HARNESS.EXE notchat exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CHATS\NOTCHAT.JSN > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c C:\AUTOEXEC.BAT -q -m "!reopened path"
 ECHO HARNESS.EXE path exit code %ERRORLEVEL% > COM1
-IF EXIST C:\AUTOEXEC.BAT ECHO AUTOEXEC.BAT still there > COM1
+REM an emptied file would still exist: its last line must still be in it
+FIND "ClawDOS ready." C:\AUTOEXEC.BAT > NUL
+IF NOT ERRORLEVEL 1 ECHO AUTOEXEC.BAT still whole > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c NOSUCH -q -m "!reopened nosuch"
 ECHO HARNESS.EXE nosuch exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1

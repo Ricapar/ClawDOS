@@ -11,8 +11,15 @@ void tools_toggle_safe(void);
 /* Started by CLAWDOS.EXE (-launched): run hands its commands to the launcher and
    returns TS_RELAUNCH instead of running them here (see relaunch.h). */
 void tools_set_launched(int on);
-/* After the relaunch: the note under the Run header, as the call would have shown. */
+/* After the relaunch: the launcher's capture (SHOT.RAW, when the run asked for
+   a screenshot) made into the result's screenshot as an in-process run makes
+   it, then the note under the Run header, as the call would have shown. */
+void tools_resume_shot(int status, ToolCtx *t);
 void tools_show_result(int status, const ToolCtx *t);
+/* The PNG the last call's result carries (a run's screenshot), or NULL;
+   tools_result_image_done once the result is written (the file goes). */
+const char *tools_result_image(void);
+void tools_result_image_done(void);
 
 /* Hand the screen over (scr_suspend into an EMS page or the heap; NULL when
    neither has room) and take it back, footer redrawn (ui_redraw). */

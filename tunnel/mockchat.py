@@ -209,11 +209,16 @@ def schema_types(path=DEFAULT_TOOLS):
 
 
 def typed_value(kind, text):
-    """A !tool value as its schema type: integers and booleans as JSON, not strings.
+    """A !tool value as its schema type: numbers and booleans as JSON, not strings.
     Text that doesn't parse stays a string, so the harness's own error can be tried."""
     if kind == 'integer':
         try:
             return int(text, 0)
+        except ValueError:
+            return text
+    if kind == 'number':
+        try:
+            return int(text) if text.lstrip('-').isdigit() else float(text)
         except ValueError:
             return text
     if kind == 'boolean' and text.lower() in ('true', 'false', '1', '0'):
