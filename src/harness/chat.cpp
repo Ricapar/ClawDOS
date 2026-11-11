@@ -91,7 +91,7 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
 }
 
 int8_t Chat::resume(Cfg *c, const char *providerId, const char *model, const char *hostOverride,
-                    ChatUi *u, const char *chatPath, const Convo *state)
+                    ChatUi *u, const char *chatPath, const Convo *state, const HistTurn *turn)
 {
     if (setup(c, providerId, hostOverride, u))
         return -1;
@@ -106,6 +106,10 @@ int8_t Chat::resume(Cfg *c, const char *providerId, const char *model, const cha
         err = errBuf;
         return -1;
     }
+    /* without the turn's start a rollback could only cut back to the reopen
+       point, leaving the call this resume answers without a result */
+    if (turn && hist_turn_set(turn))
+        ui->log("resume: the turn start does not fit the conversation file");
     convo = *state;
     setPrefixPath();                  /* the prefix the conversation started with */
     return connect();
@@ -215,7 +219,6 @@ int8_t Chat::preparePrefix(void)
     ApiPrefix x;
     ToolCtx t;
     char line[60];
-
     int status;
 
     if ((preLen = fs_size(prePath)) > 0)
@@ -568,16 +571,34 @@ int8_t Chat::turn(const char *text)
     return rounds(0);
 }
 
+void Chat::dropTurn(void)
+{
+    if (convo.assistantInTurn > 0)
+        turnsDone--;                  /* counted at the turn's first reply */
+    convo_rollback_turn(&convo);
+}
+
+/* A tool_result into the history: 0, or -1 when it could not be written and
+   the turn ends (convo_tool_result has left the file valid: a short error
+   result, or the whole turn rolled back). */
+int8_t Chat::toolResult(const char *toolId, const char *text, int isError, const char *note)
+{
+    int replied = convo.assistantInTurn > 0;
+    if (convo_tool_result(&convo, toolId, text, isError, note) == 0)
+        return 0;
+    if (replied && convo.assistantInTurn == 0)
+        turnsDone--;                  /* the turn went */
+    warn("Cannot write the conversation file.");
+    return -1;
+}
+
 /* The tool_result for a finished call: 1 stopped, 0 the turn is over, -2 next
-   round, -1 the result could not be written (convo_tool_result has left the
-   file valid). */
+   round, -1 the result could not be written. */
 int8_t Chat::finishTool(int round, const char *toolId, int status, ToolCtx *t)
 {
-    if (convo_tool_result(&convo, toolId, tools_result_text(status, t), status != TS_OK,
-                          round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL)) {
-        warn("Cannot write the conversation file.");
+    if (toolResult(toolId, tools_result_text(status, t), status != TS_OK,
+                   round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL))
         return -1;
-    }
     if (status == TS_STOPPED)
         return 1;
     if (round >= MAX_ROUNDS)          /* the model kept calling tools after the cap */
@@ -617,19 +638,15 @@ int8_t Chat::rounds(int round)
             ui->usage();
         if (!strcmp(as.stopReason, "refusal")) {
             warn("The model declined to answer that.");
-            if (convo.assistantInTurn == 1)
-                turnsDone--;          /* the whole turn goes */
-            convo_rollback_turn(&convo);
+            dropTurn();                   /* the whole turn goes, rounds before a relaunch too */
             return -1;
         }
         if (!strcmp(as.stopReason, "max_tokens"))
             warn("[reply cut off: too long]");
         if (strcmp(as.stopReason, "tool_use")) {
             if (as.hasTool                /* a call cut off before it was complete */
-                && convo_tool_result(&convo, as.toolId, "Error: reply cut off before the call was complete", 1, NULL)) {
-                warn("Cannot write the conversation file.");
+                && toolResult(as.toolId, "Error: reply cut off before the call was complete", 1, NULL))
                 return -1;
-            }
             return 0;
         }
         if (!as.hasTool)

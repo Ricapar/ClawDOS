@@ -288,6 +288,26 @@ int hist_turn_messages(void)
     return turnMessages;
 }
 
+void hist_turn_get(HistTurn *t)
+{
+    t->start = turnStart;
+    t->tailLen = savedTailLen;
+    t->tailAt = savedTailAt;
+    memcpy(t->tail, savedTail, sizeof t->tail);
+}
+
+int hist_turn_set(const HistTurn *t)
+{
+    if (fd < 0 || t->start < 0 || t->start > boundary || t->tailLen > sizeof savedTail
+        || (t->tailLen && (t->tailAt < 0 || t->tailAt + (long)t->tailLen != t->start)))
+        return -1;
+    turnStart = t->start;
+    savedTailLen = t->tailLen;
+    savedTailAt = t->tailAt;
+    memcpy(savedTail, t->tail, sizeof savedTail);
+    return 0;
+}
+
 int hist_reopen_last(unsigned n)
 {
     if (fd < 0 || flushBuf() || (long)n > end || n > sizeof savedTail)

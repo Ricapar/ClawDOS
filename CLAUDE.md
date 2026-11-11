@@ -37,9 +37,10 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   echoed back (`redacted thinking round trip: PASS`); `busy.bat` three 529s so the retries run out; `ends.bat` a refusal and a
   max_tokens cutoff; `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
-  for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
+  for the resume, then the tour and `resume state consumed`); `runrefuse.bat --timeout 120` a refusal on the round after a
+  relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
-  which turns on test seams such as lib/history.c's failing scan). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;

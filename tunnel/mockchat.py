@@ -81,6 +81,7 @@ SCENARIOS = {
     '!stall': 'thinks for 30 seconds before answering (spinner, Esc)',
     '!error': 'an API error after a few words',
     '!refuse': 'a refusal (the message is dropped from history)',
+    '!runrefuse': 'a full_memory run of VER, then a refusal (the whole turn goes, the run with it)',
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the connection drops mid-reply (once; the retry succeeds)',
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
@@ -366,6 +367,10 @@ class MockChat:
     def _cmd_refuse(self, _text):
         raise Refused('The model declined to answer that. (simulated)')
         yield   # never reached: makes this a generator like the others
+
+    def _cmd_runrefuse(self, _text):
+        yield ToolCall('run', {'command': 'VER', 'full_memory': True})
+        raise Refused('The model declined to answer that. (simulated, after a run)')
 
     def _cmd_cutoff(self, _text):
         yield from self.stream(LOREM.split('\n\n', maxsplit=1)[0])

@@ -103,7 +103,10 @@ link, an API error, a refusal) truncates the file back to the last complete
 message and then: no assistant message this turn, back to the turn start (the
 text goes back into the input box); an unanswered `tool_use`, a stopped result
 is appended so the next request is valid. A reply cut by `max_tokens` keeps
-what arrived and shows `[reply cut off: too long]`. `/new` starts a new file;
+what arrived and shows `[reply cut off: too long]`. A turn carried on after a
+relaunch keeps its start: RESUME.TXT holds the offset (and the closing bytes of
+a results message the turn's text joined), so a rollback there takes the whole
+turn as it would have before the relaunch. `/new` starts a new file;
 nothing deletes them.
 
 Writes collect in a 2 KB buffer (lib/history.c) and go to DOS when it fills

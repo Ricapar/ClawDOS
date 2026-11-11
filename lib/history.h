@@ -45,6 +45,18 @@ void hist_turn_begin(void);           /* remember where this turn started */
 int  hist_rollback_message(void);     /* truncate to the last boundary */
 int  hist_rollback_turn(void);        /* truncate to the turn start */
 int  hist_turn_messages(void);        /* complete messages since turn_begin */
+/* Where the current turn started and what hist_reopen_last took off, so a
+   relaunched harness can carry them over and a rollback there cuts to where
+   the turn really began. hist_turn_set goes after hist_open: -1 (and nothing
+   changes) if the values do not fit the file. */
+typedef struct HistTurn {
+    long start;                       /* the turn's start */
+    long tailAt;                      /* where the reopened message's tail was */
+    unsigned tailLen;                 /* 0: the turn reopened nothing */
+    char tail[8];
+} HistTurn;
+void hist_turn_get(HistTurn *t);
+int  hist_turn_set(const HistTurn *t);
 /* Take the last n bytes off the last complete message (its closing "]}") so
    more can be appended to it; finish with hist_message_done. A later
    hist_rollback_turn restores the message if turn_begin preceded the reopen. */

@@ -81,6 +81,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --reject '"content":"!refuse"' --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \
+	    --reject '"content":"!runrefuse"' --reject toolu_mock --reject "VALIDATION:"
 
 boottests-online: build ## the DOSBox-X boot tests that need the internet (NTP)
 	$(BOOTTEST) image/tests/clock.bat --expect "System time set" --expect "PING after the clock: 0"

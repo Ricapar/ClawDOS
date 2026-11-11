@@ -12,6 +12,7 @@
 #include "apistream.h"
 #include "sse.h"
 #include "convo.h"
+#include "history.h"
 
 struct ChatUi {
     void (*text)(const char *cp437, unsigned n);   /* visible reply text */
@@ -44,9 +45,10 @@ class Chat {
     int    answered(void) { return convo.assistantInTurn > 0; }
 
     /* Like init, but back into an existing conversation after a relaunch: the
-       history file, the convo state and the provider/model in use. */
+       history file, the convo state, where the turn began in the file (turn,
+       NULL if not known) and the provider/model in use. */
     int8_t resume(Cfg *cfg, const char *providerId, const char *model, const char *hostOverride,
-                  ChatUi *ui, const char *chatPath, const Convo *state);
+                  ChatUi *ui, const char *chatPath, const Convo *state, const HistTurn *turn);
     int    pendingRound(void) { return pendRound; }
     const char *pendingToolId(void) { return pendTool; }
     const Convo *state(void) { return &convo; }
@@ -102,6 +104,8 @@ class Chat {
     int8_t setup(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
     int8_t rounds(int round);              /* the request/tool loop from this round on */
     int8_t finishTool(int round, const char *toolId, int status, ToolCtx *t);   /* -2: next round */
+    int8_t toolResult(const char *toolId, const char *text, int isError, const char *note);
+    void   dropTurn(void);                 /* the whole turn rolled back, its count with it */
     int8_t connect(void);
     int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, 2 ask again, -1 failed */
     int8_t stream(void);                   /* as request, or 3: an overload before any text, retry it */

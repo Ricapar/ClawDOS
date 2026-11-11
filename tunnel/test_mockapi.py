@@ -206,6 +206,12 @@ class MockApiTest(unittest.TestCase):
         self.assertEqual(reply(self.ask('!refuse'))[2], 'refusal')
         self.assertEqual(reply(self.ask('!cutoff'))[2], 'max_tokens')
 
+    def test_runrefuse_is_a_full_memory_run_then_a_refusal(self):
+        replies, _ = self.turn('!runrefuse')
+        call = tool_block(replies[0][1])
+        self.assertEqual((call['name'], call['input']), ('run', {'command': 'VER', 'full_memory': True}))
+        self.assertEqual([r[2] for r in replies], ['tool_use', 'refusal'])
+
     def test_bigevent_is_one_huge_delta(self):
         events = self.ask('!bigevent')
         sizes = [len(d['delta']['text']) for e, d in events

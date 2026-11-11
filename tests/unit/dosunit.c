@@ -1545,6 +1545,73 @@ static void testHistoryWriteFails(void)
     remove("C:\\HISTTEST.JSN");
 }
 
+/* A relaunch: the turn's start and the reopened message's tail carried
+   over to a fresh open, so a rollback there cuts the whole turn. */
+static void testHistoryTurnCarried(void)
+{
+    static char text[4097];
+    static const char call[] =
+        "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"run\",\"input\":{}}]}";
+    HistTurn turn, bad;
+    Convo c, saved;
+    long before;
+
+    memset(text, 'z', 4096); text[4096] = 0;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    convo_init(&c);
+    convo_turn_begin(&c);
+    convo_user_text(&c, "first");
+    hist_puts(call);
+    convo_assistant_done(&c);
+    convo_tool_result(&c, "t1", "done", 0, NULL);
+    before = hist_size();                       /* ends with a results message */
+
+    /* a turn whose text joins the results, then a call that relaunches */
+    convo_turn_begin(&c);
+    convo_user_text(&c, "second");
+    hist_puts(call);
+    convo_assistant_done(&c);
+    hist_turn_get(&turn);
+    saved = c;
+    hist_close();
+    CHECK("turn carried: what get gives", turn.start == before && turn.tailLen == 2
+          && turn.tailAt == before - 2 && turn.tail[0] == ']' && turn.tail[1] == '}');
+
+    hist_open("C:\\HISTTEST.JSN");
+    bad = turn; bad.start = hist_size() + 1;
+    CHECK("turn carried: a start past the file is refused", hist_turn_set(&bad) == -1);
+    bad = turn; bad.tailAt = turn.start - 3;
+    CHECK("turn carried: a tail that does not end at the start is refused", hist_turn_set(&bad) == -1);
+    CHECK("turn carried: set", hist_turn_set(&turn) == 0);
+    c = saved;
+    /* neither the result nor its short form fits: the whole turn goes */
+    hist_test_write_ok = 0; hist_test_write_bad = 2;
+    CHECK("turn carried: rollback after a resume cuts the whole turn",
+          convo_tool_result(&c, "t1", text, 0, NULL) == -1 && hist_size() == before && histFileSize() == before
+          && c.mergeNext == 1 && c.assistantInTurn == 0 && endsWith(histTail(), "\"done\",\"is_error\":false}]}"));
+    hist_test_write_ok = -1; hist_test_write_bad = 0;
+    hist_close();
+
+    /* the history layer alone: a reopen, two messages, a fresh open, a rollback */
+    hist_open("C:\\HISTTEST.JSN");
+    convo_init(&c);
+    c.mergeNext = 1;
+    convo_turn_begin(&c);
+    hist_reopen_last(2);
+    hist_puts(",{\"type\":\"text\",\"text\":\"x\"}]}");
+    hist_message_done();
+    hist_puts(call);
+    hist_message_done();
+    hist_turn_get(&turn);
+    hist_close();
+    hist_open("C:\\HISTTEST.JSN");
+    CHECK("turn carried: the tail put back after a fresh open", hist_turn_set(&turn) == 0 && hist_rollback_turn() == 0
+          && hist_size() == before && endsWith(histTail(), "\"done\",\"is_error\":false}]}"));
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
 /* --- events too long for the SSE buffer (a long thinking signature) -------------- */
 
 static ApiStream bigAs;
@@ -1666,6 +1733,7 @@ int main(void)
     testHistoryCommit();
     testHistoryBuffer();
     testHistoryWriteFails();
+    testHistoryTurnCarried();
     testHistoryScanFails();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);

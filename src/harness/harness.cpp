@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <dos.h>
 #include <i86.h>
 #include <fcntl.h>
@@ -135,6 +136,8 @@ struct Resume {
     char chat[40], tool[64], provider[16], model[48], host[80], effort[8];
     int round, merge, mergeAtStart, assistant, safe, quick, quit, turns;
     long tokens;
+    HistTurn turn;                    /* where the turn began in the chat file */
+    int hasTurn;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -1133,6 +1136,8 @@ static int writeState(void)
 {
     FILE *f = fopen(RELAUNCH_STATE, "w");
     const Convo *c = chat.state();
+    HistTurn turn;
+    unsigned i;
 
     if (!f)
         return -1;
@@ -1143,6 +1148,11 @@ static int writeState(void)
             tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
     fprintf(f, "tokens %ld\nturns %d\n", chat.contextTokens(), chat.turns());
+    hist_turn_get(&turn);
+    fprintf(f, "turnstart %ld\ntailat %ld\ntail ", turn.start, turn.tailAt);
+    for (i = 0; i < turn.tailLen; i++)
+        fprintf(f, "%02X", (unsigned char)turn.tail[i]);
+    fprintf(f, "\n");
     return fclose(f) ? -1 : 0;
 }
 
@@ -1172,6 +1182,19 @@ static int readState(Resume *r)
             r->tokens = atol(v);
         if (!strcmp(line, "ticks"))
             r->ticks = strtoul(v, NULL, 10);
+        if (!strcmp(line, "turnstart")) {
+            r->turn.start = atol(v);
+            r->hasTurn = 1;
+        }
+        if (!strcmp(line, "tailat"))
+            r->turn.tailAt = atol(v);
+        if (!strcmp(line, "tail"))            /* hex, two digits a byte */
+            while (r->turn.tailLen < sizeof r->turn.tail && isxdigit(v[0]) && isxdigit(v[1])) {
+                char hex[3];
+                hex[0] = v[0]; hex[1] = v[1]; hex[2] = 0;
+                r->turn.tail[r->turn.tailLen++] = (char)strtoul(hex, NULL, 16);
+                v += 2;
+            }
     }
     fclose(f);
     return r->chat[0] && r->tool[0] ? 0 : -1;
@@ -1394,7 +1417,7 @@ int main(int argc, char *argv[])
         c.mergeAtStart = resumeState.mergeAtStart;
         c.assistantInTurn = resumeState.assistant;
         if (chat.resume(cfg, providerArg, resumeState.model, host[0] ? host : NULL, &chatUi,
-                        resumeState.chat, &c))
+                        resumeState.chat, &c, resumeState.hasTurn ? &resumeState.turn : NULL))
             fatal(chat.errorText());
         if (resumeState.effort[0])    /* F5 may have changed it from CLAWDOS.CFG's */
             strcpy(chat.provider()->effort, resumeState.effort);
