@@ -52,20 +52,30 @@ boot: build ## one boot test in DOSBox-X (TEST=image/tests/x.bat, default units)
 boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
 	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
-	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost"
-	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS"
-	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2"
-	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok"
-	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/overload.bat --mock --expect "before any text); trying again" --expect "stop=end_turn" \
-	    --reject "link lost"
+	    --reject "link lost" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/streamerr.bat --mock --expect "API error 529: Overloaded (simulated)" \
-	    --expect "Bad request (simulated, before any text)" --reject "trying again"
-	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
-	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
-	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn"
+	    --expect "Bad request (simulated, before any text)" --reject "trying again" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/loop.bat --mock --timeout 240 --expect "loop: 25 tool calls, then tool_choice none" \
+	    --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/think.bat --mock --expect "I should answer with a thinking block" \
+	    --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/redacted.bat --mock --expect "redacted thinking round trip: PASS" \
+	    --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/busy.bat --mock --expect "attempt 2 of 3); trying again" --expect "attempt 3 of 3)" \
+	    --reject "attempt 3 of 3); trying again" --reject "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/ends.bat --mock --expect "stop=refusal" --expect "The model declined" \
+	    --expect "stop=max_tokens" --expect "reply cut off" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
-	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed"
+	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" --reject "VALIDATION:"
 
 boottests-online: build ## the DOSBox-X boot tests that need the internet (NTP)
 	$(BOOTTEST) image/tests/clock.bat --expect "System time set" --expect "PING after the clock: 0"

@@ -12,7 +12,11 @@ that path.
 
 The API is stateless, so the conversation arrives whole in every request. A
 tool call ends one response (stop_reason tool_use) and the scenario resumes
-when the next request carries the tool_result. Stdlib only.
+when the next request carries the tool_result.
+
+Every request is validated as strictly as the real API would (see Validator): a
+violation is answered with HTTP 400 and logged on a line starting `VALIDATION:`,
+so the boot tests can reject it. Stdlib only.
 """
 
 import argparse
@@ -26,15 +30,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mockchat import (CHUNKS_TEXT, Disconnect, MockAPIError, MockChat, Refused, RetryOnce,  # noqa: E402
-                      ToolCall, ToolResult)
+from mockchat import (CHUNKS_TEXT, DEFAULT_TOOLS, Disconnect, HttpError, MockAPIError, MockChat,  # noqa: E402
+                      Ping, Refused, ToolCall, ToolResult)
 
 __all__ = ['CHUNKS_TEXT', 'make_server', 'main']
 
 MODEL = 'mock'
 SIGNATURE = base64.b64encode(bytes(range(256)) * 5).decode()   # 1708 bytes, like a real one
-DEFAULT_TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             'image', 'clawdos', 'TOOLS.JSN')
+API_VERSION = '2023-06-01'
 
 
 class BadRequest(Exception):
@@ -55,22 +58,272 @@ def tool_results(content):
     return [b for b in content if isinstance(b, dict) and b.get('type') == 'tool_result']
 
 
-def validate(messages):
+THINKING_TYPES = ('thinking', 'redacted_thinking')
+BLOCK_TYPES = {'user': ('text', 'image', 'tool_result'),
+               'assistant': ('text', 'thinking', 'redacted_thinking', 'tool_use')}
+KNOWN_BLOCK_TYPES = set(BLOCK_TYPES['user']) | set(BLOCK_TYPES['assistant'])
+
+
+def is_text(value):
+    """A string with something in it besides whitespace, which is what the API calls text."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def check_block(where, role, block):
+    """Raise BadRequest unless one content block is well formed for a message from `role`."""
+    if not isinstance(block, dict):
+        raise BadRequest(f'{where}: a content block must be an object')
+    kind = block.get('type')
+    if kind not in KNOWN_BLOCK_TYPES:
+        raise BadRequest(f'{where}.type: unknown block type {kind!r}')
+    if kind not in BLOCK_TYPES[role]:
+        article = 'an' if role == 'assistant' else 'a'
+        raise BadRequest(f'{where}: a {kind} block is not allowed in {article} {role} message')
+    if kind == 'text' and not is_text(block.get('text')):
+        raise BadRequest(f'{where}.text: text content blocks must contain non-whitespace text')
+    if kind == 'thinking' and not (isinstance(block.get('thinking'), str) and is_text(block.get('signature'))):
+        raise BadRequest(f'{where}: a thinking block needs a thinking string and a signature')
+    if kind == 'redacted_thinking' and not is_text(block.get('data')):
+        raise BadRequest(f'{where}.data: a redacted_thinking block needs its data')
+    if kind == 'tool_use' and not (is_text(block.get('id')) and is_text(block.get('name'))
+                                   and isinstance(block.get('input'), dict)):
+        raise BadRequest(f'{where}: a tool_use block needs an id, a name and an input object')
+    if kind == 'tool_result':
+        check_tool_result(where, block)
+
+
+def check_tool_result(where, block):
+    """Raise BadRequest unless a tool_result block is well formed."""
+    if not is_text(block.get('tool_use_id')):
+        raise BadRequest(f'{where}.tool_use_id: required')
+    if 'is_error' in block and not isinstance(block['is_error'], bool):
+        raise BadRequest(f'{where}.is_error: must be a boolean')
+    content = block.get('content', '')
+    if isinstance(content, list):
+        for k, inner in enumerate(content):
+            if not isinstance(inner, dict) or inner.get('type') not in ('text', 'image'):
+                raise BadRequest(f'{where}.content.{k}: must be a text or image block')
+            if inner['type'] == 'text' and not is_text(inner.get('text')):
+                raise BadRequest(f'{where}.content.{k}.text: text content blocks must contain non-whitespace text')
+    elif not isinstance(content, str):
+        raise BadRequest(f'{where}.content: must be a string or a list of blocks')
+
+
+def check_message(i, m, expected_ids, seen_ids):
+    """Check message i alone (its blocks, and its tool_use / tool_result ids against the message before).
+    Returns the tool_use ids an assistant message asks to have answered next."""
+    role, content = m['role'], m['content']
+    where = f'messages.{i}'
+    if isinstance(content, str):
+        content = [{'type': 'text', 'text': content}]
+        where += '.content'
+        blocks = [(where, b) for b in content]
+    elif isinstance(content, list) and content:
+        blocks = [(f'{where}.content.{j}', b) for j, b in enumerate(content)]
+    else:
+        raise BadRequest(f'{where}.content: must be a non-empty string or a non-empty array of blocks')
+    for path, b in blocks:
+        check_block(path, role, b)
+    if role == 'assistant':
+        ids = [b['id'] for _, b in blocks if b['type'] == 'tool_use']
+        for tool_id in ids:
+            if tool_id in seen_ids:
+                raise BadRequest(f'{where}: tool_use id {tool_id} is used twice')
+            seen_ids.add(tool_id)
+        return ids               # the next message must answer these
+    waiting, text_seen = list(expected_ids), False
+    for path, b in blocks:
+        if b['type'] != 'tool_result':
+            text_seen = True
+        elif text_seen:
+            raise BadRequest(f'{path}: tool_result blocks must come before any other content in the message')
+        elif b['tool_use_id'] not in waiting:
+            raise BadRequest(f'{path}: tool_use_id {b["tool_use_id"]} has no tool_use in the message before '
+                             f'(or is answered twice)')
+        else:
+            waiting.remove(b['tool_use_id'])
+    if waiting:
+        raise BadRequest(f'{where}: tool_use ids {waiting} in the message before have no tool_result')
+    return []
+
+
+def check_messages(messages):
     """Raise BadRequest unless messages is a well-formed, alternating conversation."""
     if not isinstance(messages, list) or not messages:
         raise BadRequest('messages must be a non-empty array')
-    last = None
+    expected, seen = [], set()
     for i, m in enumerate(messages):
         role = m.get('role') if isinstance(m, dict) else None
         if role not in ('user', 'assistant'):
             raise BadRequest(f'messages.{i}.role must be user or assistant')
-        if role == last:
-            raise BadRequest(f'messages.{i}: roles must alternate')
+        if role != ('user', 'assistant')[i % 2]:
+            raise BadRequest(f'messages.{i}: roles must alternate, starting with user')
         if 'content' not in m:
             raise BadRequest(f'messages.{i}.content is required')
-        last = role
-    if last != 'user':
+        expected = check_message(i, m, expected, seen)
+    if messages[-1]['role'] != 'user':
         raise BadRequest('the last message must be from the user')
+
+
+def check_tool_choice(choice, tools):
+    """Raise BadRequest unless tool_choice has one of the shapes the API accepts."""
+    if not isinstance(choice, dict):
+        raise BadRequest('tool_choice must be an object')
+    kind, extra = choice.get('type'), set(choice) - {'type'}
+    allowed = {'auto': {'disable_parallel_tool_use'}, 'any': {'disable_parallel_tool_use'},
+               'tool': {'name', 'disable_parallel_tool_use'}, 'none': set()}
+    if kind not in allowed:
+        raise BadRequest(f'tool_choice.type: must be auto, any, tool or none, not {kind!r}')
+    if extra - allowed[kind]:
+        raise BadRequest(f'tool_choice: unexpected fields {sorted(extra - allowed[kind])} for type {kind}')
+    if 'disable_parallel_tool_use' in choice and not isinstance(choice['disable_parallel_tool_use'], bool):
+        raise BadRequest('tool_choice.disable_parallel_tool_use: must be a boolean')
+    if kind == 'tool':
+        names = [t.get('name') for t in tools or [] if isinstance(t, dict)]
+        if choice.get('name') not in names:
+            raise BadRequest(f'tool_choice.name: {choice.get("name")!r} is not one of the tools')
+
+
+def check_system(system):
+    """Raise BadRequest unless system is a string or a list of text blocks."""
+    if isinstance(system, str):
+        return
+    if not isinstance(system, list):
+        raise BadRequest('system must be a string or an array of text blocks')
+    for k, b in enumerate(system):
+        if not isinstance(b, dict) or b.get('type') != 'text' or not is_text(b.get('text')):
+            raise BadRequest(f'system.{k}: must be a text block with non-whitespace text')
+
+
+def shape_of(messages):
+    """'user[text] assistant[thinking,text,tool_use] ...': the block types of each message, for the log."""
+    out = []
+    for m in messages if isinstance(messages, list) else []:
+        content = m.get('content') if isinstance(m, dict) else None
+        kinds = 'text' if isinstance(content, str) else ','.join(
+            str(b.get('type')) if isinstance(b, dict) else '?' for b in content) if isinstance(content, list) else '?'
+        out.append(f'{m.get("role") if isinstance(m, dict) else "?"}[{kinds}]')
+    return ' '.join(out)
+
+
+def same_json(a, b):
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+class Validator:
+    """Holds what the strict request check needs to remember between requests: for each
+    conversation (keyed by its first message), what the mock sent in it (the replies, to
+    check thinking blocks come back) and its system and tools (to check they stay put)."""
+
+    def __init__(self, tools_path):
+        self.tools_path = tools_path
+        self.conversations = {}
+        self.lock = threading.Lock()
+
+    def tools(self):
+        """The tools array of TOOLS.JSN, or None (with a warning) when the file is unreadable."""
+        try:
+            with open(self.tools_path, encoding='utf-8') as f:
+                return json.load(f)
+        except (OSError, ValueError) as e:
+            print(f'VALIDATION-WARN: cannot read {self.tools_path}, tools not checked: {e}', flush=True)
+            return None
+
+    def conversation(self, messages):
+        """The record of the conversation these messages belong to."""
+        key = json.dumps(messages[0], sort_keys=True)
+        return self.conversations.setdefault(key, {'replies': [], 'system': None, 'tools': None, 'seen': False})
+
+    def check(self, headers, body):
+        """Return (request, conversation) or raise BadRequest. `headers` maps names to values."""
+        headers = {k.lower(): v for k, v in headers.items()}
+        if headers.get('anthropic-version') != API_VERSION:
+            raise BadRequest(f'anthropic-version header: must be {API_VERSION}')
+        if headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
+            raise BadRequest('content-type header: must be application/json')
+        if headers.get('content-length') != str(len(body)):
+            raise BadRequest(f'content-length header {headers.get("content-length")!r} does not match '
+                             f'the {len(body)} body bytes')
+        try:
+            req = json.loads(body.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise BadRequest(f'invalid JSON: {e}') from e
+        if not isinstance(req, dict):
+            raise BadRequest('the body must be an object')
+        self.check_fields(req)
+        with self.lock:
+            conv = self.conversation(req['messages'])
+            self.check_thinking(conv, req['messages'])
+            self.check_stable(conv, req)
+        return req, conv
+
+    def check_fields(self, req):
+        """The request's top-level fields and its messages."""
+        if not is_text(req.get('model')):
+            raise BadRequest('model: required')
+        if not isinstance(req.get('max_tokens'), int) or isinstance(req['max_tokens'], bool) or req['max_tokens'] < 1:
+            raise BadRequest('max_tokens: required, a positive integer')
+        if 'messages' not in req:
+            raise BadRequest('messages: required')
+        if req.get('stream') is not True:
+            raise BadRequest('stream: must be true (the DOS PC reads server-sent events)')
+        tools = None
+        if 'tools' in req:
+            tools = self.tools()
+            if tools is not None and not same_json(req['tools'], tools):
+                raise BadRequest(f'tools: differ from {os.path.basename(self.tools_path)}')
+        if 'tool_choice' in req:
+            check_tool_choice(req['tool_choice'], req.get('tools'))
+        if 'system' in req:
+            check_system(req['system'])
+        check_messages(req['messages'])
+
+    def record(self, conv, thinking, text, tool_id):
+        """Remember a complete reply the mock sent (its thinking block, text and tool call id)."""
+        with self.lock:
+            conv['replies'].append({'thinking': thinking, 'text': text, 'tool_id': tool_id})
+
+    @staticmethod
+    def sent_reply(replies, blocks):
+        """The reply the mock sent that this assistant message repeats: by tool call id, else by text."""
+        ids = [b['id'] for b in blocks if b['type'] == 'tool_use']
+        text = text_of(blocks)
+        for r in reversed(replies):
+            if (ids and r['tool_id'] == ids[0]) or (not ids and r['tool_id'] is None and r['text'] == text):
+                return r
+        return None
+
+    def check_thinking(self, conv, messages):
+        """Every thinking block the mock sent comes back byte-identical and in place; any other
+        thinking block in the request is one the mock never sent."""
+        replies = conv['replies']
+        for i, m in enumerate(messages):
+            if m['role'] != 'assistant' or not isinstance(m['content'], list):
+                continue
+            blocks = m['content']
+            got = [(j, b) for j, b in enumerate(blocks) if b['type'] in THINKING_TYPES]
+            reply = self.sent_reply(replies, blocks)
+            if reply is not None:
+                if len(got) != 1 or got[0][0] != 0 or not same_json(got[0][1], reply['thinking']):
+                    raise BadRequest(f'messages.{i}.content: the {reply["thinking"]["type"]} block the mock sent '
+                                     f'did not come back unchanged as the first block')
+                continue
+            for j, b in got:
+                if not any(same_json(b, r['thinking']) for r in replies):
+                    raise BadRequest(f'messages.{i}.content.{j}: a {b["type"]} block the mock never sent')
+
+    def check_stable(self, conv, req):
+        """Within a conversation system and tools must not change, or the API drops or rejects thinking
+        blocks bound to the old ones. Task 5 makes the harness keep them stable; until it lands a change
+        only warns (VALIDATION-WARN:). Then make this raise BadRequest."""
+        now = {'system': req.get('system'), 'tools': req.get('tools')}
+        if not conv['seen']:
+            conv.update(now, seen=True)
+            return
+        for field in ('system', 'tools'):
+            if not same_json(now[field], conv[field]):
+                print(f'VALIDATION-WARN: {field} changed within a conversation', flush=True)
+                conv[field] = now[field]
 
 
 class Pending:
@@ -138,25 +391,33 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.split('?')[0] != '/v1/messages':
             self.send_error_json(404, 'not_found_error', f'Not found: {self.path}')
             return
+        body = b''
         try:
-            length = int(self.headers.get('Content-Length', '0'))
-            body = self.rfile.read(length)
-            try:
-                req = json.loads(body.decode('utf-8'))
-            except (ValueError, UnicodeDecodeError) as e:
-                raise BadRequest(f'invalid JSON: {e}') from e
-            if not isinstance(req, dict):
-                raise BadRequest('the body must be an object')
-            messages = req.get('messages')
-            validate(messages)
+            length = self.headers.get('Content-Length', '')
+            if not length.isdigit():
+                raise BadRequest(f'content-length header {length!r} is missing or not a number')
+            body = self.rfile.read(int(length))
+            req, conv = self.server.validator.check(self.headers, body)
         except BadRequest as e:
+            shape = shape_of(self.try_messages(body))
+            print(f'VALIDATION: {e} [messages: {shape}]', flush=True)
             self.send_error_json(400, 'invalid_request_error', str(e))
             return
+        messages = req['messages']
         print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}', flush=True)
-        self.answer(messages)
+        self.answer(req, conv)
 
-    def answer(self, messages):
+    @staticmethod
+    def try_messages(body):
+        """The messages of a request body that may not be valid JSON, for the log; [] when it has none."""
+        try:
+            return json.loads(body.decode('utf-8')).get('messages')
+        except (AttributeError, ValueError, UnicodeDecodeError):
+            return []
+
+    def answer(self, req, conv):
         server = self.server
+        messages = req['messages']
         last = messages[-1]
         results = tool_results(last['content'])
         pending = server.pending
@@ -178,13 +439,19 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(b, dict) and b.get('type') == 'thinking']
                 print(f'big signature round trip: {"PASS" if want in sigs else "FAIL"} '
                       f'({len(want)} bytes sent, {[len(x or "") for x in sigs]} back)', flush=True)
+            data = getattr(pending.chat, 'redacted_data', None)
+            if data and len(messages) >= 2:
+                back = [b.get('data') for b in messages[-2].get('content', [])
+                        if isinstance(b, dict) and b.get('type') == 'redacted_thinking']
+                print(f'redacted thinking round trip: {"PASS" if data in back else "FAIL"} '
+                      f'({len(data)} bytes sent, {[len(x or "") for x in back]} back)', flush=True)
             print(f'tool {pending.call.name} -> {status}: {content[:100]!r}', flush=True)
             chat, gen = pending.chat, pending.gen
             server.pending = None
         else:
             if results:
                 print('tool result with nothing pending; treating it as a new message', flush=True)
-            chat = MockChat(server.speed, state=server.state)
+            chat = MockChat(server.speed, state=server.state, tools_path=server.tools_path)
             chat.history = [(text_of(messages[i]['content']), text_of(messages[i + 1]['content']))
                             for i in range(0, len(messages) - 1, 2)]
             text = text_of(last['content'])
@@ -194,7 +461,9 @@ class Handler(BaseHTTPRequestHandler):
             if command == '!tooltour':
                 self.check_tools()
             gen = chat.respond(command, text)
-        self.stream_reply(chat, gen)
+        choice = req.get('tool_choice')
+        chat.no_tools = isinstance(choice, dict) and choice.get('type') == 'none'
+        self.stream_reply(chat, gen, conv)
 
     def check_tools(self):
         """Warn when the tour names a tool TOOLS.JSN does not define."""
@@ -209,16 +478,16 @@ class Handler(BaseHTTPRequestHandler):
         if missing:
             print(f'tool tour: tools missing from TOOLS.JSN: {", ".join(missing)}', flush=True)
 
-    def stream_reply(self, chat, gen):
+    def stream_reply(self, chat, gen, conv):
         """Run the scenario generator into one streamed message."""
         server = self.server
         try:
             first = next(gen)
         except StopIteration:
             first = ''
-        except RetryOnce:
-            self.send_error_json(529, 'overloaded_error', 'Overloaded (simulated; try again)',
-                                 [('retry-after', '1')])
+        except HttpError as e:
+            self.send_error_json(e.status, e.kind, str(e), [('retry-after', str(e.retry_after))]
+                                 if e.retry_after is not None else ())
             return
         except Refused:
             self.start_stream()
@@ -234,9 +503,11 @@ class Handler(BaseHTTPRequestHandler):
         self.start_stream()
         self.chunk_every = chat.chunk_every
         self.message_start()
-        self.thinking_block(getattr(chat, 'signature', None) or SIGNATURE)
+        thinking = self.thinking_block(chat)
         index = 1
         text_open = False
+        texts = []
+        tool_id = None
         out_tokens = 0
         stop = 'end_turn'
         item = first
@@ -244,22 +515,29 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 if isinstance(item, Exception):
                     raise item
-                if isinstance(item, ToolCall):
+                if isinstance(item, Ping):
+                    self.event('ping', {})
+                elif isinstance(item, ToolCall) and chat.no_tools:
+                    # tool_choice none: the model never calls a tool, so the scenario is told the call failed
+                    item.result = ToolResult('error', 'tool_choice is none: no tool call was made')
+                elif isinstance(item, ToolCall):
                     if text_open:
                         self.event('content_block_stop', {'index': index})
                         index += 1
                         text_open = False
-                    item.id = f'toolu_mock_{server.next_id()}'
+                    item.id = tool_id = f'toolu_mock_{server.next_id()}'
                     self.tool_use_block(index, item)
                     index += 1
                     server.pending = Pending(chat, gen, item)
                     stop = 'tool_use'
                     break
-                if item:
+                elif item:
                     if not text_open:
-                        self.event('content_block_start', {'index': index, 'content_block': {'type': 'text', 'text': ''}})
+                        self.event('content_block_start',
+                                   {'index': index, 'content_block': {'type': 'text', 'text': ''}})
                         text_open = True
                     self.event('content_block_delta', {'index': index, 'delta': {'type': 'text_delta', 'text': item}})
+                    texts.append(item)
                     out_tokens += max(1, len(item) // 4)
                     if item.endswith('[reply cut off: too long]'):
                         stop = 'max_tokens'
@@ -282,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
                                      'usage': {'output_tokens': out_tokens}})
         self.event('message_stop', {})
         self.end_stream()
+        server.validator.record(conv, thinking, ''.join(texts) if texts else None, tool_id)
 
     def message_start(self):
         self.event('message_start', {'message': {
@@ -290,10 +569,26 @@ class Handler(BaseHTTPRequestHandler):
             'usage': {'input_tokens': 1200, 'cache_creation_input_tokens': 0,
                       'cache_read_input_tokens': 1000, 'output_tokens': 1}}})
 
-    def thinking_block(self, signature=SIGNATURE):
-        self.event('content_block_start', {'index': 0, 'content_block': {'type': 'thinking', 'thinking': '', 'signature': ''}})
+    def thinking_block(self, chat):
+        """Send the reply's first block and return it as the DOS PC should echo it back: a redacted_thinking
+        block (!redacted), else a thinking block (text from !think, the signature from !bigsig or a default)."""
+        data = getattr(chat, 'redacted_data', None)
+        if data:
+            block = {'type': 'redacted_thinking', 'data': data}
+            self.event('content_block_start', {'index': 0, 'content_block': block})
+            self.event('content_block_stop', {'index': 0})
+            return block
+        text = getattr(chat, 'thinking_text', '')
+        signature = getattr(chat, 'signature', None) or SIGNATURE
+        self.event('content_block_start',
+                   {'index': 0, 'content_block': {'type': 'thinking', 'thinking': '', 'signature': ''}})
+        third = -(-len(text) // 3)
+        for i in range(0, len(text), third or 1):
+            self.event('content_block_delta', {'index': 0, 'delta': {'type': 'thinking_delta',
+                                                                     'thinking': text[i:i + third]}})
         self.event('content_block_delta', {'index': 0, 'delta': {'type': 'signature_delta', 'signature': signature}})
         self.event('content_block_stop', {'index': 0})
+        return {'type': 'thinking', 'thinking': text, 'signature': signature}
 
     def tool_use_block(self, index, call):
         self.event('content_block_start', {'index': index, 'content_block': {
@@ -301,7 +596,8 @@ class Handler(BaseHTTPRequestHandler):
         text = json.dumps(call.args)
         cut = len(text) // 2
         for piece in (text[:cut], text[cut:]):
-            self.event('content_block_delta', {'index': index, 'delta': {'type': 'input_json_delta', 'partial_json': piece}})
+            self.event('content_block_delta',
+                       {'index': index, 'delta': {'type': 'input_json_delta', 'partial_json': piece}})
         self.event('content_block_stop', {'index': index})
 
 
@@ -313,6 +609,7 @@ class MockServer(ThreadingHTTPServer):
         super().__init__(addr, Handler)
         self.speed = speed
         self.tools_path = tools_path
+        self.validator = Validator(tools_path)
         self.state = {}             # what already happened (!drop, !retry)
         self.pending = None         # Pending tool call
         self._ids = 0
@@ -332,7 +629,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--port', type=int, default=18023)
     ap.add_argument('--speed', type=float, default=1.0, help='scale the delays (0: none)')
-    ap.add_argument('--tools', default=DEFAULT_TOOLS, help='TOOLS.JSN, to check the tool tour against')
+    ap.add_argument('--tools', default=DEFAULT_TOOLS, help='TOOLS.JSN, to check requests and the tool tour against')
     a = ap.parse_args()
     server = make_server(a.port, a.speed, a.tools)
     print(f'mock Messages API on port {a.port} (speed {a.speed})', flush=True)

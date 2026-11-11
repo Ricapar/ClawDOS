@@ -160,6 +160,17 @@ accept = 8443
 connect = api.anthropic.com:443
 ```
 
-`python3 tunnel/mockapi.py [--port 18023] [--speed 1]` fakes the API on plain
+`python3 tunnel/mockapi.py [--port 18023] [--speed 1] [--tools FILE]` fakes the API on plain
 HTTP for tests and offline use: `CLAWDOS 10.0.2.2:18023` from an emulator, then
-`!help` for its scenarios.
+`!help` for its scenarios. It validates every request as strictly as the real API
+and answers a violation with HTTP 400 (`invalid_request_error`, naming the problem
+and the message index) and a `VALIDATION:` line in its log, which the boot tests
+reject. It checks: the `anthropic-version`, `content-type` and `content-length`
+headers; valid JSON with `model`, `max_tokens`, `messages` and `stream` true;
+`tools` equal to TOOLS.JSN; the `tool_choice` shapes; the first message from the
+user, alternating roles, no empty text blocks, known block types; each `tool_use`
+answered by exactly one `tool_result` in the next message, ahead of any text block;
+every thinking and redacted_thinking block the mock sent coming back byte-identical
+and first in its message. `system` and `tools` changing within a conversation only
+logs `VALIDATION-WARN:` until the harness keeps them stable. With `tool_choice`
+none the mock makes no tool call.

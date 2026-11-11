@@ -1,6 +1,8 @@
 """Tests for the mock Messages API server (python3 tunnel/test_mockapi.py)."""
 
+import contextlib
 import http.client
+import io
 import json
 import os
 import sys
@@ -29,7 +31,8 @@ def sse_events(body):
 
 
 def reply(events):
-    """(text, blocks, stop_reason, tool input text) reassembled from events."""
+    """(text, blocks, stop_reason, tool input text) reassembled from events. The blocks are as the DOS PC
+    stores them (and the API wants them back): thinking and text filled in, a tool_use with its input."""
     blocks, text, stop, tool_json = [], [], None, []
     for event, d in events:
         if event == 'content_block_start':
@@ -38,13 +41,26 @@ def reply(events):
             delta = d['delta']
             if delta['type'] == 'text_delta':
                 text.append(delta['text'])
+                blocks[-1]['text'] += delta['text']
+            elif delta['type'] == 'thinking_delta':
+                blocks[-1]['thinking'] += delta['thinking']
             elif delta['type'] == 'signature_delta':
                 blocks[-1]['signature'] = blocks[-1].get('signature', '') + delta['signature']
             elif delta['type'] == 'input_json_delta':
                 tool_json.append(delta['partial_json'])
+        elif event == 'content_block_stop' and blocks[d['index']]['type'] == 'tool_use':
+            blocks[d['index']]['input'] = json.loads(''.join(tool_json))
         elif event == 'message_delta':
             stop = d['delta'].get('stop_reason')
     return ''.join(text), blocks, stop, ''.join(tool_json)
+
+
+def tool_result(block, content='ok', is_error=False):
+    return {'type': 'tool_result', 'tool_use_id': block['id'], 'content': content, 'is_error': is_error}
+
+
+def tool_block(blocks):
+    return [b for b in blocks if b['type'] == 'tool_use'][0]
 
 
 class MockApiTest(unittest.TestCase):
@@ -60,16 +76,43 @@ class MockApiTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
-    def post(self, messages, raw=None):
+    def post(self, messages, raw=None, extra=None, headers=None):
+        """POST a valid request (headers and fields as HARNESS.EXE sends them) with `extra` fields added
+        and `headers` replacing the defaults; returns (status, response headers, body)."""
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
-        body = raw if raw is not None else json.dumps({'model': 'mock', 'max_tokens': 16000, 'stream': True,
-                                                        'messages': messages}).encode()
-        conn.request('POST', '/v1/messages', body=body, headers={'Content-Type': 'application/json'})
-        r = conn.getresponse()
-        data = r.read()
-        headers = dict((k.lower(), v) for k, v in r.getheaders())
+        fields = dict({'model': 'mock', 'max_tokens': 16000, 'stream': True, 'messages': messages}, **(extra or {}))
+        body = raw if raw is not None else json.dumps(fields).encode()
+        sent = {'Content-Type': 'application/json', 'anthropic-version': '2023-06-01'}
+        sent.update(headers or {})
+        with contextlib.redirect_stdout(self.log):
+            conn.request('POST', '/v1/messages', body=body, headers=sent)
+            r = conn.getresponse()
+            data = r.read()
+        response_headers = dict((k.lower(), v) for k, v in r.getheaders())
         conn.close()
-        return r.status, headers, data
+        return r.status, response_headers, data
+
+    def setUp(self):
+        self.log = io.StringIO()     # what the server prints during a request: the mock's log
+
+    def turn(self, text, choice=lambda calls: None, extra=None):
+        """Play a whole turn the way HARNESS.EXE does, echoing each reply back, answering every tool call
+        ok; `choice(n)` gives the tool_choice for the request after n tool calls. Returns the replies as
+        (text, blocks, stop) and the final messages."""
+        messages, replies = [{'role': 'user', 'content': text}], []
+        for calls in range(40):
+            fields = dict(extra or {})
+            if choice(calls):
+                fields['tool_choice'] = choice(calls)
+            status, _, data = self.post(messages, extra=fields)
+            self.assertEqual(status, 200, data)
+            said, blocks, stop, _ = reply(sse_events(data))
+            replies.append((said, blocks, stop))
+            if stop != 'tool_use':
+                return replies, messages
+            messages += [{'role': 'assistant', 'content': blocks},
+                         {'role': 'user', 'content': [tool_result(tool_block(blocks), 'sysinfo says hi')]}]
+        self.fail('the turn never ended')
 
     def ask(self, text):
         status, headers, data = self.post([{'role': 'user', 'content': text}])
@@ -94,14 +137,12 @@ class MockApiTest(unittest.TestCase):
         self.assertEqual(stop, 'tool_use')
         tool = [b for b in blocks if b['type'] == 'tool_use'][0]
         self.assertEqual(tool['name'], 'read')
-        self.assertEqual(json.loads(tool_json), {'path': 'C:\\A.TXT'})
+        self.assertEqual(tool['input'], {'path': 'C:\\A.TXT'})
+        self.assertEqual(json.loads(tool_json), tool['input'])
         self.assertIn('Calling read.', text)
-        assistant = [{'type': 'text', 'text': text},
-                     {'type': 'tool_use', 'id': tool['id'], 'name': 'read', 'input': json.loads(tool_json)}]
-        result = [{'type': 'tool_result', 'tool_use_id': tool['id'], 'content': '    1 hi', 'is_error': False}]
         status, _, data = self.post([{'role': 'user', 'content': '!tool read path=C:\\A.TXT'},
-                                     {'role': 'assistant', 'content': assistant},
-                                     {'role': 'user', 'content': result}])
+                                     {'role': 'assistant', 'content': blocks},
+                                     {'role': 'user', 'content': [tool_result(tool, '    1 hi')]}])
         self.assertEqual(status, 200)
         text2, _, stop2, _ = reply(sse_events(data))
         self.assertIn('read -> ok:     1 hi', text2)
@@ -175,6 +216,110 @@ class MockApiTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn('alternate', json.loads(data)['error']['message'])
 
+    def test_a_violation_is_a_400_in_the_apis_shape_and_a_validation_line_in_the_log(self):
+        messages = [{'role': 'user', 'content': 'a'}, {'role': 'assistant', 'content': ' '}]
+        status, headers, data = self.post(messages + [{'role': 'user', 'content': 'b'}])
+        self.assertEqual(status, 400)
+        self.assertEqual(headers['content-length'], str(len(data)))
+        error = json.loads(data)
+        self.assertEqual(error['type'], 'error')
+        self.assertEqual(error['error']['type'], 'invalid_request_error')
+        self.assertIn('messages.1.content', error['error']['message'])
+        line = [x for x in self.log.getvalue().splitlines() if x.startswith('VALIDATION:')]
+        self.assertEqual(len(line), 1)
+        self.assertIn('messages.1.content', line[0])
+        self.assertIn('user[text] assistant[text] user[text]', line[0])    # the shape of the request
+
+    def test_header_violations_are_400_over_http(self):
+        status, _, data = self.post([{'role': 'user', 'content': 'a'}], headers={'anthropic-version': '1999-01-01'})
+        self.assertEqual(status, 400)
+        self.assertIn('anthropic-version', json.loads(data)['error']['message'])
+        status, _, data = self.post([{'role': 'user', 'content': 'a'}], headers={'Content-Type': 'text/plain'})
+        self.assertEqual(status, 400)
+        self.assertIn('content-type', json.loads(data)['error']['message'])
+
+    def test_tool_choice_none_means_no_tool_call(self):
+        replies, _ = self.turn('!tool read path=C:\\A.TXT', choice=lambda calls: {'type': 'none'})
+        self.assertEqual([r[2] for r in replies], ['end_turn'])
+        self.assertFalse([b for b in replies[0][1] if b['type'] == 'tool_use'])
+        self.assertIn('read -> error: tool_choice is none', replies[0][0])
+        replies, _ = self.turn('!tool read path=C:\\A.TXT', choice=lambda calls: {'type': 'auto'})
+        self.assertEqual([r[2] for r in replies], ['tool_use', 'end_turn'])
+
+    def test_loop_calls_a_tool_until_tool_choice_is_none(self):
+        # as HARNESS.EXE does: 25 rounds with tools, the 26th with tool_choice none
+        auto = {'type': 'auto', 'disable_parallel_tool_use': True}
+        replies, messages = self.turn('!loop', choice=lambda calls: {'type': 'none'} if calls >= 25 else auto)
+        self.assertEqual(len(replies), 26)
+        self.assertEqual([r[2] for r in replies], ['tool_use'] * 25 + ['end_turn'])
+        self.assertIn('after 25 tool calls', replies[-1][0])
+        self.assertIn('loop: 25 tool calls, then tool_choice none', self.log.getvalue())
+
+    def test_ping_events_come_between_the_deltas(self):
+        events = self.ask('!ping')
+        kinds = [e for e, _ in events]
+        self.assertGreaterEqual(kinds.count('ping'), 6)
+        first_delta = kinds.index('content_block_delta')
+        last_delta = len(kinds) - 1 - kinds[::-1].index('content_block_delta')
+        self.assertIn('ping', kinds[first_delta:last_delta])
+        self.assertEqual(reply(events)[0], 'Ping events between the text deltas. ')
+
+    def test_think_streams_thinking_text_then_a_signature_and_gets_it_back(self):
+        events = self.ask('!think')
+        deltas = [d['delta']['type'] for e, d in events if e == 'content_block_delta']
+        self.assertEqual(deltas[:4], ['thinking_delta'] * 3 + ['signature_delta'])
+        text, blocks, _, _ = reply(events)
+        self.assertEqual(blocks[0]['type'], 'thinking')
+        self.assertEqual(blocks[0]['thinking'], mockchat.THINKING_TEXT)
+        self.assertGreaterEqual(len(blocks[0]['signature']), 1500)
+        self.assertIn('had text and a signature', text)
+        # echoed back whole it is accepted; changed, it is not
+        messages = [{'role': 'user', 'content': '!think'}, {'role': 'assistant', 'content': blocks},
+                    {'role': 'user', 'content': 'more'}]
+        self.assertEqual(self.post(messages)[0], 200)
+        blocks[0] = dict(blocks[0], thinking=blocks[0]['thinking'][:-1])
+        status, _, data = self.post(messages)
+        self.assertEqual(status, 400)
+        self.assertIn('did not come back unchanged', json.loads(data)['error']['message'])
+
+    def test_redacted_thinking_then_a_tool_call_then_the_check(self):
+        events = self.ask('!redacted')
+        _, blocks, stop, _ = reply(events)
+        self.assertEqual(blocks[0], {'type': 'redacted_thinking', 'data': mockchat.REDACTED_DATA})
+        self.assertEqual(stop, 'tool_use')
+        replies, _ = self.turn('!redacted')
+        self.assertEqual([r[2] for r in replies], ['tool_use', 'end_turn'])
+        self.assertIn('redacted thinking round trip: PASS', self.log.getvalue())
+        self.assertIn('came back unchanged', replies[-1][0])
+
+    def test_http_errors_come_once_with_retry_after_then_a_normal_reply(self):
+        for command, status, kind in (('!400', 400, 'invalid_request_error'), ('!401', 401, 'authentication_error'),
+                                      ('!429', 429, 'rate_limit_error')):
+            got, headers, data = self.post([{'role': 'user', 'content': command}])
+            self.assertEqual(got, status, command)
+            self.assertEqual(headers.get('retry-after'), '1')
+            self.assertEqual(headers.get('content-length'), str(len(data)))
+            self.assertEqual(json.loads(data)['error']['type'], kind)
+            text, _, stop, _ = reply(self.ask(command))
+            self.assertIn(f'first request got a {status}', text)
+            self.assertEqual(stop, 'end_turn')
+
+    def test_busy_is_529_three_times_then_a_reply(self):
+        for attempt in (1, 2, 3):
+            status, headers, data = self.post([{'role': 'user', 'content': '!busy'}])
+            self.assertEqual(status, 529)
+            self.assertEqual(headers.get('retry-after'), '1')
+            self.assertIn(f'attempt {attempt} of 3', json.loads(data)['error']['message'])
+        self.assertIn('after three 529s', reply(self.ask('!busy'))[0])
+
+    def test_help_lists_every_scenario(self):
+        text = reply(self.ask('!help'))[0]
+        for command in mockchat.SCENARIOS:
+            self.assertIn(command, text)
+        for command in ('!loop', '!ping', '!think', '!redacted', '!400', '!401', '!429', '!busy'):
+            self.assertIn(command, mockchat.SCENARIOS)
+            self.assertTrue(hasattr(mockchat.MockChat, '_cmd_' + command[1:]))
+
     def test_history_is_read_from_the_request(self):
         status, _, data = self.post([{'role': 'user', 'content': 'first'},
                                      {'role': 'assistant', 'content': [{'type': 'text', 'text': 'ok'}]},
@@ -196,21 +341,200 @@ class MockApiTest(unittest.TestCase):
                 deltas = [d['delta']['text'] for e, d in events
                           if e == 'content_block_delta' and d['delta']['type'] == 'text_delta']
                 break
-            tool = [b for b in blocks if b['type'] == 'tool_use'][0]
-            args = json.loads(tool_json)
-            calls.append((tool['name'], args))
-            result = [{'type': 'tool_result', 'tool_use_id': tool['id'], 'content': 'x' * 4000, 'is_error': False}]
-            messages += [{'role': 'assistant', 'content': [{'type': 'text', 'text': text},
-                                                           {'type': 'tool_use', 'id': tool['id'],
-                                                            'name': tool['name'], 'input': args}]},
-                         {'role': 'user', 'content': result}]
+            tool = tool_block(blocks)
+            calls.append((tool['name'], json.loads(tool_json)))
+            messages += [{'role': 'assistant', 'content': blocks},
+                         {'role': 'user', 'content': [tool_result(tool, 'x' * 4000)]}]
         self.assertEqual(calls, [('read', {'path': mockchat.BENCH_FILE})] * 20
                          + [('run', {'command': 'VER', 'full_memory': True})])
         self.assertEqual(stop, 'end_turn')
         self.assertEqual(text, mockchat.BENCH_REPLY)
         self.assertTrue(3900 <= len(text) <= 4300)
         self.assertEqual(len({len(d) for d in deltas[:-1]}), 1)    # fixed-size pieces: no randomness
-        self.assertGreater(len(json.dumps(messages)), 80 * 1024)
+
+
+SIG = 'sig-' * 500
+THINKING = {'type': 'thinking', 'thinking': 'hm', 'signature': SIG}
+REDACTED = {'type': 'redacted_thinking', 'data': 'opaque' * 50}
+CALL = {'type': 'tool_use', 'id': 'toolu_1', 'name': 'sysinfo', 'input': {}}
+USER = {'role': 'user', 'content': 'go'}
+
+
+def assistant(*blocks):
+    return {'role': 'assistant', 'content': list(blocks)}
+
+
+def results(*ids, after=()):
+    return {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': i, 'content': 'x'} for i in ids]
+            + list(after)}
+
+
+class ValidatorTest(unittest.TestCase):
+    """The strict request check, rule by rule: each has a request it accepts and one it rejects."""
+
+    def setUp(self):
+        self.v = mockapi.Validator(mockapi.DEFAULT_TOOLS)
+        with open(mockapi.DEFAULT_TOOLS, encoding='utf-8') as f:
+            self.tools = json.load(f)
+
+    def fresh(self):
+        """A conversation of its own, so what one check changes does not warn in the next."""
+        self.count = getattr(self, 'count', 0) + 1
+        return [{'role': 'user', 'content': f'go {self.count}'}]
+
+    def request(self, messages=None, **fields):
+        """A valid request with `fields` changed (None removes one): (headers, body)."""
+        req = {'model': 'm', 'max_tokens': 100, 'stream': True,
+               'messages': self.fresh() if messages is None else messages}
+        for k, v in fields.items():
+            if v is None:
+                req.pop(k, None)
+            else:
+                req[k] = v
+        body = json.dumps(req).encode()
+        return {'Anthropic-Version': '2023-06-01', 'Content-Type': 'application/json',
+                'Content-Length': str(len(body))}, body
+
+    def ok(self, messages=None, **fields):
+        return self.v.check(*self.request(messages, **fields))
+
+    def bad(self, fragment, messages=None, **fields):
+        with self.assertRaises(mockapi.BadRequest) as cm:
+            self.v.check(*self.request(messages, **fields))
+        self.assertIn(fragment, str(cm.exception))
+
+    def test_headers(self):
+        headers, body = self.request()
+        self.v.check(dict(headers, **{'Content-Type': 'application/json; charset=utf-8'}), body)
+        for name, value, fragment in (('Anthropic-Version', '2024-01-01', 'anthropic-version'),
+                                      ('Content-Type', 'text/plain', 'content-type'),
+                                      ('Content-Length', str(len(body) + 1), 'content-length')):
+            with self.assertRaises(mockapi.BadRequest) as cm:
+                self.v.check(dict(headers, **{name: value}), body)
+            self.assertIn(fragment, str(cm.exception))
+        for name in ('Anthropic-Version', 'Content-Type', 'Content-Length'):
+            with self.assertRaises(mockapi.BadRequest):
+                self.v.check({k: v for k, v in headers.items() if k != name}, body)
+
+    def test_body_must_be_json_with_the_required_fields(self):
+        self.ok()
+        headers, _ = self.request()
+        for body in (b'{not json', b'[]', json.dumps({'model': 'm'}).encode() + b' x'):
+            with self.assertRaises(mockapi.BadRequest):
+                self.v.check(dict(headers, **{'Content-Length': str(len(body))}), body)
+        self.bad('model', model=None)
+        self.bad('max_tokens', max_tokens=None)
+        self.bad('max_tokens', max_tokens='100')
+        self.bad('max_tokens', max_tokens=0)
+        headers, body = self.request()
+        body = json.dumps({k: v for k, v in json.loads(body).items() if k != 'messages'}).encode()
+        with self.assertRaises(mockapi.BadRequest) as cm:
+            self.v.check(dict(headers, **{'Content-Length': str(len(body))}), body)
+        self.assertIn('messages', str(cm.exception))
+
+    def test_stream_must_be_true(self):
+        self.ok(stream=True)
+        self.bad('stream', stream=False)
+        self.bad('stream', stream=None)
+
+    def test_tools_must_equal_tools_jsn_when_present(self):
+        self.ok(tools=None)
+        self.ok(tools=self.tools)
+        self.bad('tools', tools=self.tools[:-1])
+        self.bad('tools', tools=[dict(self.tools[0], description='changed')] + self.tools[1:])
+
+    def test_tool_choice_shapes(self):
+        for choice in ({'type': 'auto'}, {'type': 'auto', 'disable_parallel_tool_use': True}, {'type': 'any'},
+                       {'type': 'tool', 'name': 'sysinfo'}, {'type': 'none'}):
+            self.ok(tools=self.tools, tool_choice=choice)
+        for choice in ('auto', {'type': 'sometimes'}, {'type': 'none', 'disable_parallel_tool_use': True},
+                       {'type': 'auto', 'disable_parallel_tool_use': 'yes'}, {'type': 'tool'},
+                       {'type': 'tool', 'name': 'nonesuch'}, {'type': 'auto', 'extra': 1}):
+            self.bad('tool_choice', tools=self.tools, tool_choice=choice)
+
+    def test_system_is_a_string_or_text_blocks(self):
+        self.ok(system='be brief')
+        self.ok(system=[{'type': 'text', 'text': 'be brief', 'cache_control': {'type': 'ephemeral'}}])
+        self.bad('system', system=[{'type': 'text', 'text': ''}])
+        self.bad('system', system=7)
+
+    def test_first_message_is_the_users_and_roles_alternate(self):
+        self.ok([USER, assistant({'type': 'text', 'text': 'a'}), USER])
+        self.bad('alternate', [assistant({'type': 'text', 'text': 'a'}), USER])
+        self.bad('alternate', [USER, USER])
+        said = {'type': 'text', 'text': 'a'}
+        self.bad('alternate', [USER, assistant(said), assistant(said)])
+        self.bad('last message', [USER, assistant({'type': 'text', 'text': 'a'})])
+        self.bad('messages', [])
+        self.bad('role', [{'role': 'system', 'content': 'x'}])
+
+    def test_no_empty_text_blocks(self):
+        self.ok([{'role': 'user', 'content': [{'type': 'text', 'text': 'x'}]}])
+        for content in ('', '  \n', [{'type': 'text', 'text': ''}], [{'type': 'text', 'text': ' '}], []):
+            self.bad('messages.0', [{'role': 'user', 'content': content}])
+        self.bad('messages.2.content.1.text', [USER, assistant({'type': 'text', 'text': 'a'}), {
+            'role': 'user', 'content': [{'type': 'text', 'text': 'b'}, {'type': 'text', 'text': ''}]}])
+
+    def test_block_types_are_known_and_belong_to_their_role(self):
+        conv = self.ok([USER])[1]
+        self.v.record(conv, THINKING, 'a', None)
+        self.v.record(conv, REDACTED, 'z', None)
+        self.ok([USER, assistant(THINKING, {'type': 'text', 'text': 'a'}), USER])
+        self.bad('unknown block type', [{'role': 'user', 'content': [{'type': 'video'}]}])
+        self.bad('not allowed in a user message', [{'role': 'user', 'content': [THINKING]}])
+        self.bad('not allowed in an assistant', [USER, assistant({'type': 'tool_result', 'tool_use_id': 'x'}), USER])
+        self.bad('thinking block needs', [USER, assistant({'type': 'thinking', 'thinking': 'x'}), USER])
+        self.bad('redacted_thinking block needs', [USER, assistant({'type': 'redacted_thinking'}), USER])
+
+    def test_every_tool_use_is_answered_by_exactly_one_tool_result(self):
+        self.ok([USER, assistant(CALL), results('toolu_1')])
+        self.bad('no tool_result', [USER, assistant(CALL), USER])
+        self.bad('toolu_2', [USER, assistant(CALL, dict(CALL, id='toolu_2')), results('toolu_1')])
+        self.bad('no tool_use', [USER, assistant(CALL), results('toolu_1', 'toolu_9')])
+        self.bad('answered twice', [USER, assistant(CALL), results('toolu_1', 'toolu_1')])
+        self.bad('no tool_use', [USER, assistant({'type': 'text', 'text': 'a'}), results('toolu_1')])
+        self.bad('no tool_use', [results('toolu_1')])
+        self.bad('used twice', [USER, assistant(CALL), results('toolu_1'), assistant(CALL), results('toolu_1')])
+        self.ok([USER, assistant(CALL), results('toolu_1'), assistant(dict(CALL, id='toolu_2')), results('toolu_2')])
+
+    def test_tool_results_come_before_text_in_their_message(self):
+        note = {'type': 'text', 'text': 'Tool limit reached; answer now without tools.'}
+        self.ok([USER, assistant(CALL), results('toolu_1', after=[note])])
+        late = {'role': 'user', 'content': [note, {'type': 'tool_result', 'tool_use_id': 'toolu_1', 'content': 'x'}]}
+        self.bad('before any other content', [USER, assistant(CALL), late])
+
+    def test_thinking_blocks_come_back_byte_identical_and_in_place(self):
+        v = self.v
+        conv = self.ok([USER])[1]
+        v.record(conv, THINKING, 'a', None)
+        v.record(conv, REDACTED, None, 'toolu_1')
+        self.ok([USER, assistant(REDACTED, CALL), results('toolu_1'),
+                 assistant(THINKING, {'type': 'text', 'text': 'a'}), USER])
+        self.bad('did not come back', [USER, assistant(dict(REDACTED, data='opaque'), CALL), results('toolu_1')])
+        self.bad('did not come back', [USER, assistant(CALL), results('toolu_1')])             # dropped
+        self.bad('did not come back', [USER, assistant(CALL, REDACTED), results('toolu_1')])   # moved
+        self.bad('did not come back', [USER, assistant(REDACTED, REDACTED, CALL), results('toolu_1')])
+        self.bad('did not come back', [USER, assistant(dict(THINKING, signature=SIG[:-1]),
+                                                       {'type': 'text', 'text': 'a'}), USER])
+        self.bad('did not come back', [USER, assistant({'type': 'text', 'text': 'a'}), USER])
+        self.bad('never sent', [USER, assistant(dict(THINKING, thinking='other'), {'type': 'text', 'text': 'b'}), USER])
+
+    def test_system_and_tools_changing_within_a_conversation_only_warns_for_now(self):
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            self.ok([USER], system='one', tools=self.tools)
+            self.ok([USER], system='one', tools=self.tools)
+            self.assertEqual(log.getvalue(), '')
+            self.ok([USER], system='two', tools=self.tools)
+            self.ok([USER], system='two', tools=self.tools)
+            self.ok([USER], system='two')
+        self.assertEqual(log.getvalue().count('VALIDATION-WARN: system changed'), 1)
+        self.assertEqual(log.getvalue().count('VALIDATION-WARN: tools changed'), 1)
+        self.assertNotIn('VALIDATION:', log.getvalue())
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):                  # another conversation: its own system
+            self.ok([{'role': 'user', 'content': 'other'}], system='three')
+        self.assertEqual(log.getvalue(), '')
 
 
 if __name__ == '__main__':

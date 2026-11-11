@@ -53,8 +53,16 @@ class MockAPIError(Exception):
         self.kind = kind
 
 
-class RetryOnce(Exception):
-    """Answer this request with HTTP 529; the next one succeeds."""
+class HttpError(Exception):
+    """Answer this request with an HTTP error instead of a stream (the message is the error's text)."""
+
+    def __init__(self, status, kind, message, retry_after=None):
+        super().__init__(message)
+        self.status, self.kind, self.retry_after = status, kind, retry_after
+
+
+class Ping:
+    """Yielded by a scenario: send a `ping` event here."""
 
 
 CHUNKS_TEXT = ('Chunked transfer with the chunks cut every seven bytes, so sizes, CRLFs, event '
@@ -76,11 +84,19 @@ SCENARIOS = {
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the connection drops mid-reply (once; the retry succeeds)',
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
+    '!busy': 'HTTP 529 three times (retry-after 1), so the DOS PC\'s retries run out; then a normal reply',
+    '!400': 'HTTP 400 once (invalid_request_error, retry-after 1), then a normal reply',
+    '!401': 'HTTP 401 once (authentication_error, retry-after 1), then a normal reply',
+    '!429': 'HTTP 429 once (rate_limit_error, retry-after 1), then a normal reply',
     '!overload': 'an overloaded_error event before any text (once; the retry succeeds)',
     '!badstream': 'an invalid_request_error event before any text (not retried)',
     '!chunks': 'chunked encoding split every 7 bytes',
     '!bigevent': 'one text delta of 20 KB (over the DOS PC\'s event buffer)',
     '!bigsig': 'a 24 KB thinking signature (over the event buffer), a tool call, then a check that it came back intact',
+    '!loop': 'calls sysinfo again and again until tool_choice is none (the 25-round cap), then answers',
+    '!ping': 'ping events between the text deltas',
+    '!think': 'a thinking block with thinking_delta text and a signature, then text',
+    '!redacted': 'a redacted_thinking block, a tool call, then a check that the block came back',
     '!history': 'what the mock remembers of this conversation',
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
     '!bigrun': 'the same with full_memory (under CLAWDOS.EXE the harness steps out of memory): !bigrun MEM /C',
@@ -96,11 +112,17 @@ BIG_SIGNATURE = base64.b64encode(bytes(range(256)) * 72).decode()   # 24576 byte
 
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
-TOOLS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'image', 'clawdos', 'TOOLS.JSN')
+DEFAULT_TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             'image', 'clawdos', 'TOOLS.JSN')
+
+# The text of a !think block, and the opaque data of a !redacted one.
+THINKING_TEXT = ('The user sent !think. I should answer with a thinking block that has some text in it, '
+                 'streamed as thinking_delta pieces ahead of the signature, so the DOS PC keeps it in the '
+                 'history and sends it back unchanged on the next request.')
+REDACTED_DATA = base64.b64encode(bytes(range(256)) * 3).decode()
 
 
-def schema_types(path=TOOLS_PATH):
+def schema_types(path=DEFAULT_TOOLS):
     """{tool: {argument: JSON type}} from TOOLS.JSN, the one source of the schemas."""
     with open(path, encoding='utf-8') as f:
         return {t['name']: {k: v.get('type') for k, v in t['input_schema']['properties'].items()}
@@ -251,8 +273,10 @@ SMALL_TALK = [
 class MockChat:
     """One mock conversation. `speed` scales every delay; 0 means no waiting."""
 
-    def __init__(self, speed=1.0, seed=None, state=None):
+    def __init__(self, speed=1.0, seed=None, state=None, tools_path=DEFAULT_TOOLS):
         self.speed = speed
+        self.tools_path = tools_path                       # the TOOLS.JSN the server checks requests against
+        self.no_tools = False                              # the request said tool_choice none (set by the server)
         self.rng = random.Random(seed)
         self.history = []   # (user text, reply text) pairs
         self.state = state if state is not None else {}   # shared across requests: what already happened
@@ -350,8 +374,32 @@ class MockChat:
     def _cmd_retry(self, _text):
         if not self.state.get('retried'):
             self.state['retried'] = True
-            raise RetryOnce()
+            raise HttpError(529, 'overloaded_error', 'Overloaded (simulated; try again)', retry_after=1)
         yield from self.stream('The first request got a 529; this is the second attempt.')
+
+    def _cmd_busy(self, _text):
+        self.state['busy'] = self.state.get('busy', 0) + 1
+        if self.state['busy'] <= 3:
+            raise HttpError(529, 'overloaded_error', f'Overloaded (simulated, attempt {self.state["busy"]} of 3)',
+                            retry_after=1)
+        yield from self.stream('The overload is over; this is the reply after three 529s.')
+
+    def once_http_error(self, status, kind, message):
+        """Raise the error the first time, so the next request gets the reply."""
+        key = f'http{status}'
+        if not self.state.get(key):
+            self.state[key] = True
+            raise HttpError(status, kind, message, retry_after=1)
+        yield from self.stream(f'The first request got a {status}; this is the reply after it.')
+
+    def _cmd_400(self, _text):
+        yield from self.once_http_error(400, 'invalid_request_error', 'Bad request (simulated)')
+
+    def _cmd_401(self, _text):
+        yield from self.once_http_error(401, 'authentication_error', 'invalid x-api-key (simulated)')
+
+    def _cmd_429(self, _text):
+        yield from self.once_http_error(429, 'rate_limit_error', 'Rate limited (simulated)')
 
     def _cmd_overload(self, _text):
         if not self.state.get('overloaded'):
@@ -378,6 +426,30 @@ class MockChat:
         yield from self.call('sysinfo', {})
         yield from self.stream(' The long signature made the round trip.')
 
+    def _cmd_loop(self, _text):
+        calls = 0
+        while not self.no_tools:
+            calls += 1
+            yield f'Loop call {calls}.'
+            yield ToolCall('sysinfo', {})
+        print(f'loop: {calls} tool calls, then tool_choice none', flush=True)
+        yield f'Loop ended after {calls} tool calls: tool_choice was none, so I answer without a tool.'
+
+    def _cmd_ping(self, _text):
+        for word in ('Ping', 'events', 'between', 'the', 'text', 'deltas.'):
+            yield Ping()
+            yield word + ' '
+        yield Ping()
+
+    def _cmd_think(self, _text):
+        self.thinking_text = THINKING_TEXT
+        yield from self.stream('The thinking block had text and a signature.')
+
+    def _cmd_redacted(self, _text):
+        self.redacted_data = REDACTED_DATA
+        yield from self.call('sysinfo', {})
+        yield from self.stream(' The redacted thinking block came back unchanged.')
+
     def _cmd_history(self, _text):
         yield from self.stream(self.describe_history())
 
@@ -394,7 +466,7 @@ class MockChat:
             yield 'Usage: !tool NAME key=value ...'
             return
         try:
-            types = schema_types().get(words[0], {})
+            types = schema_types(self.tools_path).get(words[0], {})
         except (OSError, ValueError, KeyError):
             types = {}
         args = {}
