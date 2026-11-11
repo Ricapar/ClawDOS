@@ -8,6 +8,8 @@ Ordinary messages get a canned conversational reply. Messages starting with
 """
 
 import base64
+import json
+import os
 import random
 import re
 import shlex
@@ -88,6 +90,30 @@ BIG_SIGNATURE = base64.b64encode(bytes(range(256)) * 72).decode()   # 24576 byte
 
 PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E D. C8 C2'
 
+TOOLS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          'image', 'clawdos', 'TOOLS.JSN')
+
+
+def schema_types(path=TOOLS_PATH):
+    """{tool: {argument: JSON type}} from TOOLS.JSN, the one source of the schemas."""
+    with open(path, encoding='utf-8') as f:
+        return {t['name']: {k: v.get('type') for k, v in t['input_schema']['properties'].items()}
+                for t in json.load(f)}
+
+
+def typed_value(kind, text):
+    """A !tool value as its schema type: integers and booleans as JSON, not strings.
+    Text that doesn't parse stays a string, so the harness's own error can be tried."""
+    if kind == 'integer':
+        try:
+            return int(text, 0)
+        except ValueError:
+            return text
+    if kind == 'boolean' and text.lower() in ('true', 'false', '1', '0'):
+        return text.lower() in ('true', '1')
+    return text
+
+
 # The tool tour: (tool, args, expected status, text the result must contain).
 # Tools HARNESS.EXE doesn't have yet are expected to fail; flip them as they land.
 TOUR_EXPECT = {}
@@ -105,7 +131,7 @@ def tour_steps():
         ('read', {'path': 'c:\\dostour.txt'}, 'ok', 'Hello from the tool tour.'),
         ('edit', {'path': 'C:\\DOSTOUR.TXT', 'old': 'Second line.', 'new': 'Second line, edited.\nThird.'},
          'ok', '    3 Third.'),
-        ('read', {'path': 'C:\\DOSTOUR.TXT', 'start': '3'}, 'ok', '    3 Third.'),
+        ('read', {'path': 'C:\\DOSTOUR.TXT', 'start': 3}, 'ok', '    3 Third.'),
         ('edit', {'path': 'C:\\DOSTOUR.TXT', 'old': 'Not in the file', 'new': 'x'}, 'error', 'not found'),
         ('search', {'text': 'EDITED', 'path': 'C:\\DOSTOUR.TXT C:\\NOPE\\*.C'}, 'ok',
          '    2: Second line, edited.'),
@@ -114,7 +140,7 @@ def tour_steps():
         ('delete', {'path': 'C:\\DOSTOUR2.TXT'}, 'ok', None),
         ('delete', {'path': 'C:\\*.BAT'}, 'error', None),
         ('poke', {'addr': '0000:04F0', 'bytes': '44 4F 53'}, 'ok', None),
-        ('peek', {'addr': '0000:04F0', 'len': '3'}, 'ok', '44 4F 53'),
+        ('peek', {'addr': '0000:04F0', 'len': 3}, 'ok', '44 4F 53'),
         ('port', {'port': '61'}, 'ok', None),
         ('textart', {'text': '~EClaw~CDOS'}, 'ok', None),
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
@@ -350,10 +376,14 @@ class MockChat:
         if not words:
             yield 'Usage: !tool NAME key=value ...'
             return
+        try:
+            types = schema_types().get(words[0], {})
+        except (OSError, ValueError, KeyError):
+            types = {}
         args = {}
         for w in words[1:]:
             key, _, value = w.strip('"').partition('=')
-            args[key] = value.strip('"')
+            args[key] = typed_value(types.get(key), value.strip('"'))
         yield from self.call(words[0], args)
 
     def _cmd_play(self, _text):

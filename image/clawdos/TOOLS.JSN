@@ -11,7 +11,7 @@
  },
  {
   "name": "dir",
-  "description": "List a directory: names, sizes, dates, attributes. DOS 8.3 names.",
+  "description": "List a directory: names, sizes, dates, attributes. DOS 8.3 names. One directory, not its subdirectories. At most 150 entries and about 4000 characters per result; past that a last line says how many more there are, so narrow the pattern to see them.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -28,7 +28,7 @@
  },
  {
   "name": "read",
-  "description": "Read a file. Text files come back as numbered lines; binary files as a hex dump. Keep reads targeted: the link is slow.",
+  "description": "Read a file. Text files come back as numbered lines; binary files as a hex dump. A result holds about 4000 characters (around 60 lines of 60 columns) and never ends mid-line: when it stops early its last line says which line comes next, to pass as start. Lines over 160 characters are cut. Keep reads targeted: the link is slow.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -37,19 +37,19 @@
      "description": "File to read, e.g. C:\\AUTOEXEC.BAT"
     },
     "start": {
-     "type": "string",
+     "type": "integer",
      "description": "Text: first line number (default 1)"
     },
     "lines": {
-     "type": "string",
+     "type": "integer",
      "description": "Text: how many lines (default 100)"
     },
     "offset": {
-     "type": "string",
+     "type": "integer",
      "description": "Binary: first byte offset (default 0)"
     },
     "bytes": {
-     "type": "string",
+     "type": "integer",
      "description": "Binary: how many bytes, up to 256 (default 256)"
     }
    },
@@ -61,7 +61,7 @@
  },
  {
   "name": "search",
-  "description": "Find the lines that contain a piece of text in files, with line numbers: much faster than running FIND. Plain text, not a pattern; case is ignored unless case=1. Binary files are skipped.",
+  "description": "Find the lines that contain a piece of text in files, with line numbers: much faster than running FIND. Plain text, not a pattern; case is ignored unless case is true. Binary files are skipped. Each path is searched on its own level, not in subdirectories. At most 80 matches and about 4000 characters per result (lines shown up to 100 columns); past that a last line counts the other matches, so narrow the search.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -74,8 +74,8 @@
      "description": "Files to search: a file, a directory or a wildcard; several separated by spaces, e.g. C:\\WG\\*.C C:\\WG\\*.H"
     },
     "case": {
-     "type": "string",
-     "description": "1 to match case exactly"
+     "type": "boolean",
+     "description": "true to match case exactly"
     }
    },
    "required": [
@@ -96,8 +96,8 @@
      "description": "Address as hex seg:off, e.g. 0040:0000"
     },
     "len": {
-     "type": "string",
-     "description": "Bytes to dump, up to 256 (decimal or 0x hex; default 64)"
+     "type": "integer",
+     "description": "Bytes to dump, up to 256 (default 64)"
     }
    },
    "required": [
@@ -108,7 +108,7 @@
  },
  {
   "name": "write",
-  "description": "Create or overwrite a text file (newlines are written as CRLF), or append to one. The user may be asked to approve. The text may be at most 12000 bytes per call: write a longer file in pieces, the first with append=0 and the rest with append=1.",
+  "description": "Create or overwrite a text file (newlines are written as CRLF), or append to one. The user may be asked to approve. The text may be at most 12000 bytes per call: write a longer file in pieces, the first without append and the rest with append true.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -121,8 +121,8 @@
      "description": "The file's contents"
     },
     "append": {
-     "type": "string",
-     "description": "1 to append instead of overwriting"
+     "type": "boolean",
+     "description": "true to append instead of overwriting"
     }
    },
    "required": [
@@ -134,7 +134,7 @@
  },
  {
   "name": "edit",
-  "description": "Change part of a text file: replace an exact piece of its text with new text, instead of rewriting the whole file with write. old must match the file exactly, spaces, tabs and line breaks included (copy it from a read, without the line numbers), and occur once unless all=1. You get the changed lines back, numbered. The file keeps its line ends. Files up to 60000 bytes. The user may be asked to approve.",
+  "description": "Change part of a text file: replace an exact piece of its text with new text, instead of rewriting the whole file with write. old must match the file exactly, spaces, tabs and line breaks included (copy it from a read, without the line numbers), and occur once unless all is true. You get the changed lines back, numbered. The file keeps its line ends. Files up to 60000 bytes. The user may be asked to approve.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -151,8 +151,8 @@
      "description": "The text to put in its place (empty to delete it)"
     },
     "all": {
-     "type": "string",
-     "description": "1 to replace every occurrence"
+     "type": "boolean",
+     "description": "true to replace every occurrence"
     }
    },
    "required": [
@@ -273,8 +273,8 @@
      "description": "Port number in hex, e.g. 3D9"
     },
     "value": {
-     "type": "string",
-     "description": "Byte to write (decimal or 0x hex); omit to read"
+     "type": "integer",
+     "description": "Byte to write, 0-255; omit to read"
     }
    },
    "required": [

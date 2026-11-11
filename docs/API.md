@@ -81,7 +81,13 @@ Everything in it is UTF-8 JSON exactly as the API wants it. CLAWDOS writes:
 - tool results: `{"role":"user","content":[{"type":"tool_result","tool_use_id":
   "...","content":"...","is_error":false}]}`. The content is the tool's output,
   or `Error: ` + output, `The user denied this tool call.` or
-  `Interrupted by the user.` with `is_error` true.
+  `Interrupted by the user.` with `is_error` true. The output holds at most
+  4,096 bytes; `read`, `dir` and `search` stop at a whole line and end with
+  one saying so (`...(more lines from N; use start)`, `+N more`,
+  `+N more matches`). Tool arguments arrive as the schema's types (`integer`,
+  `boolean`, `string`); the executors also take `"true"`/`"false"`/`"1"`/`"0"`
+  for a flag and digits in a string for a number, and fail the call naming
+  the argument for anything else. Tabs in arguments stay tabs.
 
 A turn remembers where it started. Anything that ends it early (Esc, a dropped
 link, an API error, a refusal) truncates the file back to the last complete

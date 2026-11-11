@@ -107,6 +107,22 @@ class MockApiTest(unittest.TestCase):
         self.assertIn('read -> ok:     1 hi', text2)
         self.assertEqual(stop2, 'end_turn')
 
+    def test_tool_values_have_the_schema_types(self):
+        events = self.ask('!tool read path=C:\\A.TXT start=3 lines=x')
+        _, _, _, tool_json = reply(events)
+        self.assertEqual(json.loads(tool_json), {'path': 'C:\\A.TXT', 'start': 3, 'lines': 'x'})
+        events = self.ask('!tool write path=C:\\A.TXT text=hi append=true')
+        self.assertEqual(json.loads(reply(events)[3]), {'path': 'C:\\A.TXT', 'text': 'hi', 'append': True})
+
+    def test_tour_arguments_match_the_schemas(self):
+        json_types = {'string': str, 'integer': int, 'boolean': bool}
+        types = mockchat.schema_types()
+        for name, args, _, _ in mockchat.tour_steps():
+            for key, value in args.items():
+                kind = types[name].get(key)
+                self.assertIsNotNone(kind, f'{name}.{key} is not in TOOLS.JSN')
+                self.assertIs(type(value), json_types[kind], f'{name}.{key}={value!r} is not {kind}')
+
     def test_retry_is_529_then_200(self):
         status, headers, data = self.post([{'role': 'user', 'content': '!retry'}])
         self.assertEqual(status, 529)
