@@ -391,7 +391,8 @@ def check_cache_markers(req):
 
 
 def settings_of(req):
-    """'thinking updates+drop_block, cache 1h': a request's thinking object and top-level cache marker, for the log."""
+    """'thinking updates+drop_block, cache 1h (system 1h)': a request's thinking object, top-level cache marker
+    and the system block's, for the log."""
     thinking = req.get('thinking')
     if isinstance(thinking, dict):
         parts = [p for p, on in (('updates', thinking.get('display') == 'updates'),
@@ -401,6 +402,10 @@ def settings_of(req):
         kinds = 'none'
     marker = req.get('cache_control')
     cache = marker.get('ttl', '5m') if isinstance(marker, dict) else 'off'
+    system = req.get('system')
+    if isinstance(system, list) and system and isinstance(system[-1], dict) and 'cache_control' in system[-1]:
+        mark = system[-1]['cache_control']
+        cache += f' (system {mark.get("ttl", "5m") if isinstance(mark, dict) else "?"})'
     return f'thinking {kinds}, cache {cache}'
 
 
@@ -422,6 +427,16 @@ def shape_of(messages):
 
 def same_json(a, b):
     return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def without_markers(value):
+    """value with every cache_control key taken out, at any depth: the API binds thinking blocks and
+    the prompt cache to the system prompt and tools, and a cache marker invalidates neither."""
+    if isinstance(value, dict):
+        return {k: without_markers(v) for k, v in value.items() if k != 'cache_control'}
+    if isinstance(value, list):
+        return [without_markers(v) for v in value]
+    return value
 
 
 class Validator:
@@ -535,11 +550,12 @@ class Validator:
               'cache_control': 'the cache markers are chosen when the conversation starts'}
 
     def check_stable(self, conv, req):
-        """Within a conversation system and tools must not change: the API drops or rejects thinking
-        blocks bound to the old ones, and the prompt cache misses from the first byte. The thinking
-        configuration and the top-level cache marker are held to the same rule (a message thread
-        refuses a request whose fixed fields differ)."""
-        now = {field: req.get(field) for field in self.STABLE}
+        """Within a conversation system and tools must not change, their cache markers aside (the
+        API's rule): the API drops or rejects thinking blocks bound to the old ones, and the prompt
+        cache misses from the first byte. The thinking configuration and the top-level cache marker
+        are held to the same rule (a message thread refuses a request whose fixed fields differ)."""
+        now = {field: without_markers(req.get(field)) if field in ('system', 'tools') else req.get(field)
+               for field in self.STABLE}
         if not conv['seen']:
             conv.update(now, seen=True)
             return
@@ -1171,7 +1187,7 @@ class MockServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, speed, tools_path, thread_ttl=THREAD_TTL):
+    def __init__(self, addr, speed, tools_path, thread_ttl=THREAD_TTL, first_id=1):
         super().__init__(addr, Handler)
         self.speed = speed
         self.tools_path = tools_path
@@ -1180,7 +1196,7 @@ class MockServer(ThreadingHTTPServer):
         self.body_timeout = BODY_TIMEOUT
         self.state = {}             # what already happened (!drop, !retry)
         self.pending = None         # Pending tool call
-        self._ids = 0
+        self._ids = first_id - 1     # a second mock beside this one counts from elsewhere: ids stay unique
         self._lock = threading.Lock()
         self.shot_dir = SHOT_DIR    # where the images that arrive are saved
         self.images = {}            # (call id, digest of the base64) -> the file it was saved as
@@ -1214,8 +1230,8 @@ class MockServer(ThreadingHTTPServer):
             return self._ids
 
 
-def make_server(port, speed=1.0, tools_path=DEFAULT_TOOLS, host='127.0.0.1', thread_ttl=THREAD_TTL):
-    return MockServer((host, port), speed, tools_path, thread_ttl)
+def make_server(port, speed=1.0, tools_path=DEFAULT_TOOLS, host='127.0.0.1', thread_ttl=THREAD_TTL, first_id=1):
+    return MockServer((host, port), speed, tools_path, thread_ttl, first_id)
 
 
 def main():
@@ -1228,11 +1244,13 @@ def main():
     ap.add_argument('--tools', default=DEFAULT_TOOLS, help='TOOLS.JSN, to check requests and the tool tour against')
     ap.add_argument('--thread-ttl', type=float, default=THREAD_TTL,
                     help='seconds a message thread stays continuable after its last request')
+    ap.add_argument('--first-id', type=int, default=1,
+                    help='the number the message and tool call ids count from (a second mock: 1001)')
     a = ap.parse_args()
     for old in glob.glob(os.path.join(SHOT_DIR, 'mockshot-*.png')):    # a run's pictures are its own
         os.remove(old)
     try:
-        server = make_server(a.port, a.speed, a.tools, host=a.listen, thread_ttl=a.thread_ttl)
+        server = make_server(a.port, a.speed, a.tools, host=a.listen, thread_ttl=a.thread_ttl, first_id=a.first_id)
     except (OSError, ValueError) as e:
         sys.exit(f'mockapi: cannot start ({a.tools} must be readable JSON): {e}')
     # scripts/boottest.py waits for the start of this line

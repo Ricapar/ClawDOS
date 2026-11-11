@@ -787,6 +787,26 @@ class ValidatorTest(unittest.TestCase):
         self.ok(deeper(), system='one', tools=self.tools)      # a rejected request changed nothing
         self.ok([{'role': 'user', 'content': 'other'}], system='three')    # another conversation: its own
 
+    def test_cache_markers_in_system_and_tools_do_not_count_as_a_change(self):
+        said = {'type': 'text', 'text': 'a'}
+
+        def system(text, marker=None):
+            block = {'type': 'text', 'text': text}
+            return [dict(block, cache_control=marker)] if marker else [block]
+
+        def deeper():
+            return [USER, assistant(THINKING, said), USER]
+
+        hour = {'type': 'ephemeral', 'ttl': '1h'}
+        self.v.record(self.ok([USER], system=system('one', hour), cache_control=hour)[1], THINKING, 'a', None)
+        self.bad('cache_control: changed within a conversation', deeper(), system=system('one'))   # top level: strict
+        conv = self.ok([{'role': 'user', 'content': 'b'}], system=system('one', hour))[1]
+        self.v.record(conv, THINKING, 'a', None)
+        later = [{'role': 'user', 'content': 'b'}, assistant(THINKING, said), USER]
+        self.ok(later, system=system('one'))                                   # the marker dropped
+        self.ok(later, system=system('one', {'type': 'ephemeral'}))           # ...and put back with another ttl
+        self.bad('system: changed within a conversation', later, system=system('two'))
+
     def test_a_request_of_one_message_starts_the_conversation_anew(self):
         said = {'type': 'text', 'text': 'a'}
         self.v.record(self.ok([USER], system='one')[1], THINKING, 'a', None)

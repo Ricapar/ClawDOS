@@ -80,7 +80,11 @@ class Chat {
     const ApiThread *thread(void) { return th.id[0] ? &th : NULL; }
     void   setThread(const ApiThread *t);
 
-    int8_t switchProvider(const char *id, const char *model);   /* /model */
+    /* /model: within the provider section only the model changes; to another
+       section the conversation's fixed settings are chosen again from it,
+       its prefix's cache marker follows (api_fixed_switch) and the thread is
+       dropped. Only between turns. */
+    int8_t switchProvider(const char *id, const char *model);
     const char *describe(void);            /* "anthropic: claude-opus-5-5" */
     const char *address(void);             /* the tunnel address in use */
     int    connected(void) { return http.isOpen(); }

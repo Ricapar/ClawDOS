@@ -221,6 +221,91 @@ int api_prefix_cache(const char *path, int *cache, int *ttl1h)
     return 0;
 }
 
+/* The prefix file again with only its system block's marker changed: the
+   bytes up to the prompt's closing quote, the new marker, then everything
+   from the "}],\"tools\":" after it. Written beside it first, then renamed.
+   Its size; -1 unreadable or not a prefix, -2 the file could not be written. */
+static long recache(const char *path, int cache, int ttl1h)
+{
+    static const char tools[] = "}],\"tools\":";
+    char tmp[80], after[72], *buf, *t;
+    FILE *in, *out;
+    unsigned n = strlen(path);
+    int c, quotes = 0, esc = 0, rc = 0;
+    long size = 0;
+
+    if (n == 0 || n >= sizeof tmp)
+        return -1;
+    strcpy(tmp, path);
+    tmp[n - 1] = '$';
+    if ((in = fopen(path, "rb")) == NULL)
+        return -1;
+    if ((buf = (char *)malloc(PIECE)) == NULL || (out = fopen(tmp, "wb")) == NULL) {
+        free(buf);
+        fclose(in);
+        return -2;
+    }
+    while (quotes < 10 && (c = getc(in)) != EOF) {
+        if (esc)
+            esc = 0;
+        else if (c == '\\')
+            esc = 1;
+        else if (c == '"')
+            quotes++;
+        putc(c, out);
+        size++;
+    }
+    n = quotes == 10 ? fread(after, 1, sizeof after - 1, in) : 0;
+    after[n] = 0;
+    if ((t = strstr(after, tools)) == NULL)
+        rc = -1;
+    else {
+        unsigned k = (unsigned)(after + n - t);
+        if (cache) {
+            fputs(",\"cache_control\":", out);
+            fputs(cacheMarker(ttl1h), out);
+            size += 17 + strlen(cacheMarker(ttl1h));
+        }
+        size += fwrite(t, 1, k, out);
+        while ((k = fread(buf, 1, PIECE, in)) > 0)
+            size += fwrite(buf, 1, k, out);
+    }
+    free(buf);
+    if (ferror(in))
+        rc = -1;
+    fclose(in);
+    if ((ferror(out) | fclose(out)) && rc == 0)
+        rc = -2;
+    if (rc == 0) {
+        remove(path);
+        if (rename(tmp, path))
+            rc = -2;
+    }
+    if (rc) {
+        remove(tmp);
+        return rc;
+    }
+    return size;
+}
+
+int api_fixed_switch(ApiFixed *f, const Provider *p, const char *prefixPath)
+{
+    int cache, ttl1h;
+
+    api_fixed_from(f, p);
+    if (api_prefix_cache(prefixPath, &cache, &ttl1h)) {
+        remove(prefixPath);               /* none, or unreadable: rendered with f at the next request */
+        return 0;
+    }
+    if (cache == f->cache && (!cache || ttl1h == f->ttl1h))
+        return 0;
+    if (recache(prefixPath, f->cache, f->ttl1h) >= 0)
+        return 1;
+    f->cache = cache;
+    f->ttl1h = ttl1h;
+    return -1;
+}
+
 /* The fields before the prefix, each followed by a comma. thinking and the
    top-level cache_control come from the conversation's fixed settings, the
    rest from the provider's settings the request took (api_req_settings). */

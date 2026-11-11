@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot the ClawDOS image headless in DOSBox-X with a test batch file and print its log.
 
-  python scripts/boottest.py [image/tests/units.bat] [--timeout 90] [--mock]
+  python scripts/boottest.py [image/tests/units.bat] [--timeout 90] [--mock] [--mock2]
                              [--expect TEXT ...] [--reject TEXT ...]
 
 The test batch file runs as C:\\AUTOTEST.BAT instead of the normal startup. It
@@ -10,7 +10,9 @@ ECHO CLAWDOS-TEST-DONE > COM1; this script waits for that marker, then stops
 DOSBox-X. Files written inside the guest are not a reliable result channel: DOS
 may not have flushed them to the image yet. Exit status is 0 only if the marker was seen,
 every --expect TEXT is in the serial or mock log and no --reject TEXT is, and (with
---mock) the mock API started and was still running at the end.
+--mock) the mock API started and was still running at the end. --mock2 runs a second,
+separate mock on the next port (10.0.2.2:18024, log build/mock2.log): another provider
+section, as a test that switches providers with /model needs.
 """
 
 import argparse
@@ -42,6 +44,7 @@ CPUTYPE = '80186'
 # The mock API gets its own port so a real tunnel on 8443 can keep running (and
 # isn't reached by test traffic). Tests use 10.0.2.2:18023.
 TEST_API_PORT = 18023
+TEST_API_PORT2 = TEST_API_PORT + 1     # --mock2: a second provider, a mock with its own memory
 
 
 def dosbox():
@@ -77,6 +80,8 @@ def parse_args():
                     help='TEXT must not appear in the serial or mock API log (repeatable)')
     ap.add_argument('--mock', action='store_true',
                     help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_API_PORT} during the test')
+    ap.add_argument('--mock2', action='store_true',
+                    help=f'also run a second mock on port {TEST_API_PORT2} (log build/mock2.log)')
     return ap.parse_args()
 
 
@@ -178,11 +183,11 @@ def _unlock(f):
 
 
 @contextlib.contextmanager
-def mock_api(log_path):
+def mock_api(log_path, port=TEST_API_PORT):
     """Run the mock Messages API (tunnel/mockapi.py), logging to log_path; it is killed when the block ends.
     Exits if it does not start, saying why: it exited (the port taken: by whom), or it said nothing."""
     cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
-           '--speed', '0', '--port', str(TEST_API_PORT)]
+           '--speed', '0', '--port', str(port), '--first-id', str(1 + 1000 * (port - TEST_API_PORT))]
     with open(log_path, 'wb') as f:
         with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as mock:
             try:
@@ -191,9 +196,9 @@ def mock_api(log_path):
                     if mock.poll() is None:
                         why = 'it said nothing for 10 s'
                     else:
-                        holder = port_holder(TEST_API_PORT)
+                        holder = port_holder(port)
                         why = f'it exited with code {mock.returncode}' + (f'; port held by: {holder}' if holder else '')
-                    sys.exit(f'mock API did not start on port {TEST_API_PORT} ({why}): {tail}')
+                    sys.exit(f'mock API did not start on port {port} ({why}): {tail}')
                 yield mock
             finally:
                 mock.kill()
@@ -236,18 +241,22 @@ def run_test(a):
 
     cmd = dosbox_command(a.set)
     mock_log = os.path.join(build.BUILD, 'mock.log')
+    mock2_log = os.path.join(build.BUILD, 'mock2.log')
     serial = os.path.join(build.BUILD, 'serial.log')
-    with mock_api(mock_log) if a.mock else contextlib.nullcontext() as mock:
+    with contextlib.ExitStack() as mocks:
+        mock = mocks.enter_context(mock_api(mock_log)) if a.mock else None
+        mock2 = mocks.enter_context(mock_api(mock2_log, TEST_API_PORT2)) if a.mock2 else None
         run_dosbox(cmd, serial, a.timeout)
-        mock_exit = mock.poll() if mock else None
+        mock_exit = [m.poll() for m in (mock, mock2) if m and m.poll() is not None]
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
-    if a.mock:
-        print('--- mock API log ---')
-        sys.stdout.write(read_log(mock_log).decode('utf-8', 'replace'))
-        log += read_log(mock_log)
-    if mock_exit is not None:
-        print(f'boottest: FAILED (the mock API died during the run, exit code {mock_exit})')
+    for on, title, path in ((a.mock, 'mock API log', mock_log), (a.mock2, 'second mock API log', mock2_log)):
+        if on:
+            print(f'--- {title} ---')
+            sys.stdout.write(read_log(path).decode('utf-8', 'replace'))
+            log += read_log(path)
+    if mock_exit:
+        print(f'boottest: FAILED (a mock API died during the run, exit code {mock_exit[0]})')
         sys.exit(1)
     if DONE not in log:
         print(f'boottest: FAILED (no {DONE.decode()} within {a.timeout}s)')

@@ -185,8 +185,19 @@ int8_t Chat::switchProvider(const char *id, const char *model)
         strncpy(p->model, model, sizeof p->model - 1);
         p->model[sizeof p->model - 1] = 0;
     }
-    if (p != prov)
+    if (p != prov) {
         http.close();
+        th.id[0] = 0;                 /* the next request creates a thread (or sends none) with the whole chat */
+        if (fixedSet) {               /* else the first request chooses them, from p */
+            static const char *const what[] = { "marker could not be rewritten", "kept", "marker rewritten" };
+            char line[120];
+            int rc = api_fixed_switch(&fix, p, prePath);
+            sprintf(line, "model: [%.15s] settings: thinking %d %d, cache %d%s, threads %d; prefix %s",
+                    p->id, fix.progress, fix.dropThinking, fix.cache, fix.ttl1h ? " 1h" : "", fix.threads,
+                    what[rc + 1]);
+            ui->log(line);
+        }
+    }
     prov = p;
     return 0;
 }
@@ -345,9 +356,11 @@ void Chat::setPrefixPath(void)
 /* The conversation's prefix file: rendered the first time a request needs it
    (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN, the memories and
    the skills as they are then, and the same bytes on every request after
-   that, through /model, F5 and a relaunch. Edits to those apply to the next
-   conversation. The fixed settings (thinking, the cache markers, threads)
-   are chosen from the provider in use at the same moment and kept as long;
+   that, through /model, F5 and a relaunch (/model to another provider
+   section rewrites only its cache marker, api_fixed_switch). Edits to those
+   apply to the next conversation. The fixed settings (thinking, the cache
+   markers, threads) are chosen from the provider in use at the same moment
+   and kept as long, unless /model moves to another section;
    only once the prefix is there, so a first attempt that wrote none (Esc, a
    full disk) leaves them to be chosen again, after a /model perhaps. */
 int8_t Chat::preparePrefix(void)

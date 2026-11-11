@@ -2534,6 +2534,56 @@ static void testPrefixCache(void)
     remove("C:\\TTEST.JSN");
 }
 
+/* /model to another provider section: the fixed settings follow it, and the
+   prefix file's marker is rewritten to the new cache setting with the prompt
+   and tools left byte for byte as rendered. */
+static void testFixedSwitch(void)
+{
+    static char want[300];
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    ApiPrefix x;
+    ApiFixed fx;
+    Sink buf;
+    int rc;
+
+    writeFile("C:\\PTEST.TXT", "Say \"hi\" \\ }],\"tools\": {name}.");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\",\"cache_control\":{\"ttl\":\"1h\"}}]");
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Q"; x.memories = "";
+    x.skills = ""; x.cache = 1; x.ttl1h = 1;
+    api_prefix_file("C:\\PTEST.PRE", &x);
+    memset(p, 0, sizeof *p);              /* a host with none of the betas and no cache */
+    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
+    x.cache = 0;
+    sink_buffer(&buf, want, sizeof want);
+    api_prefix(&buf, &x);
+    CHECK("switch: settings from the new provider", !fx.progress && !fx.dropThinking && !fx.threads && !fx.cache);
+    CHECK("switch: the marker dropped, the rest as rendered", rc == 1 && !strcmp(fileText("C:\\PTEST.PRE"), want)
+          && fs_size("C:\\PTEST.PR$") == -1);
+    p->cache = 1;
+    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
+    x.cache = 1; x.ttl1h = 0;
+    sink_buffer(&buf, want, sizeof want);
+    api_prefix(&buf, &x);
+    CHECK("switch: a five-minute marker put in", rc == 1 && fx.cache && !fx.ttl1h
+          && !strcmp(fileText("C:\\PTEST.PRE"), want));
+    p->progress = p->dropThinking = p->threads = 1;
+    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
+    CHECK("switch: the same marker leaves the file", rc == 0 && fx.progress && fx.dropThinking && fx.threads
+          && !strcmp(fileText("C:\\PTEST.PRE"), want));
+    p->cacheTtl1h = 1;
+    mkdir("C:\\PTEST.PR$");               /* the rewrite's temporary file cannot be made */
+    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
+    CHECK("switch: an unwritable marker keeps the file's", rc == -1 && fx.cache && !fx.ttl1h && fx.threads
+          && !strcmp(fileText("C:\\PTEST.PRE"), want));
+    rmdir("C:\\PTEST.PR$");
+    remove("C:\\PTEST.PRE");
+    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
+    CHECK("switch: no prefix yet", rc == 0 && fx.cache && fx.ttl1h && fs_size("C:\\PTEST.PRE") == -1);
+    remove("C:\\PTEST.TXT");
+    remove("C:\\TTEST.JSN");
+    free(p);
+}
+
 /* A list cut at the output's size ends on a whole line, then says so. */
 static void testEndList(void)
 {
@@ -2604,6 +2654,7 @@ int main(void)
     testChatFile();
     testConvoJoinText();
     testPrefixCache();
+    testFixedSwitch();
     testEndList();
     testShotPng();
     testConvoImage();

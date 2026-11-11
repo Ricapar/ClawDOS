@@ -147,6 +147,11 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "(floors 234496, 162816): PASS" --expect "bigenv exit code 0" --expect "screens exit code 0" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/fixed.bat --mock --timeout 150 --expect "tool run -> ok" --expect "CLAWDOS.EXE exit code 0" \
 	    --expect "1 messages, last role user, thinking none, cache 1h" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/provider.bat --mock --mock2 --timeout 150 --expect "first exit code 0" \
+	    --expect "switched exit code 0" --expect "cache 5m (system 5m), thread continue" \
+	    --expect "model: [plain] settings: thinking 0 0, cache 0, threads 0; prefix marker rewritten" \
+	    --expect "request: 5 messages, last role user, thinking none, cache off, no thread" \
+	    --expect "request: 7 messages, last role user, thinking none, cache off, no thread" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \
 	    --reject '"content":"!runrefuse"' --reject toolu_mock --reject "VALIDATION:"
 

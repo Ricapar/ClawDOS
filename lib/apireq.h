@@ -72,6 +72,15 @@ long api_prefix_file(const char *path, const ApiPrefix *x);
    *cache and *ttl1h. 0, or -1 if the file cannot be read or is not a prefix. */
 int  api_prefix_cache(const char *path, int *cache, int *ttl1h);
 
+/* /model to another provider section: the conversation's fixed settings are
+   chosen again from p (a host without the betas would refuse the old ones on
+   every request), and the prefix file's cache marker is rewritten to match
+   them; its prompt and tools stay as they were rendered (the API's prompt
+   cache and thinking blocks are bound to those, not to the marker). 0 done
+   (no prefix yet, or its marker already right), 1 the marker rewritten, -1
+   it could not be: f keeps the file's marker, so the two markers agree. */
+int  api_fixed_switch(ApiFixed *f, const Provider *p, const char *prefixPath);
+
 enum { API_TH_NONE, API_TH_CREATE, API_TH_CONTINUE };
 
 typedef struct ApiReq {
