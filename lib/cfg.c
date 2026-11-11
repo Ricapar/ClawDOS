@@ -49,6 +49,16 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
     else if (!stricmp(key, "betas")) setStr(p->betas, sizeof p->betas, val);
     else if (!stricmp(key, "name")) setStr(p->name, sizeof p->name, val);
     else if (!stricmp(key, "cache")) p->cache = atoi(val);
+    else if (!stricmp(key, "progress")) p->progress = atoi(val);
+    else if (!stricmp(key, "dropthinking")) p->dropThinking = atoi(val);
+    else if (!stricmp(key, "cachettl")) {
+        if (!stricmp(val, "5m"))
+            p->cacheTtl1h = 0;
+        else if (!stricmp(val, "1h"))
+            p->cacheTtl1h = 1;
+        else
+            return -1;                /* the API knows no other lifetime */
+    }
     else if (!stricmp(key, "maxtokens")) {
         char *end;
         long n = strtol(val, &end, 10);

@@ -139,6 +139,12 @@ chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), 
 a message at startup and `-i text` pre-fills the input box. Type `/model` to
 list the providers in `CLAWDOS.CFG` and switch.
 
+While Claude works through a run of tool calls it says what it is about to do:
+those progress notes appear dim, above the tool call they lead to (`progress`
+in the config; `dropthinking` keeps a conversation going if its prompt had to
+change, and `cachettl 1h` keeps the prompt cache for an hour instead of five
+minutes; see docs/API.md).
+
 **Memories** (F4 or `/memories`): a full screen listing what Claude has saved in
 `C:\MEMORY` (name, size, first line). Enter shows one, Del deletes it after a
 y/n, Esc goes back. The conversation you're in keeps the list it started with;
@@ -251,7 +257,8 @@ Every conversation is a file in `C:\CLAWDOS\CHATS\` (`MMDDnnn.JSN`): the
 messages exactly as the API sees them, which is also the log of what was said
 and done. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
 token, total, upload time and size, stop reason, tokens in/out, cache reads)
-and one per event worth knowing about (retries, lost links, errors).
+and one per event worth knowing about (retries, lost links, errors, the start
+of each progress note shown).
 `python3 scripts/bench.py` (`make bench`) times a fixed agent turn in 86Box
 against the mock API; the results are in docs/ROADMAP.md ("Benchmark").
 

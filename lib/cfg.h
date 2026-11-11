@@ -25,6 +25,9 @@ typedef struct Provider {
     char betas[64];       /* "" = no anthropic-beta header */
     char name[24];        /* assistant name; "" = the global one */
     int cache;            /* default 1: send cache_control */
+    int cacheTtl1h;       /* cachettl 1h: the markers last an hour; 0 (5m, absent): five minutes */
+    int progress;         /* progress 1: thinking display "updates", the notes shown (beta) */
+    int dropThinking;     /* dropthinking 1: thinking block_binding drop_block (beta) */
     long maxTokens;       /* max_tokens; default CFG_MAX_TOKENS */
 } Provider;
 
@@ -39,7 +42,8 @@ typedef struct Cfg {
 void cfg_defaults(Cfg *c);
 /* Parse text (LF or CRLF; '#' starts a comment except in key/keyfile values;
    "key value" separated by spaces or tabs, trailing blanks trimmed). Returns 0,
-   or the 1-based number of the first bad line (unknown key, too many sections). */
+   or the 1-based number of the first bad line (unknown key, a bad maxtokens or
+   cachettl value, too many sections). */
 int cfg_parse(Cfg *c, const char *text);
 int cfg_load(Cfg *c, const char *path);          /* file -> cfg_parse, then keyfile -> key; -1 unreadable, else as cfg_parse */
 Provider *cfg_provider(Cfg *c, const char *id);  /* NULL if unknown; case-insensitive */

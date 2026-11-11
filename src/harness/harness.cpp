@@ -138,6 +138,8 @@ struct Resume {
     long tokens;
     HistTurn turn;                    /* where the turn began in the chat file */
     int hasTurn;
+    ApiFixed fixed;                   /* the conversation's thinking and cache settings */
+    int hasFixed;
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -483,11 +485,41 @@ static void blankLine(void)
     con_newline();
 }
 
+/* A progress note: the text of a thinking block (the model's notes between
+   tool calls), drawn dim in the reply's margin as a paragraph of its own
+   ahead of the tool header or reply that follows. It opens at the first
+   character that shows; line breaks are held back until more text follows,
+   so trailing ones add no blank rows. Its start goes to CLAWDOS.LOG when it
+   ends. */
+static int noteOpen;
+static int noteBreaks;                /* line breaks held back */
+static char noteHead[61];
+static unsigned noteHeadLen;
+
+static void uiLog(const char *line);
+
+static void endNote(void)
+{
+    char line[80];
+
+    if (!noteOpen)
+        return;
+    noteOpen = 0;
+    noteBreaks = 0;
+    con_margins(0, SCR_COLS - 1);     /* what follows starts at column 0 */
+    con_newline();
+    noteHead[noteHeadLen] = 0;
+    sprintf(line, "progress note: %s", noteHead);
+    uiLog(line);
+}
+
 /* Anything written into the transcript while a reply streams calls this
    first: the reply text after it starts a new bullet, in its own colour and
-   margin, instead of carrying on in whatever was written last. */
+   margin, instead of carrying on in whatever was written last. A progress
+   note still open ends here too. */
 static void breakReply(void)
 {
+    endNote();
     if (state == STREAMING)
         state = WAITING;
 }
@@ -799,6 +831,7 @@ static void uiText(const char *text, unsigned n)
 
     if (scr_viewing())
         scr_view(0);
+    endNote();
     if (state == WAITING) {
         startReply();
         setState(STREAMING);
@@ -813,8 +846,44 @@ static void uiText(const char *text, unsigned n)
     }
 }
 
-static void uiThinking(void)
+static void uiProgress(int phase, const char *text, unsigned n)
 {
+    int styled = 0;
+
+    if (phase != THINK_TEXT) {        /* a thinking block began or ended */
+        endNote();
+        return;
+    }
+    for (; n; n--, text++) {
+        unsigned char c = (unsigned char)*text;
+        if (c == '\n' || c == '\r' || ((c == ' ' || c == '\t') && !noteOpen)) {
+            if (c == '\n' && noteOpen)
+                noteBreaks++;
+            continue;
+        }
+        if (!noteOpen) {
+            if (scr_viewing())
+                scr_view(0);
+            breakReply();
+            con_margins(0, SCR_COLS - 1);
+            blankLine();
+            noteOpen = 1;
+            noteHeadLen = 0;
+        }
+        if (!styled) {                /* the colour and margin, whatever was written last */
+            con_margins(2, SCR_COLS - 1);
+            con_attr(A_DIM);
+            styled = 1;
+        }
+        for (; noteBreaks; noteBreaks--) {
+            con_newline();
+            if (noteHeadLen < sizeof noteHead - 1)
+                noteHead[noteHeadLen++] = ' ';
+        }
+        if (noteHeadLen < sizeof noteHead - 1)
+            noteHead[noteHeadLen++] = c < ' ' ? ' ' : c;
+        con_putc(c);
+    }
 }
 
 static void uiNote(const char *text, int error)
@@ -868,7 +937,7 @@ static void uiLog(const char *line)
     fclose(f);
 }
 
-static ChatUi chatUi = { uiText, uiThinking, uiNote, tools_call, uiIdle, uiEscPressed, uiLog, drawBoxTop };
+static ChatUi chatUi = { uiText, uiProgress, uiNote, tools_call, uiIdle, uiEscPressed, uiLog, drawBoxTop };
 
 
 /* --- tool calls (ui.h) ----------------------------------------------------- */
@@ -1136,6 +1205,7 @@ static int writeState(void)
 {
     FILE *f = fopen(RELAUNCH_STATE, "w");
     const Convo *c = chat.state();
+    const ApiFixed *fx;
     HistTurn turn;
     unsigned i;
 
@@ -1148,6 +1218,8 @@ static int writeState(void)
             tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
     fprintf(f, "tokens %ld\nturns %d\n", chat.contextTokens(), chat.turns());
+    if ((fx = chat.fixed()) != NULL)  /* not the provider's: /model may have moved on */
+        fprintf(f, "fixed %d %d %d %d\n", fx->progress, fx->dropThinking, fx->cache, fx->ttl1h);
     hist_turn_get(&turn);
     fprintf(f, "turnstart %ld\ntailat %ld\ntail ", turn.start, turn.tailAt);
     for (i = 0; i < turn.tailLen; i++)
@@ -1186,6 +1258,9 @@ static int readState(Resume *r)
             r->turn.start = atol(v);
             r->hasTurn = 1;
         }
+        if (!strcmp(line, "fixed"))
+            r->hasFixed = sscanf(v, "%d %d %d %d", &r->fixed.progress, &r->fixed.dropThinking,
+                                 &r->fixed.cache, &r->fixed.ttl1h) == 4;
         if (!strcmp(line, "tailat"))
             r->turn.tailAt = atol(v);
         if (!strcmp(line, "tail"))            /* hex, two digits a byte */
@@ -1393,7 +1468,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (bad > 0) {
-        fprintf(stderr, "%s line %d: unknown setting or too many providers.\n", CFG_PATH, bad);
+        fprintf(stderr, "%s line %d: unknown setting, bad value or too many providers.\n", CFG_PATH, bad);
         return 1;
     }
     if (Net::startStack())
@@ -1422,6 +1497,8 @@ int main(int argc, char *argv[])
         if (resumeState.effort[0])    /* F5 may have changed it from CLAWDOS.CFG's */
             strcpy(chat.provider()->effort, resumeState.effort);
         chat.setUsage(resumeState.tokens, resumeState.turns);
+        if (resumeState.hasFixed)
+            chat.setFixed(&resumeState.fixed);
         remove(RELAUNCH_STATE);       /* resumed; until now CLAWDOS -resume could try again */
         statusNote = NULL;
         drawFooter();

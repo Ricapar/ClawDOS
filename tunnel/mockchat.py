@@ -285,6 +285,8 @@ class MockChat:
         self.speed = speed
         self.tools_path = tools_path                       # the TOOLS.JSN the server checks requests against
         self.no_tools = False                              # the request said tool_choice none (set by the server)
+        self.progress = False                              # the request asked for display "updates" (the server)
+        self.progress_note = ''                            # the thinking text sent then, if a scenario sets one
         self.rng = random.Random(seed)
         self.history = []   # (user text, reply text) pairs
         self.state = state if state is not None else {}   # shared across requests: what already happened
@@ -527,14 +529,20 @@ class MockChat:
         yield from self.stream(f'{name} -> {result.status}: {result.text[:300]}', per_token=0.005)
 
     def tooltour(self):
-        """Call every tool in turn and end with a PASS or FAIL verdict."""
+        """Call every tool in turn and end with a PASS or FAIL verdict. Each response opens with a progress
+        note naming the next step (the server sends it as thinking text when the request asks for display
+        "updates"); it is set before the text that leads the response, since the server reads it then."""
+        steps = list(tour_steps())
+        self.progress_note = f'Tour step 1 of {len(steps)}: {steps[0][0]}.'
         yield 'Touring the DOS tools.\n'
         failure = None
-        for i, (name, args, status, want) in enumerate(tour_steps(), 1):
+        for i, (name, args, status, want) in enumerate(steps, 1):
             call = ToolCall(name, args)
             yield call
             got = call.result
             ok = got.status == status and (want is None or (want(got.text) if callable(want) else want in got.text))
+            self.progress_note = (f'Tour step {i + 1} of {len(steps)}: {steps[i][0]}.' if i < len(steps)
+                                  else 'Tour done; the verdict next.')
             yield f'{i:2}. {name}: {got.status}{"" if ok else "  <- expected " + status}\n'
             if not ok and failure is None:
                 failure = f'step {i} {name}: got {got.status} {got.text[:60]!r}'

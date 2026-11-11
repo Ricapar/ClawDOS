@@ -32,7 +32,7 @@
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
                rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
-               upTicks(0), reqLen(0)
+               upTicks(0), reqLen(0), fixedSet(0)
 {
     addr[0] = path[0] = prePath[0] = desc[0] = 0;
     preLen = -1;
@@ -197,6 +197,7 @@ int8_t Chat::newConversation(void)
     convo_init(&convo);
     setPrefixPath();
     remove(prePath);                  /* one left by a chat file deleted since */
+    fixedSet = 0;                     /* chosen again with the new prefix */
     return 0;
 }
 
@@ -213,7 +214,9 @@ void Chat::setPrefixPath(void)
 /* The conversation's prefix file: rendered the first time a request needs it
    (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN and the memories
    as they are then, and the same bytes on every request after that, through
-   /model, F5 and a relaunch. Edits to those apply to the next conversation. */
+   /model, F5 and a relaunch. Edits to those apply to the next conversation.
+   The fixed settings (thinking, the cache markers) are chosen from the
+   provider in use at the same moment and kept as long. */
 int8_t Chat::preparePrefix(void)
 {
     ApiPrefix x;
@@ -221,6 +224,10 @@ int8_t Chat::preparePrefix(void)
     char line[60];
     int status;
 
+    if (!fixedSet) {
+        api_fixed_from(&fix, prov);
+        fixedSet = 1;
+    }
     if ((preLen = fs_size(prePath)) > 0)
         return 0;
     tout_reset(&t);
@@ -232,7 +239,8 @@ int8_t Chat::preparePrefix(void)
     x.toolsPath = TOOLS_PATH;
     x.name = prov->name[0] ? prov->name : cfg->name;
     x.memories = status == TS_OK ? t.out : "";
-    x.cache = prov->cache;
+    x.cache = fix.cache;
+    x.ttl1h = fix.ttl1h;
     if ((preLen = api_prefix_file(prePath, &x)) < 0)
         return (int8_t)preLen;
     sprintf(line, "prefix %.30s: %ld bytes", prePath, preLen);
@@ -259,10 +267,10 @@ void Chat::onText(void *ctx, const char *cp437, unsigned n)
     c->ui->text(cp437, n);
 }
 
-void Chat::onThinking(void *ctx)
+void Chat::onThinking(void *ctx, int phase, const char *cp437, unsigned n)
 {
     Chat *c = (Chat *)ctx;
-    c->ui->thinking();
+    c->ui->progress(phase, cp437, n);
 }
 
 int Chat::onHist(void *ctx, const char *p, unsigned n)
@@ -469,6 +477,7 @@ int8_t Chat::request(int noTools)
         return -1;
     }
     r.p = prov;
+    r.fixed = &fix;
     r.prefixPath = prePath;
     r.prefixLen = preLen;
     r.noTools = noTools;
@@ -489,7 +498,7 @@ int8_t Chat::request(int noTools)
             fresh = 1;
         }
         reqStart = TICKS_NOW;
-        rc = http.sendHead(prov, length);
+        rc = http.sendHead(prov, &fix, length);
         if (rc == 0 && (body = api_body(http.sink(), &r)) != 0)
             rc = -1;
         if (body == -1) {                 /* the prefix or history unreadable: no use retrying */

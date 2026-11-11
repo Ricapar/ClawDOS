@@ -24,10 +24,12 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log; the test fails if that mock cannot start,
   say the port is taken, or dies during the run), `--expect TEXT` fails unless TEXT is in the
   serial or mock log and `--reject TEXT` fails if it is. The mock checks every request against its own list of rules
-  (docs/API.md, "The tunnel": headers, fields, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks
-  returned byte-identical) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
+  (docs/API.md, "The tunnel": headers, fields, the thinking object and its beta headers, cache markers agreeing on their
+  ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
   that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
-  every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
+  every DOS tool (and `progress note:` lines show the mock's progress notes reached the screen);
+  `fixed.bat` a conversation keeping its thinking and cache settings across a relaunch whose run changed CLAWDOS.CFG
+  (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
   (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk

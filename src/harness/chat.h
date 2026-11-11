@@ -13,10 +13,11 @@
 #include "sse.h"
 #include "convo.h"
 #include "history.h"
+#include "apireq.h"
 
 struct ChatUi {
     void (*text)(const char *cp437, unsigned n);   /* visible reply text */
-    void (*thinking)(void);                        /* the model is thinking (a delta arrived) */
+    void (*progress)(int phase, const char *cp437, unsigned n);  /* thinking text (apistream.h THINK_*) */
     void (*note)(const char *text, int error);     /* a line in the transcript */
     int  (*tool)(const char *name, const char *input, unsigned len, ToolCtx *t);  /* tools_call */
     void (*idle)(void);                            /* called while waiting: keys, spinner */
@@ -56,6 +57,12 @@ class Chat {
        tool_result message, then the remaining rounds. Returns as turn(). */
     int8_t continueTurn(int round, const char *toolId, int status, ToolCtx *t);
 
+    /* The conversation's thinking and cache settings (apireq.h): NULL until
+       its first request chose them; setFixed gives a resumed conversation
+       the ones it started with. */
+    const ApiFixed *fixed(void) { return fixedSet ? &fix : NULL; }
+    void   setFixed(const ApiFixed *f) { fix = *f; fixedSet = 1; }
+
     int8_t switchProvider(const char *id, const char *model);   /* /model */
     const char *describe(void);            /* "anthropic: claude-opus-5-5" */
     const char *address(void);             /* the tunnel address in use */
@@ -87,6 +94,8 @@ class Chat {
     char path[40];
     char prePath[40];                      /* the conversation's prefix file (apireq.h) */
     long preLen;                           /* its size; -1 until a request looks */
+    ApiFixed fix;                          /* chosen with the prefix, kept to the end */
+    int fixedSet;
     char desc[80];
     char errBuf[160];
     const char *err;
@@ -120,7 +129,7 @@ class Chat {
     void   warn(const char *text);
 
     static void onText(void *ctx, const char *cp437, unsigned n);
-    static void onThinking(void *ctx);
+    static void onThinking(void *ctx, int phase, const char *cp437, unsigned n);
     static int  onHist(void *ctx, const char *p, unsigned n);
     static void onEvent(void *ctx, const char *event, const char *data, unsigned n);
     static int onBig(void *ctx, int phase, const char *event, const char *data, unsigned n);

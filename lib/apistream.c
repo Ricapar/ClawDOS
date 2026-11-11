@@ -96,18 +96,22 @@ static unsigned safeCut(const char *raw, unsigned len, unsigned want)
     }
 }
 
-/* A text delta: raw escaped JSON to the history, decoded CP437 to the screen. */
-static int textDelta(ApiStream *a, const char *raw, unsigned len)
+/* A text or thinking delta: raw escaped JSON to the history, decoded CP437 to
+   the screen (text through a->text, thinking as THINK_TEXT). */
+static int textDelta(ApiStream *a, const char *raw, unsigned len, int thinking)
 {
     if (emitHist(a, raw, len))
         return -1;
-    if (!a->text || !raw8 || !cp)
+    if (!(thinking ? a->thinking != NULL : a->text != NULL) || !raw8 || !cp)
         return 0;
     while (len) {
         unsigned take = safeCut(raw, len, SCRATCH / 2), n8, nc;
         n8 = json_unescape(raw, take, raw8, SCRATCH);
         nc = utf8_to_cp437(raw8, n8, cp, SCRATCH);
-        a->text(a->ctx, cp, nc);
+        if (!thinking)
+            a->text(a->ctx, cp, nc);
+        else if (nc)
+            a->thinking(a->ctx, THINK_TEXT, cp, nc);
         raw += take;
         len -= take;
     }
@@ -154,6 +158,8 @@ static int blockStart(ApiStream *a, const char *data, unsigned n)
     }
     if (!strcmp(type, "thinking")) {
         a->blockType = B_THINKING;
+        if (a->thinking)
+            a->thinking(a->ctx, THINK_START, "", 0);
         return emitHistZ(a, "{\"type\":\"thinking\",\"thinking\":\"");
     }
     if (!strcmp(type, "redacted_thinking")) {
@@ -190,12 +196,10 @@ static int blockDelta(ApiStream *a, const char *data, unsigned n)
     field(data, n, "delta.type", type, sizeof type);
     if (!strcmp(type, "text_delta")) {
         if (json_find(data, n, "delta.text", &v, &len) == JSON_STRING)
-            return textDelta(a, v, len);
+            return textDelta(a, v, len, 0);
     } else if (!strcmp(type, "thinking_delta")) {
-        if (a->thinking)
-            a->thinking(a->ctx);
         if (json_find(data, n, "delta.thinking", &v, &len) == JSON_STRING)
-            return emitHist(a, v, len);
+            return textDelta(a, v, len, 1);
     } else if (!strcmp(type, "signature_delta")) {
         if (json_find(data, n, "delta.signature", &v, &len) == JSON_STRING) {
             if (emitHistZ(a, "\",\"signature\":\"") || emitHist(a, v, len))
@@ -218,6 +222,8 @@ static int blockStop(ApiStream *a)
         break;
     case B_THINKING:
         rc = emitHistZ(a, a->sigOpen ? "\"}" : "\",\"signature\":\"\"}");
+        if (a->thinking)
+            a->thinking(a->ctx, THINK_END, "", 0);
         break;
     case B_TOOL:
         rc = emitHistZ(a, a->sigOpen ? "}" : "{}}");

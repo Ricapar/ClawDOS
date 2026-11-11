@@ -11,6 +11,10 @@
  *
  * whose length is known before a byte is written: the fields are a few short
  * strings, the prefix and the history are files of known size.
+ *
+ * A conversation also keeps, from its first request to its last, the settings
+ * a message thread treats as fixed (ApiFixed): the thinking configuration and
+ * the cache markers, and with them the anthropic-beta values they need.
  */
 #ifndef CLAWDOS_APIREQ_H
 #define CLAWDOS_APIREQ_H
@@ -22,6 +26,19 @@
 extern "C" {
 #endif
 
+/* The settings a conversation is held to whatever /model or a relaunch does,
+   taken from the provider when the conversation's prefix is first rendered:
+   thinking blocks and the prompt cache are bound to them, and a message
+   thread refuses a request whose fixed fields differ. */
+typedef struct ApiFixed {
+    int progress;                /* "thinking":{"display":"updates"}: the model's progress notes */
+    int dropThinking;            /* "block_binding":{"prefix_mismatch_behavior":"drop_block"} */
+    int cache;                   /* the two cache_control markers */
+    int ttl1h;                   /* ...with "ttl":"1h"; else five minutes */
+} ApiFixed;
+
+void api_fixed_from(ApiFixed *f, const Provider *p);
+
 /* What a conversation's prefix is made from. */
 typedef struct ApiPrefix {
     const char *promptPath;      /* PROMPT.TXT: CP437 text with {name} and {memories} */
@@ -29,6 +46,7 @@ typedef struct ApiPrefix {
     const char *name;            /* for {name} */
     const char *memories;        /* for {memories}; "" shows as "(none)" */
     int cache;                   /* the system block's cache_control marker */
+    int ttl1h;                   /* its ttl: one hour, else five minutes */
 } ApiPrefix;
 
 /* "system":[...],"tools":[...] into the sink. 0 ok, -1 a file could not be
@@ -41,6 +59,7 @@ long api_prefix_file(const char *path, const ApiPrefix *x);
 
 typedef struct ApiReq {
     const Provider *p;
+    const ApiFixed *fixed;       /* the conversation's thinking and cache settings */
     const char *prefixPath;      /* the conversation's prefix file */
     long prefixLen;              /* its size */
     int noTools;                 /* the last round: tool_choice none */
@@ -51,8 +70,10 @@ unsigned long api_length(const ApiReq *r);
 /* The JSON body into the sink. 0 ok, -1 the prefix or the history could not
    be read (or the prefix was not the size counted), -2 the sink failed. */
 int api_body(Sink *s, const ApiReq *r);
-/* "POST path HTTP/1.1\r\n" + headers + "\r\n" for a body of `length` bytes. */
-int api_head(Sink *s, const Provider *p, unsigned long length);
+/* "POST path HTTP/1.1\r\n" + headers + "\r\n" for a body of `length` bytes.
+   anthropic-beta carries the provider's betas line and the values f needs
+   (none repeated); there is none when both are empty. */
+int api_head(Sink *s, const Provider *p, const ApiFixed *f, unsigned long length);
 
 #ifdef __cplusplus
 }

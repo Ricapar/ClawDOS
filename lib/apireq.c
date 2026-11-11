@@ -9,6 +9,24 @@
 #define PIECE 2048              /* file reads (heap, freed after use) */
 #define MESSAGES "\"messages\":["
 
+/* The anthropic-beta values the fixed settings need (docs/API.md). */
+#define BETA_PROGRESS "thinking-display-updates-2026-08-18"
+#define BETA_BINDING  "thinking-binding-controls-2026-08-01"
+
+void api_fixed_from(ApiFixed *f, const Provider *p)
+{
+    f->progress = p->progress != 0;
+    f->dropThinking = p->dropThinking != 0;
+    f->cache = p->cache != 0;
+    f->ttl1h = p->cacheTtl1h != 0;
+}
+
+/* A cache_control value; both markers of a request use this, so their ttl agrees. */
+static const char *cacheMarker(int ttl1h)
+{
+    return ttl1h ? "{\"type\":\"ephemeral\",\"ttl\":\"1h\"}" : "{\"type\":\"ephemeral\"}";
+}
+
 /* Copy a file into the sink as is: all of it when want < 0, else exactly want
    bytes. 0 ok, -1 unreadable (or shorter than want), -2 sink failed. */
 static int copyFile(Sink *s, const char *path, long want)
@@ -116,8 +134,10 @@ int api_prefix(Sink *s, const ApiPrefix *x)
     if ((rc = promptText(s, x)) != 0)
         return rc;
     PUT("\"");
-    if (x->cache)
-        PUT(",\"cache_control\":{\"type\":\"ephemeral\"}");
+    if (x->cache) {
+        PUT(",\"cache_control\":");
+        PUT(cacheMarker(x->ttl1h));
+    }
     PUT("}],\"tools\":");
     return copyFile(s, x->toolsPath, -1L);
 }
@@ -159,10 +179,13 @@ long api_prefix_file(const char *path, const ApiPrefix *x)
     return (long)s.count;
 }
 
-/* The fields before the prefix, each followed by a comma. */
+/* The fields before the prefix, each followed by a comma. thinking and the
+   top-level cache_control come from the conversation's fixed settings, the
+   rest from the provider as it is now. */
 static int fields(Sink *s, const ApiReq *r)
 {
     const Provider *p = r->p;
+    const ApiFixed *f = r->fixed;
     char num[16];
 
     PUT("{\"model\":\"");
@@ -171,13 +194,24 @@ static int fields(Sink *s, const ApiReq *r)
     PUT("\",\"max_tokens\":");
     PUT(num);
     PUT(",\"stream\":true,");
+    if (f->progress || f->dropThinking) {
+        PUT("\"thinking\":{\"type\":\"adaptive\"");
+        if (f->progress)
+            PUT(",\"display\":\"updates\"");
+        if (f->dropThinking)
+            PUT(",\"block_binding\":{\"prefix_mismatch_behavior\":\"drop_block\"}");
+        PUT("},");
+    }
     if (p->effort[0]) {
         PUT("\"output_config\":{\"effort\":\"");
         PUT(p->effort);
         PUT("\"},");
     }
-    if (p->cache)
-        PUT("\"cache_control\":{\"type\":\"ephemeral\"},");
+    if (f->cache) {
+        PUT("\"cache_control\":");
+        PUT(cacheMarker(f->ttl1h));
+        PUT(",");
+    }
     if (r->noTools)
         PUT("\"tool_choice\":{\"type\":\"none\"},");
     else
@@ -211,7 +245,53 @@ int api_body(Sink *s, const ApiReq *r)
     return 0;
 }
 
-int api_head(Sink *s, const Provider *p, unsigned long length)
+/* Whether the comma-separated list holds the value v (blanks around it allowed). */
+static int listHas(const char *list, const char *v)
+{
+    unsigned n = strlen(v);
+    while (*list) {
+        const char *end;
+        while (*list == ' ' || *list == ',')
+            list++;
+        end = list;
+        while (*end && *end != ',')
+            end++;
+        while (end > list && end[-1] == ' ')
+            end--;
+        if ((unsigned)(end - list) == n && !memcmp(list, v, n))
+            return 1;
+        while (*end && *end != ',')
+            end++;
+        list = end;
+    }
+    return 0;
+}
+
+/* "anthropic-beta: ...\r\n": the provider's line, then each value the fixed
+   settings need that it lacks; nothing when there is neither. */
+static int betaHeader(Sink *s, const Provider *p, const ApiFixed *f)
+{
+    const char *need[2];
+    int n = 0, i, any = p->betas[0] != 0;
+
+    if (f->progress && !listHas(p->betas, BETA_PROGRESS))
+        need[n++] = BETA_PROGRESS;
+    if (f->dropThinking && !listHas(p->betas, BETA_BINDING))
+        need[n++] = BETA_BINDING;
+    if (!any && !n)
+        return 0;
+    PUT("anthropic-beta: ");
+    PUT(p->betas);
+    for (i = 0; i < n; i++) {
+        if (any || i)
+            PUT(",");
+        PUT(need[i]);
+    }
+    PUT("\r\n");
+    return 0;
+}
+
+int api_head(Sink *s, const Provider *p, const ApiFixed *f, unsigned long length)
 {
     char num[16];
 
@@ -231,11 +311,8 @@ int api_head(Sink *s, const Provider *p, unsigned long length)
         PUT("\r\n");
     }
     PUT("anthropic-version: 2023-06-01\r\n");
-    if (p->betas[0]) {
-        PUT("anthropic-beta: ");
-        PUT(p->betas);
-        PUT("\r\n");
-    }
+    if (betaHeader(s, p, f))
+        return -2;
     PUT("Content-Type: application/json\r\nAccept: text/event-stream\r\n"
         "Connection: keep-alive\r\nContent-Length: ");
     sprintf(num, "%lu", length);

@@ -14,8 +14,9 @@ The API is stateless, so the conversation arrives whole in every request. A
 tool call ends one response (stop_reason tool_use) and the scenario resumes
 when the next request carries the tool_result.
 
-Every request is checked against the rules of Validator (headers, fields, message
-structure, tool pairing, thinking blocks; docs/API.md lists them): a
+Every request is checked against the rules of Validator (headers, fields, the
+thinking object and its beta headers, the cache markers, message structure, tool
+pairing, thinking blocks; docs/API.md lists them): a
 violation is answered with HTTP 400 and logged on a line starting `VALIDATION:`,
 so the boot tests can reject it. Stdlib only.
 """
@@ -45,8 +46,12 @@ API_VERSION = '2023-06-01'
 BODY_TIMEOUT = 10.0     # seconds of silence while the body arrives before the request is called short
 # The top-level fields HARNESS.EXE sends (docs/API.md, "The request"); any other is rejected like the real
 # API's "Extra inputs are not permitted". A task that adds a request field adds it here, with its rule.
-REQUEST_FIELDS = ('model', 'max_tokens', 'stream', 'output_config', 'cache_control', 'tool_choice', 'system',
-                  'tools', 'messages')
+REQUEST_FIELDS = ('model', 'max_tokens', 'stream', 'thinking', 'output_config', 'cache_control', 'tool_choice',
+                  'system', 'tools', 'messages')
+# The anthropic-beta values the thinking object's beta fields need (docs/API.md, "The request").
+BETA_PROGRESS = 'thinking-display-updates-2026-08-18'
+BETA_BINDING = 'thinking-binding-controls-2026-08-01'
+CACHE_TTLS = ('5m', '1h')
 
 
 class BadRequest(Exception):
@@ -204,6 +209,76 @@ def check_system(system):
             raise BadRequest(f'system.{k}: must be a text block with non-whitespace text')
 
 
+def betas_of(headers):
+    """The set of anthropic-beta values in a request's headers (names lowercased)."""
+    return {v.strip() for v in headers.get('anthropic-beta', '').split(',') if v.strip()}
+
+
+def check_thinking_config(thinking, betas):
+    """Raise BadRequest unless the thinking object has a shape the API accepts with these beta values:
+    display "updates" and block_binding each need their beta header, as on the real API."""
+    if not isinstance(thinking, dict):
+        raise BadRequest('thinking must be an object')
+    if thinking.get('type') != 'adaptive':
+        raise BadRequest(f'thinking.type: must be adaptive, not {thinking.get("type")!r}')
+    extra = sorted(set(thinking) - {'type', 'display', 'block_binding'})
+    if extra:
+        raise BadRequest(f'thinking.{extra[0]}: Extra inputs are not permitted')
+    if 'display' in thinking:
+        if thinking['display'] != 'updates':
+            raise BadRequest(f'thinking.display: must be updates, not {thinking["display"]!r}')
+        if BETA_PROGRESS not in betas:
+            raise BadRequest(f'thinking.display: "updates" needs the anthropic-beta header {BETA_PROGRESS}')
+    if 'block_binding' in thinking:
+        if BETA_BINDING not in betas:
+            raise BadRequest(f'thinking.block_binding: needs the anthropic-beta header {BETA_BINDING}')
+        binding = thinking['block_binding']
+        if not isinstance(binding, dict) or set(binding) != {'prefix_mismatch_behavior'} \
+                or binding['prefix_mismatch_behavior'] != 'drop_block':
+            raise BadRequest('thinking.block_binding: must be {"prefix_mismatch_behavior":"drop_block"}')
+
+
+def cache_ttl(where, marker):
+    """The ttl of a cache_control marker ('5m' when it has none); BadRequest unless it is well formed."""
+    if not isinstance(marker, dict) or marker.get('type') != 'ephemeral' or set(marker) - {'type', 'ttl'}:
+        raise BadRequest(f'{where}: must be {{"type":"ephemeral"}}, with an optional ttl')
+    ttl = marker.get('ttl', '5m')
+    if ttl not in CACHE_TTLS:
+        raise BadRequest(f'{where}.ttl: must be one of {", ".join(CACHE_TTLS)}, not {ttl!r}')
+    return ttl
+
+
+def check_cache_markers(req):
+    """The top-level cache_control and the system blocks' markers are well formed and agree on their ttl."""
+    ttls = []
+    if 'cache_control' in req:
+        ttls.append(('cache_control', cache_ttl('cache_control', req['cache_control'])))
+    system = req.get('system')
+    if isinstance(system, list):
+        for k, b in enumerate(system):
+            if isinstance(b, dict) and 'cache_control' in b:
+                where = f'system.{k}.cache_control'
+                ttls.append((where, cache_ttl(where, b['cache_control'])))
+    for where, ttl in ttls[1:]:
+        if ttl != ttls[0][1]:
+            raise BadRequest(f'{where}: ttl {ttl} differs from the {ttls[0][1]} of {ttls[0][0]} '
+                             f'(the markers of a request must carry the same ttl)')
+
+
+def settings_of(req):
+    """'thinking updates+drop_block, cache 1h': a request's thinking object and top-level cache marker, for the log."""
+    thinking = req.get('thinking')
+    if isinstance(thinking, dict):
+        parts = [p for p, on in (('updates', thinking.get('display') == 'updates'),
+                                 ('drop_block', 'block_binding' in thinking)) if on]
+        kinds = '+'.join(parts) or str(thinking.get('type'))
+    else:
+        kinds = 'none'
+    marker = req.get('cache_control')
+    cache = marker.get('ttl', '5m') if isinstance(marker, dict) else 'off'
+    return f'thinking {kinds}, cache {cache}'
+
+
 def shape_of(messages):
     """'user[text] assistant[thinking,text,tool_use] ...': the block types of each message, for the log."""
     out = []
@@ -242,8 +317,7 @@ class Validator:
         """The record of the conversation these messages belong to."""
         key = json.dumps(messages[0], sort_keys=True)
         if len(messages) == 1 or key not in self.conversations:
-            self.conversations[key] = {'replies': [], 'system': None, 'tools': None, 'seen': False,
-                                       'known': len(messages) == 1}
+            self.conversations[key] = {'replies': [], 'seen': False, 'known': len(messages) == 1}
         return self.conversations[key]
 
     def check(self, headers, body):
@@ -263,6 +337,9 @@ class Validator:
         if not isinstance(req, dict):
             raise BadRequest('the body must be an object')
         self.check_fields(req)
+        if 'thinking' in req:
+            check_thinking_config(req['thinking'], betas_of(headers))
+        check_cache_markers(req)
         with self.lock:
             conv = self.conversation(req['messages'])
             self.check_thinking(conv, req['messages'])
@@ -323,17 +400,23 @@ class Validator:
                 raise BadRequest(f'messages.{i}.content: the {reply["thinking"]["type"]} block the mock sent '
                                  f'did not come back unchanged as the first block')
 
+    STABLE = {'system': 'thinking blocks are bound to the system prompt and tools they were made under',
+              'tools': 'thinking blocks are bound to the system prompt and tools they were made under',
+              'thinking': 'the thinking configuration is chosen when the conversation starts',
+              'cache_control': 'the cache markers are chosen when the conversation starts'}
+
     def check_stable(self, conv, req):
         """Within a conversation system and tools must not change: the API drops or rejects thinking
-        blocks bound to the old ones, and the prompt cache misses from the first byte."""
-        now = {'system': req.get('system'), 'tools': req.get('tools')}
+        blocks bound to the old ones, and the prompt cache misses from the first byte. The thinking
+        configuration and the top-level cache marker are held to the same rule (a message thread
+        refuses a request whose fixed fields differ)."""
+        now = {field: req.get(field) for field in self.STABLE}
         if not conv['seen']:
             conv.update(now, seen=True)
             return
-        for field in ('system', 'tools'):
+        for field, why in self.STABLE.items():
             if not same_json(now[field], conv[field]):
-                raise BadRequest(f'{field}: changed within a conversation (thinking blocks are bound to '
-                                 f'the system prompt and tools they were made under)')
+                raise BadRequest(f'{field}: changed within a conversation ({why})')
 
 
 class Pending:
@@ -346,6 +429,7 @@ class Pending:
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     rbufsize = 0                # unbuffered: read_body can tell from the socket whether bytes are waiting
+    binding = False             # this request carries the thinking-binding beta (message_start shows it)
 
     def log_message(self, fmt, *args):   # quieter default logging, to stdout
         print(f'{self.address_string()} {fmt % args}', flush=True)
@@ -412,7 +496,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(400, 'invalid_request_error', str(e))
             return
         messages = req['messages']
-        print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}', flush=True)
+        print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}, {settings_of(req)}', flush=True)
         self.answer(req, conv)
 
     def drain(self):
@@ -512,6 +596,9 @@ class Handler(BaseHTTPRequestHandler):
             gen = chat.respond(command, text)
         choice = req.get('tool_choice')
         chat.no_tools = isinstance(choice, dict) and choice.get('type') == 'none'
+        thinking = req.get('thinking') or {}
+        chat.progress = thinking.get('display') == 'updates'
+        self.binding = BETA_BINDING in betas_of({k.lower(): v for k, v in self.headers.items()})
         self.stream_reply(chat, gen, conv)
 
     def check_tools(self):
@@ -613,11 +700,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_stream()
 
     def message_start(self):
-        self.event('message_start', {'message': {
-            'id': f'msg_mock_{self.server.next_id()}', 'type': 'message', 'role': 'assistant', 'model': MODEL,
-            'content': [], 'stop_reason': None, 'stop_sequence': None,
-            'usage': {'input_tokens': 1200, 'cache_creation_input_tokens': 0,
-                      'cache_read_input_tokens': 1000, 'output_tokens': 1}}})
+        message = {'id': f'msg_mock_{self.server.next_id()}', 'type': 'message', 'role': 'assistant', 'model': MODEL,
+                   'content': [], 'stop_reason': None, 'stop_sequence': None,
+                   'usage': {'input_tokens': 1200, 'cache_creation_input_tokens': 0,
+                             'cache_read_input_tokens': 1000, 'output_tokens': 1}}
+        if self.binding:
+            message['input_transformations'] = []     # what the binding beta adds; the client ignores it
+        self.event('message_start', {'message': message})
 
     def thinking_block(self, chat):
         """Send the reply's first block and return it as the DOS PC should echo it back: a redacted_thinking
@@ -629,6 +718,8 @@ class Handler(BaseHTTPRequestHandler):
             self.event('content_block_stop', {'index': 0})
             return block
         text = getattr(chat, 'thinking_text', '')
+        if not text and chat.progress:      # display "updates": the scenario's progress note, if any
+            text = chat.progress_note
         signature = getattr(chat, 'signature', None) or SIGNATURE
         self.event('content_block_start',
                    {'index': 0, 'content_block': {'type': 'thinking', 'thinking': '', 'signature': ''}})

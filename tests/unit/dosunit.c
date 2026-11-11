@@ -613,6 +613,16 @@ static void testCfg(void)
         sprintf(text + strlen(text), "[p%d]\n", i);
     CHECK("cfg ninth section", cfg_parse(c, text) == 9);
     cfg_defaults(c);
+    CHECK("cfg thinking and cache lifetime", cfg_parse(c, "[a]\nprogress 1\ndropthinking 1\ncachettl 1h\n"
+                                                         "[b]\ncachettl 5m\n[c]\n") == 0
+          && c->providers[0].progress == 1 && c->providers[0].dropThinking == 1 && c->providers[0].cacheTtl1h == 1
+          && c->providers[1].cacheTtl1h == 0 && c->providers[2].progress == 0
+          && c->providers[2].dropThinking == 0 && c->providers[2].cacheTtl1h == 0);
+    cfg_defaults(c);
+    CHECK("cfg bad cachettl names its line", cfg_parse(c, "[a]\nmodel m\ncachettl 2h\n") == 3);
+    cfg_defaults(c);
+    CHECK("cfg empty cachettl is bad", cfg_parse(c, "[a]\ncachettl\n") == 2);
+    cfg_defaults(c);
     CHECK("cfg defaults", !strcmp(c->name, "Claude") && c->nproviders == 0);
     CHECK("cfg old keys ignored", cfg_parse(c, "clock 0\ntimezone -5\ntheme x\n") == 0);
     free(c);
@@ -723,7 +733,7 @@ static void testPromptAcrossReads(void)
     writeFile("C:\\PTEST.TXT", prompt);
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
     x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = "M1\nM2";
-    x.cache = 0;
+    x.cache = 0; x.ttl1h = 0;
     sink_buffer(&buf, out, 6600);
     CHECK("prompt across reads: rendered", api_prefix(&buf, &x) == 0 && !strcmp(out, want));
     remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
@@ -747,6 +757,7 @@ static void testApiReq(void)
     char *big = (char *)malloc(3001);
     ApiPrefix x;
     ApiReq r;
+    ApiFixed fx;
     Sink buf;
     long len;
     int i;
@@ -755,6 +766,7 @@ static void testApiReq(void)
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
     remove("C:\\PTEST.PRE");
     x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = ""; x.cache = 1;
+    x.ttl1h = 0;
     sink_buffer(&buf, body, sizeof body);
     CHECK("prefix ok", api_prefix(&buf, &x) == 0);
     CHECK_STR("prefix text", body, wantPrefix);
@@ -773,7 +785,8 @@ static void testApiReq(void)
     strcpy(p->host, "api.anthropic.com"); strcpy(p->path, "/v1/messages"); strcpy(p->auth, "x-api-key");
     strcpy(p->key, "sk-ant-abc"); strcpy(p->model, "claude-opus-5-5"); strcpy(p->effort, "low"); p->cache = 1;
     p->maxTokens = 64000L;
-    r.p = p; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
+    api_fixed_from(&fx, p);               /* progress, dropthinking off; cache on, 5 minutes */
+    r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
 
     remove("C:\\HISTTEST.JSN");
     hist_open("C:\\HISTTEST.JSN");
@@ -810,7 +823,7 @@ static void testApiReq(void)
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
     CHECK("req no effort", strstr(body, "output_config") == NULL && lengthMatches(&r));
-    p->cache = 0;
+    fx.cache = 0;                         /* the conversation's setting, not the provider's */
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
     CHECK("req no top-level cache, prefix as rendered",
@@ -828,7 +841,7 @@ static void testApiReq(void)
     CHECK("req missing prefix file", api_body(&buf, &r) == -1);
 
     sink_buffer(&buf, head, sizeof head);
-    api_head(&buf, p, 123);
+    api_head(&buf, p, &fx, 123);
     CHECK("head request line", !strncmp(head, "POST /v1/messages HTTP/1.1\r\n", 28));
     CHECK("head fields", strstr(head, "Host: api.anthropic.com\r\n") && strstr(head, "x-api-key: sk-ant-abc\r\n")
           && strstr(head, "anthropic-version: 2023-06-01\r\n") && strstr(head, "Content-Length: 123\r\n")
@@ -837,7 +850,7 @@ static void testApiReq(void)
           && !strcmp(head + strlen(head) - 4, "\r\n\r\n"));
     strcpy(p->auth, "bearer"); strcpy(p->key, "sk-or-x"); strcpy(p->betas, "b-2026");
     sink_buffer(&buf, head, sizeof head);
-    api_head(&buf, p, 1);
+    api_head(&buf, p, &fx, 1);
     CHECK("head bearer and betas", strstr(head, "Authorization: Bearer sk-or-x\r\n") && !strstr(head, "x-api-key")
           && strstr(head, "anthropic-beta: b-2026\r\n"));
     hist_close();
@@ -846,11 +859,138 @@ static void testApiReq(void)
     free(p);
 }
 
+/* The thinking object, the cache markers and the beta header for each of the
+   fixed settings, with their lengths counted right. */
+static void testApiFixed(void)
+{
+    static char body[700], head[600];
+    static const char *const thinking[4] = {
+        NULL,
+        "\"thinking\":{\"type\":\"adaptive\",\"display\":\"updates\"},",
+        "\"thinking\":{\"type\":\"adaptive\",\"block_binding\":{\"prefix_mismatch_behavior\":\"drop_block\"}},",
+        "\"thinking\":{\"type\":\"adaptive\",\"display\":\"updates\","
+        "\"block_binding\":{\"prefix_mismatch_behavior\":\"drop_block\"}},"
+    };
+    static const char *const betas[4] = {
+        NULL,
+        "anthropic-beta: thinking-display-updates-2026-08-18\r\n",
+        "anthropic-beta: thinking-binding-controls-2026-08-01\r\n",
+        "anthropic-beta: thinking-display-updates-2026-08-18,thinking-binding-controls-2026-08-01\r\n"
+    };
+    static const char hour[] = "{\"type\":\"ephemeral\",\"ttl\":\"1h\"}";
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    ApiPrefix x;
+    ApiFixed fx;
+    ApiReq r;
+    Sink buf;
+    long len;
+    int i;
+    char name[100];
+
+    writeFile("C:\\PTEST.TXT", "Hi.");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    memset(p, 0, sizeof *p);
+    strcpy(p->host, "h"); strcpy(p->path, "/v1/messages"); strcpy(p->model, "m"); p->maxTokens = 100;
+    p->cache = 1;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
+
+    for (i = 0; i < 4; i++) {
+        p->progress = i & 1;
+        p->dropThinking = (i & 2) != 0;
+        api_fixed_from(&fx, p);
+        x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = "";
+        x.cache = fx.cache; x.ttl1h = fx.ttl1h;
+        len = api_prefix_file("C:\\PTEST.PRE", &x);
+        r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
+        sink_buffer(&buf, body, sizeof body);
+        api_body(&buf, &r);
+        sprintf(name, "fixed %d: body", i);
+        CHECK(name, i ? strstr(body, "\"stream\":true,\"thinking\"") != NULL && strstr(body, thinking[i]) != NULL
+                      : strstr(body, "thinking") == NULL);
+        sprintf(name, "fixed %d: length", i);
+        CHECK(name, lengthMatches(&r));
+        sink_buffer(&buf, head, sizeof head);
+        api_head(&buf, p, &fx, 1);
+        sprintf(name, "fixed %d: header", i);
+        CHECK(name, i ? strstr(head, betas[i]) != NULL : strstr(head, "anthropic-beta") == NULL);
+    }
+
+    /* the provider's own betas line comes first, and a value it already has is not repeated */
+    strcpy(p->betas, "b-1, thinking-binding-controls-2026-08-01");
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 1);
+    CHECK("fixed: betas merged without duplicates",
+          strstr(head, "anthropic-beta: b-1, thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18\r\n")
+          != NULL);
+    strcpy(p->betas, "thinking-display-updates-2026-08-18x");
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 1);
+    CHECK("fixed: only whole values count as present",
+          strstr(head, "anthropic-beta: thinking-display-updates-2026-08-18x,thinking-display-updates-2026-08-18,"
+                       "thinking-binding-controls-2026-08-01\r\n") != NULL);
+    p->betas[0] = 0;
+
+    /* cachettl: both markers carry the same lifetime; the body follows the
+       conversation's settings, not the provider's */
+    p->progress = p->dropThinking = 0;
+    p->cacheTtl1h = 1;
+    api_fixed_from(&fx, p);
+    x.cache = fx.cache; x.ttl1h = fx.ttl1h;
+    len = api_prefix_file("C:\\PTEST.PRE", &x);
+    r.prefixLen = len;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    sprintf(name, "\"cache_control\":%s,\"tool_choice\"", hour);
+    CHECK("fixed ttl 1h: top-level marker", strstr(body, name) != NULL);
+    sprintf(name, "\"text\":\"Hi.\",\"cache_control\":%s}]", hour);
+    CHECK("fixed ttl 1h: system marker", strstr(body, name) != NULL);
+    CHECK("fixed ttl 1h: length", lengthMatches(&r));
+    p->cacheTtl1h = 0;
+    p->cache = 0;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("fixed: a provider change leaves the conversation's markers", strstr(body, name) != NULL
+          && strstr(body, ",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"},\"tool_choice\"") != NULL);
+    api_fixed_from(&fx, p);
+    CHECK("fixed: 5 minutes is the default", !fx.ttl1h && !fx.cache && !fx.progress && !fx.dropThinking);
+    p->cache = 1;
+    api_fixed_from(&fx, p);
+    x.cache = fx.cache; x.ttl1h = fx.ttl1h;
+    len = api_prefix_file("C:\\PTEST.PRE", &x);
+    r.prefixLen = len;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("fixed ttl 5m: both markers plain",
+          strstr(body, "\"cache_control\":{\"type\":\"ephemeral\"},\"tool_choice\"") != NULL
+          && strstr(body, "\"text\":\"Hi.\",\"cache_control\":{\"type\":\"ephemeral\"}}]") != NULL
+          && strstr(body, "ttl") == NULL && lengthMatches(&r));
+
+    hist_close();
+    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
+    free(p);
+}
+
 /* --- api stream --------------------------------------------------------------- */
 
-static char asText[800], asHist[3000]; static int asThinking;
+/* asThought: "[" a thinking block's start, its text pieces between "|", "]" its end. */
+static char asText[800], asHist[3000], asThought[200];
 static void asTextFn(void *c, const char *t, unsigned n) { (void)c; strncat(asText, t, n); }
-static void asThinkFn(void *c) { (void)c; asThinking++; }
+static void asThinkFn(void *c, int phase, const char *t, unsigned n)
+{
+    (void)c;
+    if (phase == THINK_START)
+        strcat(asThought, "[");
+    else if (phase == THINK_END)
+        strcat(asThought, "]");
+    else {
+        if (asThought[0] && asThought[strlen(asThought) - 1] != '[')
+            strcat(asThought, "|");
+        strncat(asThought, t, n);
+    }
+}
 static int asHistFn(void *c, const char *p, unsigned n) { (void)c; strncat(asHist, p, n); return 0; }
 
 static int ev(ApiStream *a, const char *event, const char *data)
@@ -860,7 +1000,7 @@ static int ev(ApiStream *a, const char *event, const char *data)
 
 static void asReset(ApiStream *a, char *inputBuf, unsigned max)
 {
-    asText[0] = asHist[0] = 0; asThinking = 0;
+    asText[0] = asHist[0] = asThought[0] = 0;
     apistream_init(a, inputBuf, max);
     a->text = asTextFn; a->thinking = asThinkFn; a->hist = asHistFn; a->ctx = NULL;
 }
@@ -892,7 +1032,7 @@ static void testApiStream(void)
     CHECK("stream events ok so far", rc == 0);
     CHECK("stream message_stop", ev(&a, "message_stop", "{\"type\":\"message_stop\"}") == 1);
     CHECK_STR("stream text", asText, "Hi \x82!");
-    CHECK("stream thinking twice", asThinking == 2);
+    CHECK_STR("stream thinking text to its callback", asThought, "[Let me |think.]");
     CHECK_STR("stream history", asHist,
         "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Let me think.\",\"signature\":\"abc\"},"
         "{\"type\":\"text\",\"text\":\"Hi \\u00e9!\"},"
@@ -913,6 +1053,25 @@ static void testApiStream(void)
     CHECK_STR("stream split surrogate on screen", asText, "??");
     CHECK("stream split surrogate in history", strstr(asHist, "\"text\":\"\\ud83d\\ude00\"") != NULL);
     CHECK("stream no tool", !a.hasTool && !strcmp(a.stopReason, "end_turn"));
+
+    /* thinking without display "updates": an empty block shows nothing; a
+       note with escapes and accents decodes to CP437; message_stop ends a
+       block left open */
+    asReset(&a, input, sizeof input);
+    ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"s\"}}");
+    ev(&a, "content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    ev(&a, "content_block_start", "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Caf\\u00e9 \\\"x\\\"\\n\"}}");
+    ev(&a, "content_block_delta", "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"t\"}}");
+    CHECK("stream note, block left open", ev(&a, "message_stop", "{\"type\":\"message_stop\"}") == 1);
+    CHECK_STR("stream empty thinking stays quiet, a note decodes", asThought, "[][Caf\x82 \"x\"\n]");
+    CHECK_STR("stream notes kept as sent", asHist,
+        "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"s\"},"
+        "{\"type\":\"thinking\",\"thinking\":\"Caf\\u00e9 \\\"x\\\"\\n\",\"signature\":\"t\"}]}");
+    CHECK("stream notes are not reply text", asText[0] == 0);
 
     asReset(&a, input, sizeof input);
     CHECK("stream error event", ev(&a, "error", "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}") == -1
@@ -1717,6 +1876,7 @@ int main(void)
     testCfg();
     testHistory();
     testApiReq();
+    testApiFixed();
     testPromptAcrossReads();
     testApiStream();
     testLongEvents();

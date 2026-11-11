@@ -12,6 +12,7 @@
 #include "httpp.h"
 #include "chunked.h"
 #include "cfg.h"
+#include "apireq.h"
 
 #define HTTP_HEAD_MAX 4096        /* the API sends ~1.5 KB of rate-limit and CDN headers */
 #define HTTP_RX_MAX   2048
@@ -26,7 +27,7 @@ class Http {
 
     Sink  *sink(void) { return &sk; }                  /* writes are staged and go out in 512-byte pieces */
     int8_t flush(void);                                /* send what the sink still holds; 0 ok */
-    int8_t sendHead(const Provider *p, unsigned long length);   /* api_head into the socket */
+    int8_t sendHead(const Provider *p, const ApiFixed *f, unsigned long length);   /* api_head into the socket */
     void   beginResponse(void) { headLen = 0; }                 /* after writing a request by hand */
 
     /* Read the status line and headers (<= HTTP_HEAD_MAX) within `secs`; call

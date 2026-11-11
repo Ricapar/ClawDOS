@@ -81,11 +81,11 @@ void Http::close(void)
     done = 1;
 }
 
-int8_t Http::sendHead(const Provider *p, unsigned long length)
+int8_t Http::sendHead(const Provider *p, const ApiFixed *f, unsigned long length)
 {
     sk.count = 0;
     headLen = 0;
-    return (int8_t)(api_head(&sk, p, length) ? -1 : 0);
+    return (int8_t)(api_head(&sk, p, f, length) ? -1 : 0);
 }
 
 /* Receive more raw bytes into rx (compacting first). */

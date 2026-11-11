@@ -13,8 +13,8 @@ stream it reads and how the history stays valid.
 | `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
-| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the provider's `cache` setting and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Esc while the memories are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
-| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event. A line per notable event (retries, `connection #n`, errors, `relaunch:`), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
+| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the conversation's cache settings (`cache`, `cachettl`) and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Esc while the memories are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
+| `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event. A line per notable event (retries, `connection #n`, errors, `relaunch:`, `progress note:` with the first 60 characters of each progress note drawn), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). |
 
 ### CLAWDOS.CFG
@@ -36,10 +36,21 @@ key sk-ant-...              # or: keyfile C:\CLAWDOS\ANTHROP.KEY
 model claude-opus-5-5
 effort low                  # omitted: no output_config is sent; F5 cycles it
 maxtokens 64000             # max_tokens; 64000 when omitted (thinking counts toward it)
-betas ...                   # omitted: no anthropic-beta header
-cache 1                     # default; 0 sends no cache_control (the system block keeps
-                            # the marker its conversation's .PRE was made with)
+betas ...                   # extra anthropic-beta values; omitted: only those below
+cache 1                     # default; 0 sends no cache_control
+cachettl 5m                 # default; 1h: both cache markers get "ttl":"1h"; anything else
+                            # is an error naming the line
+progress 1                  # thinking display "updates": the model's progress notes (beta)
+dropthinking 1              # thinking block_binding drop_block (beta)
 ```
+
+`progress` and `dropthinking` are off when absent; the shipped `[anthropic]`
+section turns both on. `cache`, `cachettl`, `progress` and `dropthinking` are
+the conversation's fixed settings: they are taken from the provider in use when
+the conversation's first request is made (with its `.PRE`) and kept to its end,
+through `/model` and F5; RESUME.TXT carries them across a relaunch
+(`fixed P D C T`). An edit to them, or a switch to a
+provider with other values, applies from the next conversation.
 
 A section without a key still works against the mock API; against the real one
 the API answers 401, which is shown. `tunnel`, `host` and `model` are required.
@@ -48,7 +59,10 @@ the API answers 401, which is shown. `tunnel`, `host` and `model` are required.
 
 One `POST {path} HTTP/1.1` per API round on a keep-alive connection to the
 tunnel, with `Host`, `x-api-key` (or `Authorization: Bearer`),
-`anthropic-version: 2023-06-01`, `anthropic-beta` (only with `betas`),
+`anthropic-version: 2023-06-01`, `anthropic-beta` (the provider's `betas`
+line, then `thinking-display-updates-2026-08-18` with `progress` and
+`thinking-binding-controls-2026-08-01` with `dropthinking`, each only once;
+no header when there is nothing to send),
 `Content-Type: application/json`, `Accept: text/event-stream`,
 `Connection: keep-alive` and `Content-Length`. The body is written once per
 attempt, straight into the socket: a few fields from the provider's settings,
@@ -61,19 +75,29 @@ prompt cache keys on it.
 
 ```
 {"model":"...","max_tokens":64000,"stream":true,              maxtokens, default 64000
+ "thinking":{"type":"adaptive",                             with progress or dropthinking
+             "display":"updates",                           progress
+             "block_binding":{"prefix_mismatch_behavior":"drop_block"}},   dropthinking
  "output_config":{"effort":"low"},                          if effort is set
- "cache_control":{"type":"ephemeral"},                      unless cache 0
+ "cache_control":{"type":"ephemeral"},                      unless cache 0; ,"ttl":"1h" with cachettl 1h
  "tool_choice":{"type":"auto","disable_parallel_tool_use":true},
                                                             {"type":"none"} on the 26th round
  "system":[{"type":"text","text":<PROMPT.TXT, escaped>,     system and tools: the .PRE file
-           "cache_control":{"type":"ephemeral"}}],           unless cache 0 when it was made
+           "cache_control":{"type":"ephemeral"}}],           the same marker as the top-level one
  "tools":<TOOLS.JSN>,
  "messages":[<the CHATS file>]}
 ```
 
-No `thinking` field is sent (the models think adaptively; `effort` is the
-control: F5 cycles it through low, medium, high, xhigh and max for the session,
-which costs one uncached request after a change) and no `fallbacks`. One tool call per round keeps one arguments buffer
+`thinking`, the top-level `cache_control` and the system block's marker come
+from the conversation's fixed settings (above), so both markers always carry the
+same ttl. The models think adaptively whether or not `thinking` is sent; it is
+there for its two beta options. `display` `updates` makes the model's notes
+between tool calls arrive as thinking text (without it the text is empty), which
+is shown (below). `block_binding` `drop_block` is the safety net for a prefix
+that had to change: the API then drops the thinking blocks bound to the old one
+instead of answering 400. `effort` is the control for how hard it thinks: F5
+cycles it through low, medium, high, xhigh and max for the session, which costs
+one uncached request after a change. No `fallbacks` is sent. One tool call per round keeps one arguments buffer
 enough and runs the tools in the order the user sees them.
 
 ## The history file
@@ -84,8 +108,9 @@ Everything in it is UTF-8 JSON exactly as the API wants it. CLAWDOS writes:
   appended to that message as a text block (roles must alternate);
 - the assistant message, block by block as it streams: `text`, `thinking`
   (with its `signature`), `redacted_thinking` and `tool_use` blocks. Thinking
-  blocks are never shown but must be echoed back unchanged on later rounds
-  ("preserved thinking"), so the file holds exactly what the API sent. A block
+  blocks must be echoed back unchanged on later rounds ("preserved thinking"),
+  so the file holds exactly what the API sent, whether or not their text was
+  shown as a progress note. A block
   type it does not know ends the turn with an error rather than being dropped;
 - tool results: `{"role":"user","content":[{"type":"tool_result","tool_use_id":
   "...","content":"...","is_error":false}]}`. The content is the tool's output,
@@ -133,10 +158,19 @@ we send), `apistream.c` (events to screen text, history and the tool call).
 
 Events acted on: `message_start` (model, usage), `content_block_start`,
 `content_block_delta` (`text_delta` to the screen and the history,
-`thinking_delta`/`signature_delta` and `input_json_delta` to the history,
+`thinking_delta` to the history and, when its text is not empty, to the screen
+as a progress note, `signature_delta` and `input_json_delta` to the history,
 the latter also to the 16 KB arguments buffer), `content_block_stop`,
 `message_delta` (stop_reason, output tokens), `message_stop`, `error`, `ping`.
-Unknown events and keys are ignored.
+Unknown events and keys are ignored (with the binding beta, `message_start`'s
+message carries an `input_transformations` array; it is not read).
+
+A progress note is a thinking block's text, decoded to CP437 like reply text
+and drawn dim in the reply's margin as a paragraph of its own: it opens with
+the block's first non-empty text, ends with the block, and what follows (a tool
+header, the reply's bullet, a note) starts on a fresh line in its own colour.
+An empty thinking block draws nothing. The start of each note goes to
+CLAWDOS.LOG (`progress note: ...`).
 
 ## Errors, retries, lost links
 
@@ -191,11 +225,20 @@ request field adds its rule. The rules: the `anthropic-version`, `content-type` 
 the connection closed); valid JSON whose top-level fields are the ones in "The
 request" above (others are rejected) with `model`, `max_tokens`, `messages` and
 `stream` true; `tools` equal to TOOLS.JSN (which must be readable at startup); the
-`tool_choice` shapes; the first message from the user, alternating roles, no empty
+`tool_choice` shapes; a `thinking` object of type `adaptive` with at most
+`display` `updates` (which needs the `thinking-display-updates-2026-08-18`
+beta header) and `block_binding` `drop_block` (which needs
+`thinking-binding-controls-2026-08-01`), as the real API checks; cache
+markers `{"type":"ephemeral"}` with an optional `ttl` of `5m` or `1h`, the
+top-level one and the system block's agreeing; the first message from the user, alternating roles, no empty
 text blocks, known block types; each `tool_use` answered by exactly one
 `tool_result` in the next message, ahead of any text block; and, in a conversation
 the mock saw begin (a request of one message starts one), every assistant message
 being a reply the mock sent, its thinking or redacted_thinking block coming back
-byte-identical and first; and `system` and `tools` the same on every request of a
-conversation. With `tool_choice`
-none the mock makes no tool call.
+byte-identical and first; and `system`, `tools`, `thinking` and the top-level
+`cache_control` the same on every request of a conversation. With `tool_choice`
+none the mock makes no tool call. With the binding beta its `message_start`
+carries `input_transformations: []`; with `display` `updates` the tool tour's
+responses each open with a progress note naming the next step. Its log line per
+request names the thinking options and the cache ttl
+(`request: N messages, last role user, thinking updates+drop_block, cache 5m`).

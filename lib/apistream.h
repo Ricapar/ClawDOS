@@ -10,10 +10,16 @@
 extern "C" {
 #endif
 
+enum { THINK_START, THINK_TEXT, THINK_END };
+
 typedef struct ApiStream {
     /* callbacks */
     void (*text)(void *ctx, const char *cp437, unsigned n);  /* visible reply text */
-    void (*thinking)(void *ctx);                             /* a thinking delta arrived */
+    /* A thinking block: THINK_START when one begins, THINK_TEXT for each
+       non-empty piece of its text as CP437 (the model's progress notes when
+       the request asks for display "updates"; otherwise the text is empty
+       and nothing comes), THINK_END when it ends. */
+    void (*thinking)(void *ctx, int phase, const char *cp437, unsigned n);
     int  (*hist)(void *ctx, const char *p, unsigned n);      /* bytes of the assistant message; 0 ok */
     void *ctx;
     /* results */

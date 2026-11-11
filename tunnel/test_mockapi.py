@@ -99,7 +99,7 @@ class MockApiTest(unittest.TestCase):
     def setUp(self):
         self.log = io.StringIO()     # what the server prints during a request: the mock's log
 
-    def turn(self, text, choice=lambda calls: None, extra=None):
+    def turn(self, text, choice=lambda calls: None, extra=None, headers=None):
         """Play a whole turn the way HARNESS.EXE does, echoing each reply back, answering every tool call
         ok; `choice(n)` gives the tool_choice for the request after n tool calls. Returns the replies as
         (text, blocks, stop) and the final messages."""
@@ -108,7 +108,7 @@ class MockApiTest(unittest.TestCase):
             fields = dict(extra or {})
             if choice(calls):
                 fields['tool_choice'] = choice(calls)
-            status, _, data = self.post(messages, extra=fields)
+            status, _, data = self.post(messages, extra=fields, headers=headers)
             self.assertEqual(status, 200, data)
             said, blocks, stop, _ = reply(sse_events(data))
             replies.append((said, blocks, stop))
@@ -167,6 +167,38 @@ class MockApiTest(unittest.TestCase):
                 kind = types[name].get(key)
                 self.assertIsNotNone(kind, f'{name}.{key} is not in TOOLS.JSN')
                 self.assertIs(type(value), json_types[kind], f'{name}.{key}={value!r} is not {kind}')
+
+    def test_tooltour_sends_progress_notes_before_its_tool_calls_with_display_updates(self):
+        both = {'anthropic-beta': f'{mockapi.BETA_PROGRESS},{mockapi.BETA_BINDING}'}
+        thinking = {'type': 'adaptive', 'display': 'updates',
+                    'block_binding': {'prefix_mismatch_behavior': 'drop_block'}}
+        replies, _ = self.turn('!tooltour', extra={'thinking': thinking}, headers=both)
+        self.assertIn('tool tour: ', self.log.getvalue())       # the canned results fail it; the notes are the point
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+        steps = mockchat.tour_steps()
+        notes = [blocks[0]['thinking'] for _, blocks, _ in replies]
+        self.assertEqual(len(notes), len(steps) + 1)
+        self.assertEqual(notes[0], f'Tour step 1 of {len(steps)}: {steps[0][0]}.')
+        self.assertEqual(notes[-1], 'Tour done; the verdict next.')
+        for (_, blocks, stop), note in zip(replies, notes):
+            self.assertEqual(blocks[0]['type'], 'thinking')     # the note comes first, ahead of the call
+            if stop == 'tool_use':
+                self.assertIn(f': {tool_block(blocks)["name"]}.', note)
+
+    def test_progress_notes_are_empty_without_display_updates(self):
+        replies, _ = self.turn('!tooltour')
+        self.assertIn('tool tour: ', self.log.getvalue())
+        self.assertEqual({blocks[0]['thinking'] for _, blocks, _ in replies}, {''})
+
+    def test_message_start_carries_input_transformations_with_the_binding_beta(self):
+        user = [{'role': 'user', 'content': 'hello'}]
+        binding = {'type': 'adaptive', 'block_binding': {'prefix_mismatch_behavior': 'drop_block'}}
+        status, _, data = self.post(user, extra={'thinking': binding},
+                                    headers={'anthropic-beta': mockapi.BETA_BINDING})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(sse_events(data)[0][1]['message']['input_transformations'], [])
+        status, _, data = self.post([{'role': 'user', 'content': 'hello again'}])
+        self.assertNotIn('input_transformations', sse_events(data)[0][1]['message'])
 
     def test_retry_is_529_then_200(self):
         status, headers, data = self.post([{'role': 'user', 'content': '!retry'}])
@@ -639,8 +671,69 @@ class ValidatorTest(unittest.TestCase):
         self.bad('did not come back', [USER, {'role': 'assistant', 'content': 'a'}, USER])   # a plain string
 
     def test_unknown_top_level_fields_are_rejected(self):
-        self.ok(output_config={'effort': 'low'}, cache_control={'type': 'ephemeral'})
+        self.ok(output_config={'effort': 'low'}, cache_control={'type': 'ephemeral'}, thinking={'type': 'adaptive'})
         self.bad('Extra inputs are not permitted', thread={'type': 'create'})
+
+    def with_betas(self, betas, messages=None, **fields):
+        """check() a request carrying the anthropic-beta header `betas`."""
+        headers, body = self.request(messages, **fields)
+        return self.v.check(dict(headers, **{'anthropic-beta': betas}), body)
+
+    def test_the_thinking_object_and_its_beta_headers(self):
+        both = f'{mockapi.BETA_PROGRESS}, {mockapi.BETA_BINDING}'
+        updates = {'type': 'adaptive', 'display': 'updates'}
+        binding = {'type': 'adaptive', 'block_binding': {'prefix_mismatch_behavior': 'drop_block'}}
+        self.ok(thinking={'type': 'adaptive'})
+        self.with_betas(mockapi.BETA_PROGRESS, thinking=updates)
+        self.with_betas(mockapi.BETA_BINDING, thinking=binding)
+        self.with_betas('other-beta,' + both, thinking=dict(updates, **binding))
+        self.bad('needs the anthropic-beta header thinking-display-updates', thinking=updates)
+        self.bad('needs the anthropic-beta header thinking-binding-controls', thinking=binding)
+        with self.assertRaises(mockapi.BadRequest) as cm:
+            self.with_betas(mockapi.BETA_PROGRESS, thinking=dict(updates, **binding))
+        self.assertIn('thinking.block_binding', str(cm.exception))
+        for wrong, fragment in (({'type': 'enabled'}, 'thinking.type'),
+                                (dict(updates, display='full'), 'thinking.display'),
+                                (dict(binding, block_binding={'prefix_mismatch_behavior': 'error'}),
+                                 'thinking.block_binding'),
+                                (dict(binding, budget_tokens=5), 'Extra inputs'),
+                                ('adaptive', 'must be an object')):
+            with self.assertRaises(mockapi.BadRequest) as cm:
+                self.with_betas(both, thinking=wrong)
+            self.assertIn(fragment, str(cm.exception))
+
+    def test_the_cache_markers_agree_on_their_ttl(self):
+        hour = {'type': 'ephemeral', 'ttl': '1h'}
+        five = {'type': 'ephemeral'}
+
+        def system(marker):
+            return [{'type': 'text', 'text': 'be brief', 'cache_control': marker}]
+
+        self.ok(cache_control=five, system=system(five))
+        self.ok(cache_control=hour, system=system(hour))
+        self.ok(cache_control={'type': 'ephemeral', 'ttl': '5m'}, system=system(five))   # 5m is the default
+        self.ok(cache_control=hour)
+        self.ok(system=system(hour))
+        self.bad('system.0.cache_control: ttl 5m differs from the 1h', cache_control=hour, system=system(five))
+        self.bad('ttl 1h differs from the 5m', cache_control=five, system=system(hour))
+        self.bad('cache_control.ttl: must be one of', cache_control={'type': 'ephemeral', 'ttl': '2h'})
+        self.bad('must be {"type":"ephemeral"}', cache_control={'type': 'persistent'})
+
+    def test_thinking_and_the_cache_marker_stay_put_within_a_conversation(self):
+        said = {'type': 'text', 'text': 'a'}
+        binding = {'type': 'adaptive', 'block_binding': {'prefix_mismatch_behavior': 'drop_block'}}
+
+        def deeper():
+            return [USER, assistant(THINKING, said), USER]
+
+        conv = self.with_betas(mockapi.BETA_BINDING, [USER], thinking=binding, cache_control={'type': 'ephemeral'})[1]
+        self.v.record(conv, THINKING, 'a', None)
+        self.with_betas(mockapi.BETA_BINDING, deeper(), thinking=binding, cache_control={'type': 'ephemeral'})
+        self.bad('thinking: changed within a conversation', deeper(), cache_control={'type': 'ephemeral'})
+        with self.assertRaises(mockapi.BadRequest) as cm:
+            self.with_betas(mockapi.BETA_BINDING, deeper(), thinking=binding,
+                            cache_control={'type': 'ephemeral', 'ttl': '1h'})
+        self.assertIn('cache_control: changed within a conversation', str(cm.exception))
 
     def test_the_tools_file_must_be_readable(self):
         with self.assertRaises(OSError):
