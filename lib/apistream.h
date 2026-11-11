@@ -26,6 +26,7 @@ typedef struct ApiStream {
     unsigned toolInputLen, toolInputMax;
     int  toolInputOverflow;    /* the input did not fit toolInputMax */
     char error[160];           /* why apistream_event returned -1 */
+    char errorType[24];        /* an error event's error.type: overloaded_error, api_error, ... */
     /* private */
     int blocks, inBlock, blockType, sigOpen, started;
     int bigKind;               /* the long event being streamed (apistream_big) */

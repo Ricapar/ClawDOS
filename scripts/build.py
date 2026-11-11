@@ -371,11 +371,24 @@ def manifest_entries(autotest=None):
     return entries
 
 
+# JSON the harness copies into every request: minified on the image, so each
+# request is that much shorter for the 8088 to send; the repo's copy stays
+# readable (and is what the mock reads).
+MINIFIED_JSON = {'CLAWDOS/TOOLS.JSN'}
+
+
+def minified_json(data):
+    """The JSON document `data` (bytes) without insignificant whitespace, ASCII only."""
+    return json.dumps(json.loads(data.decode('utf-8')), separators=(',', ':')).encode('ascii')
+
+
 def fill_image(fs, entries):
     """Write the files named by the manifest entries into the file system."""
     for dest, source in entries:
         for name, data in resolve(source):
             path = dest + name.upper() if dest.endswith('/') else dest
+            if path in MINIFIED_JSON:
+                data = minified_json(data)
             parent = path.rpartition('/')[0]
             if parent:
                 fs.makedirs(parent)
@@ -385,8 +398,9 @@ def fill_image(fs, entries):
             fs.write_file(path, data, attr=attr)
 
 
-def build_image(autotest=None):
-    """Build the bootable disk image from the manifest (plus C:\\AUTOTEST.BAT if given); returns its path."""
+def build_image(autotest=None, with_key=True):
+    """Build the bootable disk image from the manifest (plus C:\\AUTOTEST.BAT if given); returns its path.
+    with_key=False leaves the API key out (the test images talk to the mock, which needs none)."""
     with open(os.path.join(BUILD, 'mbr.bin'), 'rb') as f:
         mbr = f.read()
     with open(os.path.join(BUILD, 'fat16.bin'), 'rb') as f:
@@ -396,7 +410,7 @@ def build_image(autotest=None):
     fill_image(fs, manifest_entries(autotest))
 
     # Point HARNESS.EXE at the TLS tunnel and give it the API key.
-    fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG')))
+    fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG'), with_key))
 
     out = os.path.join(BUILD, IMAGE_NAME)
     with open(out, 'wb') as f:
@@ -419,12 +433,12 @@ def api_key():
     return None
 
 
-def clawdos_cfg(template):
+def clawdos_cfg(template, with_key=True):
     """The template CLAWDOS.CFG with the [anthropic] tunnel address from the settings
-    and the API key from .env filled in (a build without a key still boots)."""
+    and, if with_key, the API key from .env filled in (a build without a key still boots)."""
     text = template.decode('cp437')
     text = re.sub(r'^tunnel .*$', f'tunnel {settings()["tunnel"]}', text, count=1, flags=re.M)
-    key = api_key()
+    key = api_key() if with_key else None
     if key:
         text = re.sub(r'^# key sk-ant-\.\.\..*$', f'key {key}', text, count=1, flags=re.M)
     return text.encode('cp437')

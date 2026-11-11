@@ -11,7 +11,7 @@
  },
  {
   "name": "dir",
-  "description": "List a directory: names, sizes, dates, attributes. DOS 8.3 names. One directory, not its subdirectories. At most 150 entries and about 4000 characters per result; past that a last line says how many more there are, so narrow the pattern to see them.",
+  "description": "List a directory: names, sizes, dates, attributes. DOS 8.3 names. One directory, not its subdirectories. A result holds at most 83 entries (about 4000 characters); past that a last line says how many more there are, so narrow the pattern to see them.",
   "input_schema": {
    "type": "object",
    "properties": {

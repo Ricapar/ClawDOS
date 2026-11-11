@@ -77,14 +77,14 @@ int main(int argc, char *argv[])
         }
         {
             ToolCtx t;
-            int hold = 5, status;
+            int status;
             unsigned long start = TICKS_NOW;
 
             tout_reset(&t);
-            if (relaunch_read_run(cmds, sizeof cmds, &hold))
+            if (relaunch_read_run(cmds, sizeof cmds))
                 status = tool_fail(&t, "CLAWDOS: no " RELAUNCH_RUN);
             else
-                status = shell_run(&t, cmds, hold);
+                status = shell_run(&t, cmds);
             if (relaunch_write_out(status, ticks_elapsed(TICKS_NOW, start), &t))
                 printf("CLAWDOS: cannot write %s\n", RELAUNCH_OUT);
         }

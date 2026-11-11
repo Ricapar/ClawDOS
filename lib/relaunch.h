@@ -18,14 +18,15 @@ extern "C" {
 
 #define RELAUNCH_EXIT    200
 #define RELAUNCH_DIR     "C:\\CLAWDOS"
-#define RELAUNCH_RUN     RELAUNCH_DIR "\\RUN.TXT"     /* "hold N\n", then the command lines */
-#define RELAUNCH_OUT     RELAUNCH_DIR "\\RUN.OUT"     /* "status N ticks T\n", the summary line, the output */
+#define RELAUNCH_RUN     RELAUNCH_DIR "\\RUN.TXT"     /* the command lines */
+#define RELAUNCH_OUT     RELAUNCH_DIR "\\RUN.OUT"     /* "status N ticks T show A B\n", the summary line, the output */
 #define RELAUNCH_STATE   RELAUNCH_DIR "\\RESUME.TXT"  /* CLAWDOS's own "key value" lines */
 #define RELAUNCH_SCREEN  RELAUNCH_DIR "\\SCREEN.SAV"  /* the chat screen while a program has the display */
 
-int relaunch_write_run(const char *cmds, int holdSecs);
-int relaunch_read_run(char *cmds, unsigned max, int *holdSecs);           /* -1 if there is no file */
-/* status is the TS_ code shell_run returned, ticks how long it took. */
+int relaunch_write_run(const char *cmds);
+int relaunch_read_run(char *cmds, unsigned max);                         /* -1 if there is no file */
+/* status is the TS_ code shell_run returned, ticks how long it took; show
+   carries t->showFrom and showTo. */
 int relaunch_write_out(int status, unsigned long ticks, const ToolCtx *t);
 int relaunch_read_out(ToolCtx *t, int *status, unsigned long *ticks);    /* into a reset t; -1 if no file */
 

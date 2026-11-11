@@ -160,6 +160,9 @@ quits once the `-m` message is answered (both for unattended tests). Esc
 during a tool stops the reply. Programs started by `run` can't use the network
 or be stopped with Ctrl-C. `run` starts a plain program directly, and only loads
 a second COMMAND.COM (about 70K) for batch files, redirection and built-in commands.
+The chat comes back as soon as the last command ends; the last six lines of its
+output (or of the screen it left) stay in the transcript, dim under the call,
+after a line counting the ones above them. The model gets the whole output.
 
 ### Memory for programs
 

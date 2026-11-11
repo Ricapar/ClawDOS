@@ -16,13 +16,13 @@ endif
 BOOTTEST := $(PYTHON) scripts/boottest.py --no-build
 
 .DEFAULT_GOAL := help
-.PHONY: help setup build compiledb clean test check boot boottests test8088 \
+.PHONY: help setup build compiledb clean test check boot boottests boottests-online test8088 \
         bench run dosbox shot tunnel mock
 
 help:
 	@echo "make <target>   (see the top of the Makefile for variables)"
 	@grep -E '^[a-z][a-z0-9-]*:.*## ' $(MAKEFILE_LIST) | \
-	    awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
+	    awk 'BEGIN {FS = ":.*## "} {printf "  %-16s %s\n", $$1, $$2}'
 
 # --- setup and build ----------------------------------------------------------
 
@@ -44,25 +44,29 @@ clean: ## delete build/ except settings.json (the remembered tunnel address)
 test: ## unit tests of the mock API (fast, no emulator)
 	$(PYTHON) tunnel/test_mockapi.py
 
-check: test boottests ## everything: the mock API tests and every DOSBox-X boot test
+check: test boottests ## everything offline: the mock API tests and the offline DOSBox-X boot tests
 
 boot: build ## one boot test in DOSBox-X (TEST=image/tests/x.bat, default units)
 	$(BOOTTEST) $(or $(TEST),image/tests/units.bat --expect UNITS-OK)
 
-boottests: build ## every DOSBox-X boot test
+boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
-	$(BOOTTEST) image/tests/net.bat
-	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
+	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost"
 	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok"
-	$(BOOTTEST) image/tests/clock.bat --expect "System time set" --expect "PING after the clock: 0"
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
+	$(BOOTTEST) image/tests/overload.bat --mock --expect "before any text); trying again" --expect "stop=end_turn" \
+	    --reject "link lost"
 	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed"
+
+boottests-online: build ## the DOSBox-X boot tests that need the internet (NTP)
+	$(BOOTTEST) image/tests/clock.bat --expect "System time set" --expect "PING after the clock: 0"
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)

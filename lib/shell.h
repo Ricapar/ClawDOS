@@ -16,10 +16,10 @@ extern "C" {
    or with COMMAND.COM /C, stopping after the first whose exit code isn't 0.
    Output written through the BIOS (which is where DOS console output ends
    up) is captured into t; if a command printed none, the screen text after
-   it is used instead. Afterwards the last exit code is shown until a key is
-   pressed or holdSecs pass. The caller saves and restores the screen around
-   this. */
-int shell_run(ToolCtx *t, const char *cmds, int holdSecs);
+   it is used instead; t->showFrom..showTo marks that part of the last
+   command that ran, for the transcript. It returns as soon as the last
+   command ends. The caller saves and restores the screen around this. */
+int shell_run(ToolCtx *t, const char *cmds);
 
 /* How many commands `cmds` holds, and its first one (trimmed) in `first`
    (SHELL_CMD_MAX + 1 bytes), for showing the call. */

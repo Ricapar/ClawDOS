@@ -81,7 +81,7 @@ int play_run(const char *music, const PlayOps *ops, unsigned long *total_ms,
         int note = -1, len = length, v;
         unsigned long ms;
 
-        if (c == ' ' || c == ';' || c == ',')
+        if (c == ' ' || c == '\t' || c == ';' || c == ',')
             continue;
         if (c >= 'A' && c <= 'G') {
             note = octave * 12 + semitone[c - 'A'] + 1;

@@ -483,6 +483,9 @@ static void blankLine(void)
 /* "  L text" under the message it belongs to. */
 static void note(const char *text, unsigned char attr)
 {
+    if (state == STREAMING)
+        state = WAITING;              /* reply text after the note starts a new bullet,
+                                         in its own colour and margin */
     con_margins(0, SCR_COLS - 1);
     con_ensure_blank_line();
     con_attr(A_DIM);
@@ -597,8 +600,9 @@ static void echoUser(const char *text)
 
 static void startReply(void)
 {
+    con_margins(0, SCR_COLS - 1);     /* first: the new line starts at column 0, not at
+                                         the margin of a note or tool line above */
     blankLine();
-    con_margins(0, SCR_COLS - 1);
     con_attr(A_BRIGHT);
     con_putc(G_BULLET);
     con_putc(' ');

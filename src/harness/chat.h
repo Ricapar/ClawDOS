@@ -102,7 +102,7 @@ class Chat {
     int8_t finishTool(int round, const char *toolId, int status, ToolCtx *t);   /* -2: next round */
     int8_t connect(void);
     int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, 2 ask again, -1 failed */
-    int8_t stream(void);
+    int8_t stream(void);                   /* as request, or 3: an overload before any text, retry it */
     int    waitRead(char *buf, unsigned max);     /* >0, 0 end, -1 lost, -2 timeout, -3 Esc */
     int8_t waitHead(HttpHead *h);                 /* 0, -1, -2, -3 malformed, 1 Esc */
     void   drain(void);

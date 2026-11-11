@@ -17,6 +17,7 @@ static void providerDefaults(Provider *p, const char *id)
     strcpy(p->path, "/v1/messages");
     strcpy(p->auth, "x-api-key");
     p->cache = 1;
+    p->maxTokens = CFG_MAX_TOKENS;
 }
 
 static void setStr(char *dst, unsigned max, const char *val)
@@ -48,6 +49,13 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
     else if (!stricmp(key, "betas")) setStr(p->betas, sizeof p->betas, val);
     else if (!stricmp(key, "name")) setStr(p->name, sizeof p->name, val);
     else if (!stricmp(key, "cache")) p->cache = atoi(val);
+    else if (!stricmp(key, "maxtokens")) {
+        char *end;
+        long n = strtol(val, &end, 10);
+        if (end == val || *end || n < 1)
+            return -1;                /* reported as a bad line */
+        p->maxTokens = n;
+    }
     else return -1;
     return 0;
 }

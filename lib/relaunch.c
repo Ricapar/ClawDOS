@@ -59,16 +59,6 @@ static int readParts(const char *path, int nhead, char *heads[], const unsigned 
     return 0;
 }
 
-typedef struct { char *dst; unsigned max, len; } Buf;
-
-static void toBuf(void *ctx, const char *p, unsigned n)
-{
-    Buf *b = (Buf *)ctx;
-    while (n-- && b->len + 1 < b->max)
-        b->dst[b->len++] = *p++;
-    b->dst[b->len] = 0;
-}
-
 static void toTool(void *ctx, const char *p, unsigned n)
 {
     char piece[64];
@@ -82,43 +72,34 @@ static void toTool(void *ctx, const char *p, unsigned n)
     }
 }
 
-int relaunch_write_run(const char *cmds, int holdSecs)
+int relaunch_write_run(const char *cmds)
 {
-    char head[24];
-    sprintf(head, "hold %d\n", holdSecs);
-    return writeFile(RELAUNCH_RUN, head, cmds, strlen(cmds));
+    return writeFile(RELAUNCH_RUN, "", cmds, strlen(cmds));
 }
 
-int relaunch_read_run(char *cmds, unsigned max, int *holdSecs)
+int relaunch_read_run(char *cmds, unsigned max)
 {
-    char line[24];
-    char *heads[1];
-    unsigned maxes[1];
-    Buf b;
+    int fd = open(RELAUNCH_RUN, O_RDONLY | O_BINARY), n;
 
-    heads[0] = line;
-    maxes[0] = sizeof line;
-    b.dst = cmds;
-    b.max = max;
-    b.len = 0;
-    cmds[0] = 0;
-    if (readParts(RELAUNCH_RUN, 1, heads, maxes, toBuf, &b))
+    if (fd < 0)
         return -1;
-    if (!strncmp(line, "hold ", 5))
-        *holdSecs = atoi(line + 5);
+    n = read(fd, cmds, max - 1);
+    close(fd);
+    cmds[n > 0 ? n : 0] = 0;
     return 0;
 }
 
 int relaunch_write_out(int status, unsigned long ticks, const ToolCtx *t)
 {
-    char head[120];
-    sprintf(head, "status %d ticks %lu\n%.64s\n", status, ticks, t->summary);
+    char head[144];
+    sprintf(head, "status %d ticks %lu show %u %u\n%.64s\n", status, ticks, t->showFrom, t->showTo,
+            t->summary);
     return writeFile(RELAUNCH_OUT, head, t->out, t->len);
 }
 
 int relaunch_read_out(ToolCtx *t, int *status, unsigned long *ticks)
 {
-    char line[48];
+    char line[64];
     char *heads[2];
     unsigned maxes[2];
     const char *p;
@@ -132,5 +113,13 @@ int relaunch_read_out(ToolCtx *t, int *status, unsigned long *ticks)
     *status = !strncmp(line, "status ", 7) ? atoi(line + 7) : TS_ERROR;
     p = strstr(line, "ticks ");
     *ticks = p ? strtoul(p + 6, NULL, 10) : 0;
+    if ((p = strstr(line, "show ")) != NULL) {
+        char *end;
+        unsigned from = (unsigned)strtoul(p + 5, &end, 10), to = (unsigned)strtoul(end, NULL, 10);
+        if (from <= to && to <= t->len) {
+            t->showFrom = from;
+            t->showTo = to;
+        }
+    }
     return 0;
 }

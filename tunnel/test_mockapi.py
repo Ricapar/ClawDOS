@@ -142,6 +142,15 @@ class MockApiTest(unittest.TestCase):
         self.assertEqual(events[-1][0], 'error')
         self.assertEqual(events[-1][1]['error']['type'], 'overloaded_error')
 
+    def test_overload_is_an_error_before_any_text_then_a_reply(self):
+        events = self.ask('!overload')
+        self.assertEqual(events[-1][0], 'error')
+        self.assertEqual(events[-1][1]['error']['type'], 'overloaded_error')
+        self.assertEqual(reply(events)[0], '')
+        text, _, stop, _ = reply(self.ask('!overload'))
+        self.assertIn('after the overload', text)
+        self.assertEqual(stop, 'end_turn')
+
     def test_refusal_and_cutoff(self):
         self.assertEqual(reply(self.ask('!refuse'))[2], 'refusal')
         self.assertEqual(reply(self.ask('!cutoff'))[2], 'max_tokens')

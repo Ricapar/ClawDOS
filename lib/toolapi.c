@@ -144,6 +144,7 @@ void tout_reset(ToolCtx *t)
     t->len = 0;
     t->truncated = 0;
     t->summary[0] = 0;
+    t->showFrom = t->showTo = 0;
     outBuf[0] = 0;
 }
 

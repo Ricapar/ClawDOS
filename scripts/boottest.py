@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """Boot the ClawDOS image headless in DOSBox-X with a test batch file and print its log.
 
-  python scripts/boottest.py [image/tests/units.bat] [--timeout 90]
+  python scripts/boottest.py [image/tests/units.bat] [--timeout 90] [--mock]
+                             [--expect TEXT ...] [--reject TEXT ...]
 
 The test batch file runs as C:\\AUTOTEST.BAT instead of the normal startup. It
 should write its results to COM1 (captured to build/serial.log) and finish with
 ECHO CLAWDOS-TEST-DONE > COM1; this script waits for that marker, then stops
 DOSBox-X. Files written inside the guest are not a reliable result channel: DOS
-may not have flushed them to the image yet. Exit status is 0 only if the marker was seen.
+may not have flushed them to the image yet. Exit status is 0 only if the marker was seen,
+every --expect TEXT is in the serial or mock log and no --reject TEXT is, and (with
+--mock) the mock API started and was still running at the end.
 """
 
 import argparse
 import contextlib
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -65,6 +67,8 @@ def parse_args():
                     help='extra DOSBox-X -set options, e.g. "log misc=true"')
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the serial or mock API log (repeatable)')
+    ap.add_argument('--reject', action='append', default=[], metavar='TEXT',
+                    help='TEXT must not appear in the serial or mock API log (repeatable)')
     ap.add_argument('--mock', action='store_true',
                     help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_API_PORT} during the test')
     return ap.parse_args()
@@ -85,17 +89,19 @@ def dosbox_command(extra_sets):
             '-c', 'boot -l c']
 
 
-def listening(proc, port, timeout=10):
-    """True once proc accepts connections on port; False if it exits or timeout seconds pass."""
+# What tunnel/mockapi.py prints once its socket is bound and listening. Probing the
+# port is not enough: an old mock already on it would answer for a new one that is
+# about to die on bind.
+MOCK_READY = b'mock Messages API on port'
+
+
+def listening(proc, log_path, timeout=10):
+    """True once proc has logged MOCK_READY; False if it exits first or timeout seconds pass."""
     deadline = time.time() + timeout
     while time.time() < deadline and proc.poll() is None:
-        try:
-            socket.create_connection(('127.0.0.1', port), 0.5).close()
-        except OSError:
-            time.sleep(0.1)
-            continue
-        time.sleep(0.3)      # an old mock on the port answers too, but this one then dies on bind
-        return proc.poll() is None
+        if MOCK_READY in read_log(log_path):
+            return True
+        time.sleep(0.1)
     return False
 
 
@@ -108,8 +114,8 @@ def mock_api(log_path):
     with open(log_path, 'wb') as f:
         with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as mock:
             try:
-                if not listening(mock, TEST_API_PORT):
-                    sys.exit(f'mock API did not start on port {TEST_API_PORT}: '
+                if not listening(mock, log_path):
+                    sys.exit(f'mock API did not start on port {TEST_API_PORT} (in use?): '
                              + read_log(log_path).decode('utf-8', 'replace').strip()[-300:])
                 yield mock
             finally:
@@ -141,7 +147,7 @@ def main():
     if not a.no_build:
         build.build_boot()
         build.build_apps()
-    image = build.build_image(os.path.abspath(a.test))
+    image = build.build_image(os.path.abspath(a.test), with_key=False)
     test_img = os.path.join(build.BUILD, 'test.img')
     shutil.copyfile(image, test_img)
     build.build_image()  # leave a clean CLAWDOS.IMG behind
@@ -149,20 +155,28 @@ def main():
     cmd = dosbox_command(a.set)
     mock_log = os.path.join(build.BUILD, 'mock.log')
     serial = os.path.join(build.BUILD, 'serial.log')
-    with mock_api(mock_log) if a.mock else contextlib.nullcontext():
+    with mock_api(mock_log) if a.mock else contextlib.nullcontext() as mock:
         run_dosbox(cmd, serial, a.timeout)
+        mock_exit = mock.poll() if mock else None
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
     if a.mock:
         print('--- mock API log ---')
         sys.stdout.write(read_log(mock_log).decode('utf-8', 'replace'))
         log += read_log(mock_log)
+    if mock_exit is not None:
+        print(f'boottest: FAILED (the mock API died during the run, exit code {mock_exit})')
+        sys.exit(1)
     if DONE not in log:
         print(f'boottest: FAILED (no {DONE.decode()} within {a.timeout}s)')
         sys.exit(1)
     missing = [t for t in a.expect if t.encode('cp437', 'replace') not in log]
     if missing:
         print('boottest: FAILED (missing: ' + ', '.join(repr(t) for t in missing) + ')')
+        sys.exit(1)
+    found = [t for t in a.reject if t.encode('cp437', 'replace') in log]
+    if found:
+        print('boottest: FAILED (rejected text present: ' + ', '.join(repr(t) for t in found) + ')')
         sys.exit(1)
     print('boottest: PASS')
 

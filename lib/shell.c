@@ -16,9 +16,7 @@
 #include <io.h>
 #include <dos.h>
 #include <i86.h>
-#include <bios.h>
 #include "shell.h"
-#include "ticks.h"
 
 #define HEAD_MAX 900
 #define TAIL_MAX 2800
@@ -101,6 +99,7 @@ static void snapshot(ToolCtx *t, unsigned room)
     for (first = last + 1; first > 0 && used + lens[first - 1] + 1 <= room; first--)
         used += lens[first - 1] + 1;
     tout_puts(t, "(screen text)\n");
+    t->showFrom = t->len;             /* the transcript shows the rows, not the label */
     for (row = first; row <= last; row++) {
         n = lens[row];
         for (col = 0; col < n; col++) {
@@ -201,7 +200,7 @@ static const char *direct(const char *cmd, char *prog)
 
     if (strpbrk(cmd, "<>|%\""))
         return NULL;
-    while (*cmd == ' ')
+    while (*cmd == ' ' || *cmd == '\t')
         cmd++;
     n = strcspn(cmd, " /;=,\t");
     if (n == 0 || n >= sizeof(name))
@@ -210,7 +209,7 @@ static const char *direct(const char *cmd, char *prog)
     name[n] = 0;
     strupr(name);
     args = cmd + n;
-    while (*args == ' ')
+    while (*args == ' ' || *args == '\t')
         args++;
     if (name[n - 1] == ':')
         return NULL;                          /* "A:": change drive */
@@ -340,26 +339,10 @@ unsigned shell_count(const char *cmds, char *first)
     return n;
 }
 
-static void hold(int code, int holdSecs)
-{
-    unsigned long start;
-    char buf[60];
-
-    sprintf(buf, "\n-- exit code %d - any key returns to ClawDOS --", code);
-    teletype(buf);
-    while (_bios_keybrd(_KEYBRD_READY))
-        _bios_keybrd(_KEYBRD_READ);
-    start = TICKS_NOW;
-    while (!_bios_keybrd(_KEYBRD_READY) && ticks_elapsed(TICKS_NOW, start) < SECS_TO_TICKS(holdSecs))
-        ;
-    if (_bios_keybrd(_KEYBRD_READY))
-        _bios_keybrd(_KEYBRD_READ);
-}
-
 #define NOTES_ROOM 300                /* kept free for the list of commands not run */
 #define EARLY_ROOM 700                /* most output kept from a command that worked */
 
-int shell_run(ToolCtx *t, const char *cmds, int holdSecs)
+int shell_run(ToolCtx *t, const char *cmds)
 {
     static char cmd[SHELL_CMD_MAX + 1], why[WHY_MAX];
     const char *p = cmds;
@@ -393,17 +376,18 @@ int shell_run(ToolCtx *t, const char *cmds, int holdSecs)
             tout_printf(t, "%s\n", why);
             strncpy(t->summary, why, sizeof(t->summary) - 1);
             t->summary[sizeof(t->summary) - 1] = 0;
-            hold(code, holdSecs);
             return TS_ERROR;
         }
         tout_printf(t, "exit code %d\n", code);
         left = TOOL_OUT_MAX - t->len;
         left = left > NOTES_ROOM ? left - NOTES_ROOM : 0;
         room = code != 0 || i == count - 1 ? left : (left / 3 < EARLY_ROOM ? left / 3 : EARLY_ROOM);
+        t->showFrom = t->len;
         if (total == 0)
             snapshot(t, room);
         else
             putOutput(t, room);
+        t->showTo = t->len;
         if (code != 0)
             break;
         if (count > 1)
@@ -422,6 +406,5 @@ int shell_run(ToolCtx *t, const char *cmds, int holdSecs)
     } else {
         sprintf(t->summary, "%u commands, exit code %d", count, code);
     }
-    hold(code, holdSecs);
     return TS_OK;
 }

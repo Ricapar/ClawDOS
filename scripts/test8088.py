@@ -77,7 +77,7 @@ def main():
     if not a.no_build:
         build.build_boot()
         build.build_apps()
-    shutil.copyfile(build.build_image(os.path.abspath(a.test)), IMAGE)
+    shutil.copyfile(build.build_image(os.path.abspath(a.test), with_key=False), IMAGE)
     build.build_image()  # leave a clean CLAWDOS.IMG behind
 
     if run86box.running():
@@ -87,8 +87,9 @@ def main():
     with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(run86box.CFG.format(speed=4772728, cyl=build.CYLINDERS, image=IMAGE))
     mock_log = os.path.join(build.BUILD, 'mock.log')
-    with boottest.mock_api(mock_log) if a.mock else contextlib.nullcontext():
+    with boottest.mock_api(mock_log) if a.mock else contextlib.nullcontext() as mock:
         log, elapsed = run_86box(vm, a.log, a.done, a.timeout)
+        mock_exit = mock.poll() if mock else None
     print(log if log is not None else f'(no {a.log} on the image)')
     found = bool(log) and a.done in log
     if a.mock:
@@ -98,7 +99,9 @@ def main():
         missing = [t for t in a.expect if t not in (log or '') and t not in mock_text]
     else:
         missing = [t for t in a.expect if t not in (log or '')]
-    if not found:
+    if mock_exit is not None:
+        verdict = f'FAILED (the mock API died during the run, exit code {mock_exit})'
+    elif not found:
         verdict = f'FAILED (no {a.done} in the log)'
     elif missing:
         verdict = 'FAILED (missing: ' + ', '.join(repr(t) for t in missing) + ')'

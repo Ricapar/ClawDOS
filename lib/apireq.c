@@ -93,11 +93,15 @@ static int promptText(Sink *s, const ApiReq *r)
 int api_body(Sink *s, const ApiReq *r)
 {
     const Provider *p = r->p;
+    char num[16];
     int rc;
 
     PUT("{\"model\":\"");
     PUT(p->model);
-    PUT("\",\"max_tokens\":16000,\"stream\":true,");
+    sprintf(num, "%ld", p->maxTokens);
+    PUT("\",\"max_tokens\":");
+    PUT(num);
+    PUT(",\"stream\":true,");
     if (p->effort[0]) {
         PUT("\"output_config\":{\"effort\":\"");
         PUT(p->effort);

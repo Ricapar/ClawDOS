@@ -265,6 +265,7 @@ int apistream_event(ApiStream *a, const char *event, const char *data, unsigned 
     }
     if (!strcmp(type, "error")) {
         field(data, n, "error.message", a->error, sizeof a->error);
+        field(data, n, "error.type", a->errorType, sizeof a->errorType);
         if (!a->error[0])
             strcpy(a->error, "API error");
         return -1;

@@ -8,21 +8,25 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (gitignored), outputs in `build/`. The Python (tunnel/) is stdlib only: no venv.
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
 - The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (mock API unit tests),
-  `make boottests` (every DOSBox-X test), `make check` (both), `make bench` (the 86Box benchmark), `make run`,
+  `make boottests` (the DOSBox-X tests that run offline), `make boottests-online` (those that need the internet:
+  clock.bat), `make check` (test and boottests, all offline), `make bench` (the 86Box benchmark), `make run`,
   `make tunnel`, `make mock`. Keep it in step with them.
 - Build everything: `python scripts/build.py [--tunnel host:port]` (apps -> build/*.EXE, disk -> build/CLAWDOS.IMG).
   The image's C:\CLAWDOS\CLAWDOS.CFG gets the tunnel address (remembered in build/settings.json) and the API key from
-  `.env` (`ANTHROPIC_API_KEY=...`, gitignored). Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
+  `.env` (`ANTHROPIC_API_KEY=...`, gitignored); the test images boottest.py and test8088.py build get no key (the
+  mock needs none). TOOLS.JSN goes onto the image minified; the repo's copy stays readable. Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
 - Code navigation: the clangd-lsp and pyright-lsp plugins are enabled for this project (.claude/settings.json;
   clangd and pyright-langserver must be on PATH). clangd reads build/compile_commands.json, written by every build
   or by `python scripts/build.py --compiledb`; scripts/clangd/ holds the shims that let clang parse Watcom code.
 - Headless boot test (DOSBox-X): `python scripts/boottest.py [image/tests/x.bat]`. Test batch files write results to COM1
   and end with `TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1` so CLAWDOS's own notes (retries, lost links, errors) reach the log;
   `image/tests/net.bat` checks networking. `--mock` runs the mock Messages API (tunnel/mockapi.py) alongside on port 18023, so
-  tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log) and `--expect TEXT` fails unless TEXT is in the
-  serial or mock log. The Makefile's `boottests` target lists them all: `tools.bat --mock --expect "tool tour: PASS"` runs
-  every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` NETUP's
-  NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529 (`trying again`); `chunks.bat` awkward chunk
+  tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log; the test fails if that mock cannot start,
+  say the port is taken, or dies during the run), `--expect TEXT` fails unless TEXT is in the
+  serial or mock log and `--reject TEXT` fails if it is. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
+  every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
+  `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
+  (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
@@ -33,7 +37,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;
   `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023).
-- Benchmark: `python scripts/bench.py` (`make bench`, several minutes) runs image/tests/bench.bat in 86Box: the mock's
+- Benchmark: `python scripts/bench.py` (`make bench`, about half an hour) runs image/tests/bench.bat in 86Box: the mock's
   `!bench` (20 reads of 4 KB, a `full_memory` run, a 4 KB reply) through CLAWDOS.EXE, then a table from CLAWDOS.LOG's
   `api` lines (`up=` upload ms, `len=` body bytes), the relaunch and the `stack:` high-water mark. docs/ROADMAP.md's
   "Benchmark" holds the baseline; keep the scenario and format stable. `--dosbox` is a quick, not comparable, run.
@@ -57,7 +61,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
   C:\CLAWDOS\CHATS\*.JSN in the API's own message format, notes and per-round usage in C:\CLAWDOS\CLAWDOS.LOG.
   `python3 tunnel/mockapi.py` fakes the API offline on plain HTTP (point CLAWDOS at it: `CLAWDOS 10.0.2.2:18023`); in a chat,
-  `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, ...); `!tool NAME k=v` calls one
+  `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, `!overload`, ...); `!tool NAME k=v` calls one
   DOS tool, `!tooltour` all; tests `python3 tunnel/test_mockapi.py`. Tool schemas: image/clawdos/TOOLS.JSN (the one source;
   the mock reads it too); executors dispatched by src/harness/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
   after the `-m` reply, `-p NAME` picks a provider section.

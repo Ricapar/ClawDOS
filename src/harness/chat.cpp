@@ -389,8 +389,13 @@ int8_t Chat::stream(void)
             }
             if (streamRc < 0) {
                 hist_rollback_message();
-                warn(as.error);
                 drain();
+                /* An overload reported inside the stream, as it is once
+                   streaming has begun: with nothing shown yet it is retried
+                   like an HTTP 529. */
+                if (!firstText && (!strcmp(as.errorType, "overloaded_error") || !strcmp(as.errorType, "api_error")))
+                    return 3;
+                warn(as.error);
                 return -1;
             }
             continue;
@@ -415,7 +420,7 @@ int8_t Chat::request(int noTools)
     HttpHead h;
     char msg[160];
     int attempt = 0;
-    int fresh;
+    int fresh, wait;
 
     r.p = prov;
     r.promptPath = PROMPT_PATH;
@@ -478,26 +483,31 @@ int8_t Chat::request(int noTools)
             rc = stream();
             if (rc == 2)
                 continue;                 /* re-ask after a lost link */
-            return rc;
-        }
-        readErrorBody(&h, msg, sizeof msg);
-        if (h.close)
-            http.close();
-        if (h.status == 429 || h.status >= 500) {
-            int wait = h.retryAfter ? h.retryAfter : (attempt == 0 ? 2 : 8);
-            if (++attempt > 2) {
+            if (rc != 3)
+                return rc;
+            sprintf(msg, "%.120s", as.error);
+            wait = 0;
+        } else {
+            readErrorBody(&h, msg, sizeof msg - 24);   /* room for "; trying again in N s" */
+            if (h.close)
+                http.close();
+            if (h.status != 429 && h.status < 500) {
                 warn(msg);
                 return -1;
             }
-            sprintf(msg + strlen(msg), "; trying again in %d s", wait);
-            warn(msg);
-            pause(wait);
-            if (ui->escPressed())
-                return 1;
-            continue;
+            wait = h.retryAfter;
         }
+        if (!wait)                        /* 429, 5xx or an overload in the stream */
+            wait = attempt == 0 ? 2 : 8;
+        if (++attempt > 2) {
+            warn(msg);
+            return -1;
+        }
+        sprintf(msg + strlen(msg), "; trying again in %d s", wait);
         warn(msg);
-        return -1;
+        pause(wait);
+        if (ui->escPressed())
+            return 1;
     }
 }
 

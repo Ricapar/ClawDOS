@@ -104,6 +104,8 @@ static void testPlay(void)
     CHECK_STR("play: note number", rec, "440/500 ");
     play("ML O3 C# C- ", err, NULL);
     CHECK_STR("play: sharp and flat", rec, "277/500 247/500 ");
+    play("ML\tO3 C\t", err, NULL);
+    CHECK_STR("play: tabs between commands", rec, "262/500 ");
     play("ML L8 C C16", err, NULL);
     CHECK_STR("play: lengths", rec, "523/250 523/125 ");
     play("ML O3 C > C < < C", err, NULL);
@@ -569,6 +571,7 @@ static const char CFG_TEXT[] =
     "auth bearer\r\n"
     "key sk-or-x\r\n"
     "model anthropic/claude-opus-5.5\r\n"
+    "maxtokens 32000\r\n"
     "cache 0\r\n";
 
 static void testCfg(void)
@@ -589,18 +592,23 @@ static void testCfg(void)
         CHECK_STR("cfg default auth", p->auth, "x-api-key");
         CHECK_STR("cfg key keeps hash", p->key, "sk-ant-abc#def");
         CHECK("cfg default cache", p->cache == 1);
+        CHECK("cfg default maxtokens", p->maxTokens == 64000L);
         CHECK_STR("cfg effort", p->effort, "low");
         CHECK("cfg nothing missing", cfg_missing(p) == NULL);
     }
     p = cfg_provider(c, "openrouter");
     CHECK("cfg openrouter", p != NULL && !strcmp(p->auth, "bearer") && p->cache == 0
-          && !strcmp(p->path, "/api/v1/messages"));
+          && !strcmp(p->path, "/api/v1/messages") && p->maxTokens == 32000L);
     CHECK("cfg unknown provider", cfg_provider(c, "nope") == NULL);
     cfg_defaults(c);
     CHECK("cfg missing tunnel", cfg_parse(c, "[x]\ntype anthropic\nhost h\nkey k\nmodel m\n") == 0
           && !strcmp(cfg_missing(&c->providers[0]), "tunnel"));
     cfg_defaults(c);
     CHECK("cfg bad global key line", cfg_parse(c, "name x\nbogus 1\n") == 2);
+    cfg_defaults(c);
+    CHECK("cfg bad maxtokens", cfg_parse(c, "[x]\nmaxtokens 64k\n") == 2
+          && cfg_parse(c, "[y]\nmaxtokens 0\n") == 2 && cfg_parse(c, "[z]\nmaxtokens 128000\n") == 0
+          && c->providers[2].maxTokens == 128000L);
     cfg_defaults(c);
     text[0] = 0;
     for (i = 0; i < 9; i++)
@@ -688,7 +696,7 @@ static void testApiReq(void)
     ApiReq r;
     Sink count, buf;
     static const char want[] =
-        "{\"model\":\"claude-opus-5-5\",\"max_tokens\":16000,\"stream\":true,"
+        "{\"model\":\"claude-opus-5-5\",\"max_tokens\":64000,\"stream\":true,"
         "\"output_config\":{\"effort\":\"low\"},\"cache_control\":{\"type\":\"ephemeral\"},"
         "\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},"
         "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none)\",\"cache_control\":{\"type\":\"ephemeral\"}}],"
@@ -704,6 +712,7 @@ static void testApiReq(void)
     memset(p, 0, sizeof *p);
     strcpy(p->host, "api.anthropic.com"); strcpy(p->path, "/v1/messages"); strcpy(p->auth, "x-api-key");
     strcpy(p->key, "sk-ant-abc"); strcpy(p->model, "claude-opus-5-5"); strcpy(p->effort, "low"); p->cache = 1;
+    p->maxTokens = 64000L;
     r.p = p; r.promptPath = "C:\\PTEST.TXT"; r.toolsPath = "C:\\TTEST.JSN"; r.name = "Claude";
     r.memories = ""; r.noTools = 0;
 
@@ -715,6 +724,10 @@ static void testApiReq(void)
     CHECK("req prefix", !strncmp(body, want, sizeof want - 1));
     CHECK_STR("req tail", body + strlen(body) - 31, "{\"role\":\"user\",\"content\":\"a\"}]}");
 
+    p->maxTokens = 128000L;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("req maxtokens", strstr(body, "\"max_tokens\":128000,\"stream\"") != NULL);
     p->effort[0] = 0;
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
@@ -819,7 +832,7 @@ static void testApiStream(void)
 
     asReset(&a, input, sizeof input);
     CHECK("stream error event", ev(&a, "error", "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}") == -1
-          && !strcmp(a.error, "Overloaded"));
+          && !strcmp(a.error, "Overloaded") && !strcmp(a.errorType, "overloaded_error"));
 
     asReset(&a, input, sizeof input);
     ev(&a, "message_start", "{\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":1}}}");

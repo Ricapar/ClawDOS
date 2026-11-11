@@ -72,6 +72,7 @@ SCENARIOS = {
     '!cutoff': 'a reply that hits max_tokens',
     '!drop': 'the connection drops mid-reply (once; the retry succeeds)',
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
+    '!overload': 'an overloaded_error event before any text (once; the retry succeeds)',
     '!chunks': 'chunked encoding split every 7 bytes',
     '!bigevent': 'one text delta of 20 KB (over the DOS PC\'s event buffer)',
     '!bigsig': 'a 24 KB thinking signature (over the event buffer), a tool call, then a check that it came back intact',
@@ -139,12 +140,12 @@ def tour_steps():
         ('mkdir', {'path': 'C:\\DOSTDIR'}, 'ok', None),
         ('delete', {'path': 'C:\\DOSTOUR2.TXT'}, 'ok', None),
         ('delete', {'path': 'C:\\*.BAT'}, 'error', None),
-        ('poke', {'addr': '0000:04F0', 'bytes': '44 4F 53'}, 'ok', None),
+        ('poke', {'addr': '0000:04F0', 'bytes': '44\t4F, 53\t'}, 'ok', None),   # tabs arrive as tabs
         ('peek', {'addr': '0000:04F0', 'len': 3}, 'ok', '44 4F 53'),
         ('port', {'port': '61'}, 'ok', None),
         ('textart', {'text': '~EClaw~CDOS'}, 'ok', None),
         ('read', {'path': 'C:\\NOPE.TXT'}, 'error', 'not found'),
-        ('play', {'music': 'T200 L16 O4 CEG>C'}, 'ok', None),
+        ('play', {'music': 'T200\tL16 O4 CEG>C'}, 'ok', None),
         ('memory_write', {'name': 'DOSTOUR', 'text': 'Tour memory\nSecond line.'}, 'ok', None),
         ('memory_list', {}, 'ok', 'DOSTOUR'),
         ('memory_read', {'name': 'dostour'}, 'ok', 'Second line.'),
@@ -346,6 +347,12 @@ class MockChat:
             self.state['retried'] = True
             raise RetryOnce()
         yield from self.stream('The first request got a 529; this is the second attempt.')
+
+    def _cmd_overload(self, _text):
+        if not self.state.get('overloaded'):
+            self.state['overloaded'] = True
+            raise MockAPIError('Overloaded (simulated, before any text)')
+        yield from self.stream('The stream said overloaded_error before any text; this is the reply after the overload.')
 
     def _cmd_chunks(self, _text):
         self.chunk_every = 7

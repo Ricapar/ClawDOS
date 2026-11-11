@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 #define CFG_PROVIDERS 8
+#define CFG_MAX_TOKENS 64000L /* thinking counts toward it, so it is a ceiling, not a target */
 
 typedef struct Provider {
     char id[16];          /* [section] */
@@ -24,6 +25,7 @@ typedef struct Provider {
     char betas[64];       /* "" = no anthropic-beta header */
     char name[24];        /* assistant name; "" = the global one */
     int cache;            /* default 1: send cache_control */
+    long maxTokens;       /* max_tokens; default CFG_MAX_TOKENS */
 } Provider;
 
 typedef struct Cfg {

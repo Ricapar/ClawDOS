@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include "dosfs.h"
 
-#define DIR_MAX   150
 #define LINE_MAX  160
 #define BIN_MAX   256
 
@@ -90,7 +89,7 @@ int tool_dir(ToolCtx *t)
     do {
         if (!strcmp(f.name, "."))
             continue;
-        if (shown >= DIR_MAX || t->truncated) {
+        if (t->truncated) {           /* full: 83 lines of 48 bytes fit */
             more++;
             continue;
         }

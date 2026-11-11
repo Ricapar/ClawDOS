@@ -87,7 +87,7 @@ static int toolPoke(ToolCtx *t)
     while (*p) {
         char *end;
         unsigned long v;
-        while (*p == ' ' || *p == ',')
+        while (*p == ' ' || *p == '\t' || *p == ',')
             p++;
         if (!*p)
             break;
@@ -205,13 +205,15 @@ static int toolRun(ToolCtx *t)
     if (targ_bool(t, "full_memory", &big))
         return TS_ERROR;
     if (big && launched) {
-        if (relaunch_write_run(cmd, unattended ? 1 : 5))
+        if (cmd == NULL)
+            return tool_fail(t, "missing command");
+        if (relaunch_write_run(cmd))
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
         return TS_RELAUNCH;
     }
     if ((save = tools_save_screen()) == NULL)
         return tool_fail(t, "not enough memory to save the screen");
-    status = shell_run(t, cmd, unattended ? 1 : 5);
+    status = shell_run(t, cmd);
     tools_restore_screen(save);
     if (big && !launched)
         tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
@@ -319,6 +321,42 @@ static void runDetails(const char *cmds)
     }
 }
 
+#define SHOWN_LINES 6                 /* of a run's output, under its note */
+
+/* The last lines of a run's output (t->showFrom..showTo), dim under its note,
+   after a line counting those above them: the program's screen is gone once
+   the chat is back, and the model's copy is the whole result. */
+static void showLastLines(const ToolCtx *t)
+{
+    const char *from = t->out + t->showFrom, *end = t->out + t->showTo, *p;
+    char line[SCR_COLS - 8];          /* one row: these lines start in column 8 */
+    unsigned lines = 1, shown;
+
+    while (end > from && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t'))
+        end--;                        /* trailing blank lines */
+    if (end == from)
+        return;
+    for (p = from; p < end; p++)
+        lines += *p == '\n';
+    shown = lines < SHOWN_LINES ? lines : SHOWN_LINES;
+    if (lines > shown) {
+        sprintf(line, "... %u earlier line%s", lines - shown, lines - shown == 1 ? "" : "s");
+        ui_tool_detail(line);
+    }
+    for (p = end; ; p--)              /* back to the start of the first line shown */
+        if (p == from || (p[-1] == '\n' && --shown == 0))
+            break;
+    while (p < end) {
+        unsigned n = 0;
+        for (; p < end && *p != '\n'; p++)
+            if (*p != '\r' && n < sizeof line - 1)
+                line[n++] = (unsigned char)*p < ' ' ? ' ' : *p;
+        line[n] = 0;
+        ui_tool_detail(line);
+        p++;
+    }
+}
+
 /* Show, approve and run the call named `name` whose arguments are in the store. */
 static int execute(const char *name, int overflow, ToolCtx *t)
 {
@@ -379,6 +417,7 @@ static int execute(const char *name, int overflow, ToolCtx *t)
     else
         ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
+    showLastLines(t);
     return status;
 }
 
@@ -389,6 +428,7 @@ void tools_show_result(int status, const ToolCtx *t)
     else
         ui_tool_note(t->summary[0] ? t->summary : (status == TS_OK ? "done" : "failed"),
                      status != TS_OK);
+    showLastLines(t);
     ui_tool_done();
 }
 
