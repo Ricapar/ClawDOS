@@ -6,7 +6,8 @@ examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).
 MEMORY: a run gets about 200 KB (more than sysinfo's largest free block:
 ClawDOS lends the program its buffers). Set full_memory true and ClawDOS
 steps out of memory while it runs, giving about 450 KB, but each such run
-costs several seconds on the 8088 (ClawDOS reloads and reconnects).
+costs 10 to 25 seconds on the 8088 (ClawDOS reloads, reconnects and
+reopens the chat).
 Use it for TCC, TLINK, MAKE, the assemblers, programs you just built, .BAT
 files, and anything that said "out of memory"; leave it off for DIR, TYPE
 and quick checks. Give run a program and its arguments (TCC -c X.C): that

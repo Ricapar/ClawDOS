@@ -231,7 +231,7 @@
     },
     "full_memory": {
      "type": "boolean",
-     "description": "true: ClawDOS steps out of memory while the commands run, so they get about 450 KB instead of about 200 KB (130 KB for a .BAT file, redirection or an internal command, which load COMMAND.COM; with under 100 KB free those are refused and you are told to set this), at a cost of several seconds on the 8088 (ClawDOS reloads and reconnects). Use it for compilers, linkers and assemblers (TCC, TLINK, MAKE, NASM), for programs you just built, for .BAT files, and for anything that ran out of memory. Leave it out for DIR, TYPE, small tools and quick checks."
+     "description": "true: ClawDOS steps out of memory while the commands run, so they get about 450 KB instead of about 200 KB (130 KB for a .BAT file, redirection or an internal command, which load COMMAND.COM; with under 100 KB free those are refused and you are told to set this), at a cost of 10 to 25 seconds on the 8088 (ClawDOS reloads, reconnects and reopens the chat). Use it for compilers, linkers and assemblers (TCC, TLINK, MAKE, NASM), for programs you just built, for .BAT files, and for anything that ran out of memory. Leave it out for DIR, TYPE, small tools and quick checks."
     },
     "screenshot": {
      "type": "boolean",
