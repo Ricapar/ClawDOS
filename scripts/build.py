@@ -68,7 +68,7 @@ APPS = {
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
                                'lib/chatfile.c', 'lib/net.cpp', 'lib/http.cpp'],
                    'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
-    'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'tests/unit/shotunit.c', 'tests/unit/memunit.c', 'lib/runmem.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
+    'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'tests/unit/shotunit.c', 'tests/unit/memunit.c', 'tests/unit/apiunit.c', 'lib/runmem.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c',
                                 'lib/chatfile.c', 'lib/shotpng.c'],
                     'model': 'l', 'defines': ['DOSUNIT']},

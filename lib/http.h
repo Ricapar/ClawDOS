@@ -23,10 +23,10 @@ class Http {
     Http();
 
     int8_t open(const char *hostport);                 /* "host[:port]", port default 8443; 0 ok */
-    /* The buffers to use (HTTP_RX_MAX, HTTP_HEAD_MAX and HTTP_TX_MAX bytes)
-       instead of the heap's: the harness lends them to run programs between
-       requests, when they hold nothing (lib/runmem.h), and hands them back
-       before each. */
+    /* The buffers to use (HTTP_RX_MAX, HTTP_HEAD_MAX and HTTP_TX_MAX bytes),
+       before open: the harness lends them to run programs between requests,
+       when they hold nothing (lib/runmem.h), and hands them back before each.
+       Without them open, sends and reads fail. */
     void   useBuffers(char *rxBuf, char *head, char *tx) { rx = rxBuf; headBuf = head; txBuf = tx; }
     void   close(void);
     int    isOpen(void) { return conn.isConnected(); }

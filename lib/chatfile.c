@@ -195,6 +195,8 @@ static void emitText(Parse *p, int user)
         n = utf8End(p->text, n);
     m = utf8_to_cp437(p->text, n, p->shown, CHATFILE_TEXT_MAX);
     p->shown[m] = 0;
+    if (user && !strcmp(p->shown, CHAT_ROUND_CAP_NOTE))
+        return;                       /* the harness's note beside the last result, not something typed */
     if (user ? p->show->user != NULL : p->show->reply != NULL)
         (user ? p->show->user : p->show->reply)(p->show->ctx, p->shown, p->textCut || m == CHATFILE_TEXT_MAX);
 }

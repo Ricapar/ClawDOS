@@ -49,7 +49,6 @@
 #define BUILD_STAMP "dev"
 #endif
 #define VERSION   BUILD_STAMP
-#define CFG_PATH  "C:\\CLAWDOS\\CLAWDOS.CFG"
 #define LOG_PATH  "C:\\CLAWDOS\\CLAWDOS.LOG"
 #define INPUT_MAX 900
 #define HIST_N    8

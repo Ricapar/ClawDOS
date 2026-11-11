@@ -20,6 +20,7 @@
 #include "dosfs.h"
 #include "chatfile.h"
 #include "runmem.h"
+#include "chatui.h"
 
 #define SSE_MAX        RM_SSE_BYTES
 #define TOOL_INPUT_MAX RM_TOOLIN_BYTES
@@ -29,9 +30,7 @@
 #define MAX_ROUNDS     25           /* tool rounds per user message */
 #define PROMPT_PATH    "C:\\CLAWDOS\\PROMPT.TXT"
 #define TOOLS_PATH     "C:\\CLAWDOS\\TOOLS.JSN"
-#define CHATS_DIR      "C:\\CLAWDOS\\CHATS"
-#define CFG_PATH       "C:\\CLAWDOS\\CLAWDOS.CFG"
-#define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
+#define ROUND_CAP_NOTE CHAT_ROUND_CAP_NOTE
 #define CALL_LOST      "Error: no result: ClawDOS stopped before this call finished, and the chat was reopened later."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), err(""), reasked(0), streamRc(0), textShown(0),
@@ -392,7 +391,7 @@ int8_t Chat::preparePrefix(void)
     tout_end_list(&t, "(more memories, not listed)");
     if ((mems = (char *)malloc(t.len + 1)) == NULL)
         return -1;
-    strcpy(mems, status == TS_OK ? t.out : "");
+    strcpy(mems, t.out);              /* the list returns TS_OK or TS_STOPPED */
     tout_reset(&t);
     if (skill_list(&t) == TS_STOPPED) {
         free(mems);

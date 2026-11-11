@@ -21,7 +21,7 @@ static const char *histText(void)
     static char buf[1200];
     Sink s;
     sink_buffer(&s, buf, sizeof buf);
-    hist_copy(&s);
+    hist_copy_from(&s, 0);
     return buf;
 }
 

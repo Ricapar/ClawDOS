@@ -23,6 +23,9 @@ extern "C" {
 
 #define CHATFILE_SHOW      3          /* typed messages (exchanges) the transcript shows */
 #define CHATFILE_SHOW_MAX  49152L     /* bytes at most read to show them */
+/* The harness's note beside the result of a turn's last tool round: in a
+   user message, but not typed, so a reopened chat does not show it. */
+#define CHAT_ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 #define CHATFILE_TEXT_MAX  1000       /* bytes of a text block's JSON string read to show it: 1,000
                                          characters of plain text (about 13 rows), fewer when it holds
                                          escapes or letters outside ASCII */

@@ -29,8 +29,6 @@ int Http::sockPut(Sink *s, const char *p, unsigned n)
 {
     Http *h = (Http *)s->ctx;
     if (!h->txBuf)
-        h->txBuf = (char *)malloc(HTTP_TX_MAX);
-    if (!h->txBuf)
         return -1;
     while (n) {
         unsigned room = HTTP_TX_MAX - h->txLen, take = n < room ? n : room;
@@ -57,9 +55,7 @@ int8_t Http::flush(void)
 
 int8_t Http::open(const char *hostport)
 {
-    if (!rx)
-        rx = (char *)malloc(HTTP_RX_MAX);
-    if (!rx)
+    if (!rx)                          /* useBuffers was not called */
         return -1;
     rxLen = rxPos = 0;
     txLen = 0;
@@ -115,8 +111,6 @@ int8_t Http::readHead(HttpHead *h, int secs)
     char *buf;
     unsigned len = headLen;
 
-    if (!headBuf)
-        headBuf = (char *)malloc(HTTP_HEAD_MAX);
     buf = headBuf;
     if (!buf || !rx)
         return -1;

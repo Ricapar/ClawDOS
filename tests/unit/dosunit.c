@@ -45,7 +45,7 @@ void check(const char *name, int ok, const char *detail)
     }
 }
 
-static void check_str(const char *name, const char *got, const char *want)
+void check_str(const char *name, const char *got, const char *want)
 {
     static char detail[400];
     if (strcmp(got, want) == 0) {
@@ -649,6 +649,12 @@ static void testCfg(void)
     cfg_defaults(c);
     CHECK("cfg empty cachettl is bad", cfg_parse(c, "[a]\ncachettl\n") == 2);
     cfg_defaults(c);
+    CHECK("cfg a flag is 0 or 1", cfg_parse(c, "[a]\ncache 0\nthreads 1\n") == 0 && !c->providers[0].cache
+          && c->providers[0].threads == 1);
+    cfg_defaults(c);
+    CHECK("cfg threads on is a bad line", cfg_parse(c, "[a]\nmodel m\nthreads on\n") == 3
+          && cfg_parse(c, "[a]\nprogress 2\n") == 2);
+    cfg_defaults(c);
     CHECK("cfg defaults", !strcmp(c->name, "Claude") && c->nproviders == 0);
     CHECK("cfg auth tunnel needs no key", cfg_parse(c, "[t]\ntunnel h:1\nhost h\nmodel m\nauth tunnel\n[u]\ntunnel h:1\nhost h\nmodel m\n") == 0
           && !strcmp(c->providers[0].auth, "tunnel") && cfg_missing(&c->providers[0]) == NULL
@@ -665,7 +671,7 @@ static const char *histText(void)
     static char buf[1200];
     Sink s;
     sink_buffer(&s, buf, sizeof buf);
-    hist_copy(&s);
+    hist_copy_from(&s, 0);
     return buf;
 }
 
@@ -1196,68 +1202,6 @@ static void testThreadDecision(void)
     hist_close();
     remove("C:\\HISTTEST.JSN");
     free(p);
-}
-
-/* F5 while a request is written: the sink below is the socket, whose flushes
-   run the idle callback and so handle keys. The provider it changes is the
-   live one; the request was built from api_req_settings' copy, so the body
-   still matches the length and the fingerprint counted before it began. */
-static Provider *f5Live;
-static int f5Put(Sink *s, const char *p, unsigned n)
-{
-    char *buf = (char *)s->ctx;
-    unsigned have = strlen(buf);
-    if (have + n < 400) {
-        memcpy(buf + have, p, n);
-        buf[have + n] = 0;
-    }
-    if (s->count > 20)                    /* past "model", before "output_config" */
-        strcpy(f5Live->effort, "medium");
-    return 0;
-}
-
-static void testApiReqSnapshot(void)
-{
-    static char body[400];
-    Provider *live = (Provider *)malloc(sizeof(Provider));
-    ApiReq *rq = (ApiReq *)malloc(sizeof(ApiReq));
-    ApiPrefix x;
-    ApiFixed fx;
-    Sink s;
-    unsigned long length, fp;
-
-    writeFile("C:\\PTEST.TXT", "Hi.");
-    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
-    memset(live, 0, sizeof *live);
-    strcpy(live->id, "anthropic"); strcpy(live->host, "h"); strcpy(live->path, "/v1/messages");
-    strcpy(live->model, "m"); strcpy(live->effort, "low"); live->maxTokens = 100; live->threads = 1;
-    api_fixed_from(&fx, live);
-    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = ""; x.skills = "";
-    x.cache = 0; x.ttl1h = 0;
-    api_req_settings(rq, live);
-    rq->fixed = &fx; rq->prefixPath = "C:\\PTEST.PRE"; rq->prefixLen = api_prefix_file("C:\\PTEST.PRE", &x);
-    rq->noTools = 0; rq->thread = API_TH_CREATE; rq->prevId = ""; rq->histFrom = 0;
-    remove("C:\\HISTTEST.JSN");
-    hist_open("C:\\HISTTEST.JSN");
-    hist_puts(U1);
-    hist_message_done();
-    length = api_length(rq);
-    fp = api_fingerprint(&rq->p, 0);
-    f5Live = live;
-    body[0] = 0;
-    s.put = f5Put; s.ctx = body; s.count = 0;
-    CHECK("F5 mid-body: written", api_body(&s, rq) == 0 && !strcmp(live->effort, "medium"));
-    CHECK("F5 mid-body: the length sent still holds", s.count == length && strlen(body) == length);
-    CHECK("F5 mid-body: the effort counted is the one sent", strstr(body, "\"effort\":\"low\"") != NULL
-          && strstr(body, "medium") == NULL);
-    CHECK("F5 mid-body: the fingerprint is the request's", api_fingerprint(&rq->p, 0) == fp
-          && api_fingerprint(live, 0) != fp);
-    api_req_settings(rq, live);
-    CHECK("F5: the next message takes it", api_length(rq) == length + 3 && api_fingerprint(&rq->p, 0) != fp);
-    hist_close();
-    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
-    free(rq);
-    free(live);
 }
 
 /* The thinking object, the cache markers and the beta header for each of the
@@ -1928,10 +1872,10 @@ static long histFileSize(void)
 {
     Sink count;
     sink_count(&count);
-    return hist_copy(&count) == 0 ? (long)count.count : -1L;
+    return hist_copy_from(&count, 0) == 0 ? (long)count.count : -1L;
 }
 
-/* The file's last 32 bytes, through hist_copy. */
+/* The file's last 32 bytes, through hist_copy_from. */
 static char tail[33];
 static int tailPut(Sink *s, const char *p, unsigned n)
 {
@@ -1954,7 +1898,7 @@ static const char *histTail(void)
     Sink s;
     s.put = tailPut; s.ctx = 0; s.count = 0;
     tail[0] = 0;
-    hist_copy(&s);
+    hist_copy_from(&s, 0);
     return tail;
 }
 
@@ -2534,56 +2478,6 @@ static void testPrefixCache(void)
     remove("C:\\TTEST.JSN");
 }
 
-/* /model to another provider section: the fixed settings follow it, and the
-   prefix file's marker is rewritten to the new cache setting with the prompt
-   and tools left byte for byte as rendered. */
-static void testFixedSwitch(void)
-{
-    static char want[300];
-    Provider *p = (Provider *)malloc(sizeof(Provider));
-    ApiPrefix x;
-    ApiFixed fx;
-    Sink buf;
-    int rc;
-
-    writeFile("C:\\PTEST.TXT", "Say \"hi\" \\ }],\"tools\": {name}.");
-    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\",\"cache_control\":{\"ttl\":\"1h\"}}]");
-    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Q"; x.memories = "";
-    x.skills = ""; x.cache = 1; x.ttl1h = 1;
-    api_prefix_file("C:\\PTEST.PRE", &x);
-    memset(p, 0, sizeof *p);              /* a host with none of the betas and no cache */
-    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
-    x.cache = 0;
-    sink_buffer(&buf, want, sizeof want);
-    api_prefix(&buf, &x);
-    CHECK("switch: settings from the new provider", !fx.progress && !fx.dropThinking && !fx.threads && !fx.cache);
-    CHECK("switch: the marker dropped, the rest as rendered", rc == 1 && !strcmp(fileText("C:\\PTEST.PRE"), want)
-          && fs_size("C:\\PTEST.PR$") == -1);
-    p->cache = 1;
-    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
-    x.cache = 1; x.ttl1h = 0;
-    sink_buffer(&buf, want, sizeof want);
-    api_prefix(&buf, &x);
-    CHECK("switch: a five-minute marker put in", rc == 1 && fx.cache && !fx.ttl1h
-          && !strcmp(fileText("C:\\PTEST.PRE"), want));
-    p->progress = p->dropThinking = p->threads = 1;
-    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
-    CHECK("switch: the same marker leaves the file", rc == 0 && fx.progress && fx.dropThinking && fx.threads
-          && !strcmp(fileText("C:\\PTEST.PRE"), want));
-    p->cacheTtl1h = 1;
-    mkdir("C:\\PTEST.PR$");               /* the rewrite's temporary file cannot be made */
-    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
-    CHECK("switch: an unwritable marker keeps the file's", rc == -1 && fx.cache && !fx.ttl1h && fx.threads
-          && !strcmp(fileText("C:\\PTEST.PRE"), want));
-    rmdir("C:\\PTEST.PR$");
-    remove("C:\\PTEST.PRE");
-    rc = api_fixed_switch(&fx, p, "C:\\PTEST.PRE");
-    CHECK("switch: no prefix yet", rc == 0 && fx.cache && fx.ttl1h && fs_size("C:\\PTEST.PRE") == -1);
-    remove("C:\\PTEST.TXT");
-    remove("C:\\TTEST.JSN");
-    free(p);
-}
-
 /* A list cut at the output's size ends on a whole line, then says so. */
 static void testEndList(void)
 {
@@ -2604,6 +2498,9 @@ static void testEndList(void)
 
 
 void testShotPng(void);               /* shotunit.c: its own module, for room in the code segment */
+void testApiReqSnapshot(void);        /* apiunit.c, the same */
+void testFixedSwitch(void);
+void testChatFileImage(void);
 void testConvoImage(void);
 void testShotSeconds(void);
 void testRunmem(void);                /* memunit.c */
@@ -2652,6 +2549,7 @@ int main(void)
     testHistoryTurnCarried();
     testHistoryScanFails();
     testChatFile();
+    testChatFileImage();
     testConvoJoinText();
     testPrefixCache();
     testFixedSwitch();

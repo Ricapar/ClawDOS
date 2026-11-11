@@ -8,7 +8,7 @@
  *
  * Writes are buffered (2 KB) and reach the disk when the buffer fills, when a
  * message is complete (hist_message_done, which also commits) and before the
- * file is read or closed (hist_reopen_last, hist_copy, hist_close). A rollback
+ * file is read or closed (hist_reopen_last, hist_copy_from, hist_close). A rollback
  * cuts the file at a boundary, which is always on disk, so the bytes it holds
  * are dropped unwritten. After a failed write nothing more is taken and
  * hist_message_done fails until a rollback.
@@ -36,7 +36,7 @@ extern int hist_test_write_ok;        /* >= 0: writes after that many fail (a fu
 extern int hist_test_write_bad;       /* this many of them (0: all) */
 #endif
 void hist_close(void);
-long hist_size(void);                 /* bytes hist_copy would produce */
+long hist_size(void);                 /* bytes hist_copy_from(s, 0) would produce */
 /* The smallest size the file has had since hist_low_reset (or hist_open):
    every rollback, reopen and cut counts, so a copy of the file up to an offset
    at or below it is still what the file holds. */
@@ -69,10 +69,9 @@ int  hist_turn_set(const HistTurn *t);
    more can be appended to it; finish with hist_message_done. A later
    hist_rollback_turn restores the message if turn_begin preceded the reopen. */
 int  hist_reopen_last(unsigned n);
-/* File contents (no brackets) into the sink: 0, -1 the file could not be
-   read (or written out first), -2 the sink failed. */
-int  hist_copy(Sink *s);
-int  hist_copy_from(Sink *s, long from);  /* the same from byte `from` on */
+/* File contents (no brackets) from byte `from` on into the sink: 0, -1 the
+   file could not be read (or written out first), -2 the sink failed. */
+int  hist_copy_from(Sink *s, long from);
 /* Up to n bytes of the file from pos (written out first): how many, 0 at the
    end, -1 on an error. ctx is unused: this is chatfile.h's ChatRead. */
 int  hist_read(void *ctx, long pos, char *buf, unsigned n);

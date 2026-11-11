@@ -7,7 +7,7 @@
 #include <dos.h>
 #include "history.h"
 
-#define COPY_BUF 2048           /* reads of the scan and of hist_copy (heap, freed after) */
+#define COPY_BUF 2048           /* reads of the scan and of hist_copy_from (heap, freed after) */
 #define WBUF_MAX 2048           /* the write-behind buffer */
 
 static int fd = -1;
@@ -280,6 +280,7 @@ static int truncateTo(long pos)
     writeFailed = 0;                  /* whatever a failed write left is cut off */
     end = boundary = pos;
     needSep = end > 0;
+    commit();                         /* or a power cut leaves the dropped messages for a reopen to send */
     return 0;
 }
 
@@ -301,6 +302,7 @@ int hist_rollback_turn(void)
         end = boundary = turnStart;
         needSep = 1;
         savedTailLen = 0;
+        commit();
         return 0;
     }
     return truncateTo(turnStart);
@@ -363,11 +365,6 @@ int hist_read(void *ctx, long pos, char *buf, unsigned n)
     if (lseek(fd, pos, SEEK_SET) < 0)
         return -1;
     return read(fd, buf, n);
-}
-
-int hist_copy(Sink *s)
-{
-    return hist_copy_from(s, 0);
 }
 
 int hist_copy_from(Sink *s, long from)

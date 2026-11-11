@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 
+#define CFG_PATH "C:\\CLAWDOS\\CLAWDOS.CFG"
 #define CFG_PROVIDERS 8
 #define CFG_MAX_TOKENS 64000L /* thinking counts toward it, so it is a ceiling, not a target */
 
@@ -44,7 +45,8 @@ void cfg_defaults(Cfg *c);
 /* Parse text (LF or CRLF; '#' starts a comment except in key/keyfile values;
    "key value" separated by spaces or tabs, trailing blanks trimmed). Returns 0,
    or the 1-based number of the first bad line (unknown key, a bad maxtokens or
-   cachettl value, too many sections). */
+   cachettl value, a cache, progress, dropthinking or threads value other than
+   0 or 1, too many sections). */
 int cfg_parse(Cfg *c, const char *text);
 int cfg_load(Cfg *c, const char *path);          /* file -> cfg_parse, then keyfile -> key; -1 unreadable, else as cfg_parse */
 Provider *cfg_provider(Cfg *c, const char *id);  /* NULL if unknown; case-insensitive */

@@ -27,6 +27,16 @@ static void setStr(char *dst, unsigned max, const char *val)
 }
 
 /* Store key=val in the section (or the globals when p is NULL); 0 ok, -1 unknown key. */
+/* A 0/1 setting: anything else is a bad line ("threads on" would otherwise
+   read as 0 and turn the feature off without a word). */
+static int setFlag(int *flag, const char *val)
+{
+    if ((val[0] != '0' && val[0] != '1') || val[1])
+        return -1;
+    *flag = val[0] - '0';
+    return 0;
+}
+
 static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
 {
     if (p == NULL) {
@@ -48,10 +58,10 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
     else if (!stricmp(key, "effort")) setStr(p->effort, sizeof p->effort, val);
     else if (!stricmp(key, "betas")) setStr(p->betas, sizeof p->betas, val);
     else if (!stricmp(key, "name")) setStr(p->name, sizeof p->name, val);
-    else if (!stricmp(key, "cache")) p->cache = atoi(val);
-    else if (!stricmp(key, "progress")) p->progress = atoi(val);
-    else if (!stricmp(key, "dropthinking")) p->dropThinking = atoi(val);
-    else if (!stricmp(key, "threads")) p->threads = atoi(val);
+    else if (!stricmp(key, "cache")) return setFlag(&p->cache, val);
+    else if (!stricmp(key, "progress")) return setFlag(&p->progress, val);
+    else if (!stricmp(key, "dropthinking")) return setFlag(&p->dropThinking, val);
+    else if (!stricmp(key, "threads")) return setFlag(&p->threads, val);
     else if (!stricmp(key, "cachettl")) {
         if (!stricmp(val, "5m"))
             p->cacheTtl1h = 0;
