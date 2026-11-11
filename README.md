@@ -12,7 +12,7 @@ ClawDOS brings a modern AI coding agent experience to vintage hardware.
 
 * Chat
 * Tools
-* Memory
+* Memory and skills
 
 ## Available Tools
 
@@ -143,7 +143,9 @@ networking. It is faster but less exact (it emulates an 80186).
    everything under `MEMORY\`, `CLAWDOS\CHATS\`, `CLAWDOS.LOG`, `CLAWDOS.CFG`, `NET\MTCP.CFG`
    (the DHCP lease lives there), the relaunch state files and any file the build does not
    ship (your own programs) stay as they are, and it says so for each shipped file it left
-   alone. Other shipped files you edited on the PC (`AUTOEXEC.BAT`, `CONFIG.SYS`,
+   alone. The skills in `SKILLS\` are the build's and are replaced like the programs; a
+   memory with a shipped skill's name (older builds shipped `DEVTOOLS` and `DEMOFX` as
+   memories) is kept, with a note that it is now a skill and can go with F4. Other shipped files you edited on the PC (`AUTOEXEC.BAT`, `CONFIG.SYS`,
    `TC\TURBOC.CFG`, the programs) are replaced, and survive only in the backup. An existing
    backup is never overwritten: the next one is `CLAWDOS.IMG.bak.2`, then `.bak.3`, and the
    output names the one written. A run that would add and change nothing writes nothing
@@ -151,7 +153,7 @@ networking. It is faster but less exact (it emulates an 80186).
    added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists
    the template's `[anthropic]` settings the image's copy lacks so you can add them.
    `--dry-run` shows all that and changes nothing; `--memories` also replaces the memory
-   files the build ships (not your others); `--cfg` replaces `CLAWDOS.CFG` with the
+   files the build ships (none now; not your others); `--cfg` replaces `CLAWDOS.CFG` with the
    build's (tunnel address and key line included; it warns if that writes a key into a
    config that says `auth tunnel`); `--no-backup` skips the backup. `--no-key` is remembered
    by later builds until you give `--key`. If the build's boot code differs from the
@@ -216,7 +218,7 @@ run the commands with about 450K free, and the harness start again on the same
 conversation with the program's output as the tool result. That costs a reload
 and a reconnect (under a second in DOSBox-X; about 11 s on the 8088), so Claude
 sets it for compilers, linkers, the programs it builds and batch files
-(the run tool's schema and `image/memory/DEVTOOLS.TXT` say when), and leaves it
+(the run tool's schema and `image/skills/DEVTOOLS.TXT` say when), and leaves it
 off for DIR, TYPE and quick checks, which run beside the harness. The screen and
 the Up/Down input history come back with the harness. If the harness cannot come back (the tunnel or the
 network is down), fix that and type `CLAWDOS -resume`: the conversation carries
@@ -244,7 +246,8 @@ The image carries development tools that were tested on an 8088 at 4.77 MHz
 | `LDEBUG` | lDebug, a scriptable FreeDOS DEBUG (Fair License) | |
 
 They live in `C:\DEVEL` (licences in `C:\DEVEL\DOC`) and `C:\TC`, and
-`C:\MEMORY\DEVTOOLS.TXT`, ClawDOS's first memory, tells it how to use them.
+`C:\SKILLS\DEVTOOLS.TXT`, a skill (see [Memories and skills](#memories-and-skills)), tells it how
+to use them; `C:\SKILLS\DEMOFX.TXT` does the same for fast CGA graphics and demo effects.
 Examples are in `C:\TESTS\DEV`. Turbo C is commercial: the build copies it from
 your own floppy images in `external/` (e.g. `Borland - Turbo C v2.0 - Disk 3 of
 6 - Command Line and Utilities.img`) and leaves it out if they aren't there.
@@ -252,14 +255,22 @@ Ours came from <https://archive.org/details/borland-turbo-c-v2.0>.
 Pacific C was tried and hangs on an 8088. `docs/research/` has the survey of
 what else runs on a DOS PC and what a licensed copy would add.
 
-### Memories
+### Memories and skills
 
 ClawDOS keeps notes on the DOS PC itself, in `C:\MEMORY\NAME.TXT` (first line: a
 one-line summary; at most 4000 bytes each). At the start of every conversation
 CLAWDOS lists them and puts the list into the system prompt, so ClawDOS knows
 what it saved before and reads a memory in full when it's relevant. The memory
 tools never ask in safe mode. Delete a memory with `DEL C:\MEMORY\NAME.TXT`, or
-ask ClawDOS to (that uses `delete`, which does ask).
+ask ClawDOS to (that uses `delete`, which does ask). The image ships no memories.
+
+Skills are knowledge written for ClawDOS rather than learned by it: text files in
+`C:\SKILLS` (from `image/skills/`), which the build ships and `--update` replaces.
+The system prompt lists them beside the memories (path, size, first line) and
+ClawDOS reads one with the ordinary `read` tool when it fits the task; a long one
+comes in parts, each result saying where the next starts. They have no size
+limit, and the memory tools and F4 never touch them. To add one, put a `.TXT` in
+`image/skills/` whose first line says when to read it.
 
 ### Other providers
 
@@ -278,14 +289,14 @@ OpenAI-style `/chat/completions` hosts are not supported.
 `C:\CLAWDOS\PROMPT.TXT` is the whole system prompt (template:
 `image/clawdos/PROMPT.TXT`). It casts the assistant as ClawDOS, an AI coding
 assistant for DOS; `{name}` becomes the model behind it (`name` in the config) and
-`{memories}` the list of memories. It must tell the model about the screen
+`{memories}` the list of memories and `{skills}` the list of skills. It must tell the model about the screen
 (plain text, 80 columns, no Markdown). It is read when a conversation starts,
-together with `C:\CLAWDOS\TOOLS.JSN` and the memories, and the result is kept
+together with `C:\CLAWDOS\TOOLS.JSN`, the memories and the skills, and the result is kept
 beside the chat (`CHATS\MMDDnnn.PRE`): every request of that conversation sends
 the same system prompt and tools, through `/model`, F5 and a relaunch, because
 the model's thinking is bound to them (and the prompt cache wants them
 unchanged). So an edit on the DOS PC, by you or by ClawDOS, or a new or deleted
-memory, applies from the next conversation (F2).
+memory or skill, applies from the next conversation (F2).
 
 ### Chats and logs
 

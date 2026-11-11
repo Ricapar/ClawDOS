@@ -1,6 +1,9 @@
 /* ClawDOS memories: notes the model keeps across conversations as
  * C:\MEMORY\NAME.TXT, through memory_list, memory_read and memory_write. The
  * first line of a memory is its summary. These tools never ask the user.
+ * Skills (C:\SKILLS\*.TXT) are listed here too, for the system prompt: the
+ * build ships them, the model reads them with the read tool, and the memory
+ * tools never reach them.
  */
 #ifndef CLAWDOS_MEMORY_H
 #define CLAWDOS_MEMORY_H
@@ -12,6 +15,7 @@ extern "C" {
 #endif
 
 #define MEM_DIR      "C:\\MEMORY"
+#define SKILL_DIR    "C:\\SKILLS"
 #define MEM_MAX      4000            /* bytes: one memory fits one tool reply */
 #define MEM_SUMMARY  60              /* longest summary shown by memory_list */
 
@@ -38,6 +42,11 @@ int  mem_delete(const char *name);
 int tool_memory_list(ToolCtx *t);
 int tool_memory_read(ToolCtx *t);
 int tool_memory_write(ToolCtx *t);
+
+/* For the system prompt: one line per C:\SKILLS\*.TXT (its whole path, its
+   size and its first line), nothing when there are none. TS_OK, or TS_STOPPED
+   after an Esc. */
+int skill_list(ToolCtx *t);
 
 #ifdef __cplusplus
 }

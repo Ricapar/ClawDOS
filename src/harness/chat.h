@@ -36,7 +36,7 @@ class Chat {
     int8_t init(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
     void   close(void);
 
-    int8_t newConversation(void);          /* a new CHATS file, and a new prefix with the memories as they are */
+    int8_t newConversation(void);          /* a new CHATS file, and a new prefix (memories and skills as they are) */
     /* Send the user's text and run the whole turn, tool rounds included.
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
        -1 failed (a note has been shown), 2 a run waits for the launcher

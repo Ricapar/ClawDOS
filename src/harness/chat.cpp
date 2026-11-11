@@ -214,19 +214,19 @@ void Chat::setPrefixPath(void)
 }
 
 /* The conversation's prefix file: rendered the first time a request needs it
-   (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN and the memories
-   as they are then, and the same bytes on every request after that, through
-   /model, F5 and a relaunch. Edits to those apply to the next conversation.
-   The fixed settings (thinking, the cache markers, threads) are chosen from
-   the provider in use at the same moment and kept as long; only once the
-   prefix is there, so a first attempt that wrote none (Esc, a full disk)
-   leaves them to be chosen again, after a /model perhaps. */
+   (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN, the memories and
+   the skills as they are then, and the same bytes on every request after
+   that, through /model, F5 and a relaunch. Edits to those apply to the next
+   conversation. The fixed settings (thinking, the cache markers, threads)
+   are chosen from the provider in use at the same moment and kept as long;
+   only once the prefix is there, so a first attempt that wrote none (Esc, a
+   full disk) leaves them to be chosen again, after a /model perhaps. */
 int8_t Chat::preparePrefix(void)
 {
     ApiPrefix x;
     ApiFixed f;
     ToolCtx t;
-    char line[60];
+    char line[60], *mems;
     int status;
 
     if ((preLen = fs_size(prePath)) > 0) {
@@ -241,17 +241,30 @@ int8_t Chat::preparePrefix(void)
     else
         api_fixed_from(&f, prov);
     tout_reset(&t);
-    /* Esc while the memories are listed (it polls the keyboard) stops the
-       turn: a short list would be frozen into the conversation. */
+    /* Esc while the memories or the skills are listed (both poll the
+       keyboard) stops the turn: a short list would be frozen into the
+       conversation. The two lists share the tool output buffer, so the
+       memories wait on the heap while the skills are listed. */
     if ((status = tool_memory_list(&t)) == TS_STOPPED)
         return 1;
+    if ((mems = (char *)malloc(t.len + 1)) == NULL)
+        return -1;
+    strcpy(mems, status == TS_OK ? t.out : "");
+    tout_reset(&t);
+    if (skill_list(&t) == TS_STOPPED) {
+        free(mems);
+        return 1;
+    }
     x.promptPath = PROMPT_PATH;
     x.toolsPath = TOOLS_PATH;
     x.name = prov->name[0] ? prov->name : cfg->name;
-    x.memories = status == TS_OK ? t.out : "";
+    x.memories = mems;
+    x.skills = t.out;
     x.cache = f.cache;
     x.ttl1h = f.ttl1h;
-    if ((preLen = api_prefix_file(prePath, &x)) < 0)
+    preLen = api_prefix_file(prePath, &x);
+    free(mems);
+    if (preLen < 0)
         return (int8_t)preLen;
     fix = f;
     fixedSet = 1;

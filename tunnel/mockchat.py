@@ -141,6 +141,7 @@ SCENARIOS = {
     '!headercol': 'text, a sysinfo call, then peeks of CGA memory until the tool header\'s row is found: '
                    'logs the column its bullet starts in (0 is right)',
     '!nothreads': 'two sysinfo calls; from the second request on, thread_unsupported_request for any thread',
+    '!skills': 'checks the system prompt lists the shipped skills (not as memories), then reads one in two parts',
 }
 
 # A thinking signature longer than the DOS PC's 16 KB event buffer (see !bigsig).
@@ -163,6 +164,31 @@ THINKING_TEXT = ('The user sent !think. I should answer with a thinking block th
 # !thinktool: JSON needs escaping here (a quote, a backslash) and UTF-8 needs more than a byte (\u00e9, \u00fc).
 THINKING_ESCAPES = 'He said "wait", the path is C:\\DOS\\, caf\u00e9 and Z\u00fcrich, then a tool call.'
 REDACTED_DATA = base64.b64encode(bytes(range(256)) * 3).decode()
+
+
+# !skills: the skills the build ships (image/skills), one read in parts of SKILL_PART lines, and a line from
+# each end of it.
+SKILLS = ('C:\\SKILLS\\DEVTOOLS.TXT', 'C:\\SKILLS\\DEMOFX.TXT')
+SKILL_READ = SKILLS[0]
+SKILL_PART = 40
+SKILL_FIRST = '    1 Dev tools: '
+SKILL_LAST = 'Plain DEBUG still works too.'
+
+
+def skills_listed(system):
+    """None if the system prompt's skills list names every shipped skill and its memories list none of them,
+    else what is wrong. The skills list runs from "Skills now" to the "Memories:" paragraph."""
+    start, mems = system.find('Skills now'), system.find('Memories now')
+    if start < 0 or mems < 0 or not start < system.find('Memories:') < mems:
+        return 'no skills list before the memories list'
+    listed, memories = system[start:system.find('Memories:')], system[mems:]
+    missing = [s for s in SKILLS if s not in listed]
+    if missing:
+        return 'skills list lacks ' + ', '.join(missing)
+    doubled = [s for s in SKILLS if s.rsplit('\\', 1)[1].split('.')[0] in memories]
+    if doubled:
+        return 'memories list has ' + ', '.join(doubled)
+    return None
 
 
 def schema_types(path=DEFAULT_TOOLS):
@@ -338,6 +364,7 @@ class MockChat:
         self.requests = []                                 # (kind, body bytes) of each request answered
         self.tools_path = tools_path                       # the TOOLS.JSN the server checks requests against
         self.no_tools = False                              # the request said tool_choice none (set by the server)
+        self.system = ''                                   # the system prompt's text, as the model sees it (the server)
         self.progress = False                              # the request asked for display "updates" (the server)
         self.progress_note = ''                            # the thinking text sent then, if a scenario sets one
         self.rng = random.Random(seed)
@@ -641,6 +668,23 @@ class MockChat:
         print(f'thread unsupported: {"PASS" if replayed else "FAIL"} (the requests after the refusal '
               f'came without a thread: {self.thread_kind})', flush=True)
         yield 'Both calls done; threads stayed off after thread_unsupported_request.'
+
+    def _cmd_skills(self, _text):
+        failure = skills_listed(self.system)
+        yield f'The system prompt lists the skills{" (" + failure + ")" if failure else ""}; reading one in two parts.'
+        first = ToolCall('read', {'path': SKILL_READ, 'lines': SKILL_PART})
+        yield first
+        cont = f'...(more lines from {SKILL_PART + 1}; use start)'
+        if failure is None and not (first.result.status == 'ok' and SKILL_FIRST in first.result.text
+                                    and first.result.text.rstrip().endswith(cont)):
+            failure = f'first part: {first.result.status} {first.result.text[-80:]!r}'
+        rest = ToolCall('read', {'path': SKILL_READ, 'start': SKILL_PART + 1})
+        yield rest
+        if failure is None and not (rest.result.status == 'ok' and SKILL_LAST in rest.result.text):
+            failure = f'second part: {rest.result.status} {rest.result.text[-80:]!r}'
+        verdict = 'skills: PASS' if failure is None else f'skills: FAIL {failure}'
+        print(verdict, flush=True)
+        yield f' {verdict}'
 
     def _cmd_toolstall(self, _text):
         yield from self.call('sysinfo', {})

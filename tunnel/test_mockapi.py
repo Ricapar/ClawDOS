@@ -152,6 +152,44 @@ class MockApiTest(unittest.TestCase):
         self.assertIn('read -> ok:     1 hi', text2)
         self.assertEqual(stop2, 'end_turn')
 
+    def skills_prompt(self, skills, memories):
+        """The real PROMPT.TXT as the harness renders it, with these lists."""
+        with open(os.path.join(os.path.dirname(mockchat.DEFAULT_TOOLS), 'PROMPT.TXT'), encoding='cp437') as f:
+            text = f.read()
+        return text.replace('{name}', 'Claude').replace('{skills}', skills).replace('{memories}', memories)
+
+    def test_skills_listed_reads_the_real_prompt(self):
+        both = ('C:\\SKILLS\\DEMOFX.TXT        3211  CGA demo effects\n'
+                'C:\\SKILLS\\DEVTOOLS.TXT      3264  Dev tools\n')
+        self.assertIsNone(mockchat.skills_listed(self.skills_prompt(both, 'no memories yet\n')))
+        self.assertIn('lacks C:\\SKILLS\\DEMOFX.TXT',
+                      mockchat.skills_listed(self.skills_prompt(both.split('\n')[1], 'no memories yet\n')))
+        self.assertIn('memories list has C:\\SKILLS\\DEVTOOLS.TXT',
+                      mockchat.skills_listed(self.skills_prompt(both, 'DEVTOOLS  3264  Dev tools\n')))
+        self.assertIn('no skills list', mockchat.skills_listed('Memories now (name, bytes, first line):\n'))
+
+    def test_skills_turn_checks_the_prompt_and_both_reads(self):
+        system = [{'type': 'text', 'text': self.skills_prompt(
+            'C:\\SKILLS\\DEVTOOLS.TXT 1 x\nC:\\SKILLS\\DEMOFX.TXT 1 y\n', '(none)')}]
+        results = ['    1 Dev tools: TINYASM\n   40 x\n...(more lines from 41; use start)\n',
+                   '   41 y\n   61   C:\\DEVEL\\DOC\\LDEBUG\\LDEBUG.TXT. Plain DEBUG still works too.\n']
+        for second, verdict in ((results[1], 'skills: PASS'), ('   41 y\n', 'skills: FAIL second part')):
+            messages, calls = [{'role': 'user', 'content': '!skills'}], []
+            while True:
+                status, _, data = self.post(messages, extra={'system': system})
+                self.assertEqual(status, 200, data)
+                said, blocks, stop, _ = reply(sse_events(data))
+                if stop != 'tool_use':
+                    break
+                call = tool_block(blocks)
+                calls.append(call['input'])
+                messages += [{'role': 'assistant', 'content': blocks},
+                             {'role': 'user', 'content': [tool_result(call, (results[0], second)[len(calls) - 1])]}]
+            self.assertEqual(calls, [{'path': 'C:\\SKILLS\\DEVTOOLS.TXT', 'lines': 40},
+                                     {'path': 'C:\\SKILLS\\DEVTOOLS.TXT', 'start': 41}])
+            self.assertIn(verdict, said)
+            self.assertIn(verdict, self.log.getvalue())
+
     def test_tool_values_have_the_schema_types(self):
         events = self.ask('!tool read path=C:\\A.TXT start=3 lines=x')
         _, _, _, tool_json = reply(events)

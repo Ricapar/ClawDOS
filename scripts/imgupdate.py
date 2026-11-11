@@ -26,6 +26,7 @@ PC_FILES = ('CLAWDOS/CLAWDOS.LOG',               # the log
             'CLAWDOS/RUN.TXT', 'CLAWDOS/RUN.OUT',        # relaunch state (lib/relaunch.h)
             'CLAWDOS/RESUME.TXT', 'CLAWDOS/SCREEN.SAV')
 MTCP_CFG = 'NET/MTCP.CFG'              # shipped, but mTCP's DHCP writes the lease into it on the PC
+SKILLS_DIR = 'SKILLS'                  # shipped knowledge; earlier builds shipped the same files as memories
 
 
 class UpdateError(Exception):
@@ -103,6 +104,7 @@ class Report:
         self.new_settings = []                       # [anthropic] lines in the template, absent from the image's CFG
         self.cfg_note = ''
         self.warnings = []
+        self.old_skills = []                         # [(memory path, skill path, same text)]: a skill that was a memory
         self.boot_differs = False                    # the build's MBR/boot sector code is not the image's
         self.backup = None                           # the name the old image was copied to, if it was
 
@@ -126,6 +128,12 @@ class Report:
             out.append('Note: the build\'s boot code (MBR or boot sector) differs from the image\'s. --update does not '
                        'rewrite it; to get the new boot code, write a whole new image.')
         out += [f'WARNING: {w}' for w in self.warnings]
+        for mem, skill, same in self.old_skills:
+            out.append(f'Note: the memory {mem} has the name of the skill {skill}: it is now a skill, and the '
+                       'model sees both. It was left alone; '
+                       + ('it holds the same text as the skill, so delete it with F4.' if same else
+                          'its text differs from the skill\'s (an older version, or edited on the PC): if nobody '
+                          'edited it, delete it with F4.'))
         if self.cfg_note:
             out.append(self.cfg_note)
         if self.new_settings:
@@ -218,7 +226,24 @@ def update_fs(target, fresh, memories=False, cfg=False, dry_run=False):
     for path, ent in target.walk():
         if not ent.is_dir and norm(path) not in shipped:
             rep.not_ours += 1
+    rep.old_skills = old_skill_memories(target, fresh)
     return rep
+
+
+def old_skill_memories(target, fresh):
+    """[(memory path, skill path, same)] for each file directly in the target's MEMORY/ whose name is a
+    skill the fresh image ships in SKILLS/; same says the two hold the same text. Never changes anything:
+    the model may have rewritten such a memory, so only the user can tell whether it can go."""
+    skills = {norm(p).rpartition('/')[2]: p.lstrip('/') for p, e in fresh.walk()
+              if not e.is_dir and norm(p).rpartition('/')[0] == SKILLS_DIR}
+    out = []
+    for path, ent in target.walk():
+        p = norm(path)
+        name = p.rpartition('/')[2]
+        if not ent.is_dir and p.rpartition('/')[0] == MEMORY_DIR and name in skills:
+            same = target.read_file(path.lstrip('/')) == fresh.read_file(skills[name])
+            out.append((path.lstrip('/'), skills[name], same))
+    return sorted(out)
 
 
 def remove_quietly(path):

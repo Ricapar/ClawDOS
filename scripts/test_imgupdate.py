@@ -192,6 +192,45 @@ class UpdateFsTest(unittest.TestCase):
         self.assertEqual(len(rep.added), 2)
         self.assertIn('would add', '\n'.join(rep.lines(True)))
 
+    def test_skills_are_the_builds(self):
+        pc = dict(PC, **{'SKILLS/DEVTOOLS.TXT': b'skill v1', 'SKILLS/MINE.TXT': b'a skill made on the PC'})
+        fresh = dict(FRESH, **{'SKILLS/DEVTOOLS.TXT': b'skill v2', 'SKILLS/DEMOFX.TXT': b'demofx'})
+        rep, after = self.update(pc=pc, fresh=fresh)
+        self.assertEqual(after['SKILLS/DEVTOOLS.TXT'], b'skill v2')
+        self.assertEqual(after['SKILLS/DEMOFX.TXT'], b'demofx')
+        self.assertEqual(after['SKILLS/MINE.TXT'], b'a skill made on the PC')   # not shipped: never touched
+        self.assertIn('SKILLS/DEVTOOLS.TXT', rep.changed)
+        self.assertIn('SKILLS/DEMOFX.TXT', rep.added)
+        self.assertNotIn('SKILLS/DEVTOOLS.TXT', dict(rep.left))
+
+    def test_a_memory_named_like_a_skill_is_noted_and_kept(self):
+        # a card from a build that shipped DEVTOOLS and DEMOFX as memories, one of them edited since
+        pc = dict(PC, **{'MEMORY/DEVTOOLS.TXT': b'devtools, edited', 'MEMORY/DEMOFX.TXT': b'demofx'})
+        fresh = {'CLAWDOS/HARNESS.EXE': b'harness v3', 'SKILLS/DEVTOOLS.TXT': b'devtools',
+                 'SKILLS/DEMOFX.TXT': b'demofx', 'SKILLS/DEEP/MINE.TXT': b'deeper'}
+        pc['MEMORY/DEEP/MINE.TXT'] = b'only a skill straight in SKILLS/ counts'
+        rep, after = self.update(pc=pc, fresh=fresh)
+        self.assertEqual(after['MEMORY/DEVTOOLS.TXT'], b'devtools, edited')
+        self.assertEqual(after['MEMORY/DEMOFX.TXT'], b'demofx')
+        self.assertEqual(rep.old_skills, [('MEMORY/DEMOFX.TXT', 'SKILLS/DEMOFX.TXT', True),
+                                          ('MEMORY/DEVTOOLS.TXT', 'SKILLS/DEVTOOLS.TXT', False)])
+        text = '\n'.join(rep.lines())
+        self.assertIn('the memory MEMORY/DEMOFX.TXT has the name of the skill SKILLS/DEMOFX.TXT', text)
+        self.assertIn('same text as the skill, so delete it with F4', text)
+        self.assertIn('if nobody edited it, delete it with F4', text)
+        self.assertIn('Note:', '\n'.join(rep.lines(True)))               # a dry run says it too
+
+    def test_no_note_without_such_a_memory(self):
+        rep, _ = self.update()
+        self.assertEqual(rep.old_skills, [])
+        self.assertNotIn('has the name of the skill', '\n'.join(rep.lines()))
+
+    def test_the_manifest_ships_skills_and_no_memories(self):
+        dests = [dest for dest, _ in build.manifest_entries()]
+        self.assertIn('SKILLS/', dests)
+        self.assertFalse([d for d in dests if (imgupdate.norm(d) + '/').startswith('MEMORY/')])
+        self.assertIsNone(imgupdate.owner('SKILLS/DEVTOOLS.TXT'))
+
     def test_the_second_update_changes_nothing(self):
         pc_img = make_image(PC)
         fresh = fatimg.open_fs(make_image(FRESH))

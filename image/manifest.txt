@@ -88,7 +88,9 @@ TC/LIB/                 external:*Turbo C v2.0*Disk 6*!*.LIB
 TC/EXAMPLES/            external:*Turbo C v2.0*Disk 6*!*.C
 TC/                     repo:image/tc/TURBOC.CFG
 
-# Claude's first memory: what it can build with on this machine.
-MEMORY/                 repo:image/memory/DEVTOOLS.TXT
-# The CGA demo-effects skill: an index memory; the topics are in DEVEL/DOC/DEMOFX.
-MEMORY/                 repo:image/memory/DEMOFX.TXT
+# Skills: knowledge written for Claude, listed in the system prompt and read with
+# the read tool. They belong to the build (--update replaces them); C:\MEMORY,
+# Claude's own notes, belongs to the PC and ships empty.
+# DEVTOOLS: what it can build with on this machine. DEMOFX: the CGA demo-effects
+# rules, an index whose topics are in DEVEL/DOC/DEMOFX.
+SKILLS/                 repo:image/skills/*.TXT

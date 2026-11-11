@@ -417,6 +417,7 @@ def build_image(autotest=None, with_key=True, tunnel_key=False):
     img = fatimg.make_hdd(CYLINDERS, mbr=mbr, vbr=vbr, label='CLAWDOS')
     fs = fatimg.open_fs(img)
     fill_image(fs, manifest_entries(autotest))
+    fs.makedirs('MEMORY')                  # Claude's memories start empty (the skills are in SKILLS)
 
     # Point HARNESS.EXE at the TLS tunnel and give it the API key.
     fs.write_file('CLAWDOS/CLAWDOS.CFG', clawdos_cfg(fs.read_file('CLAWDOS/CLAWDOS.CFG'), with_key, tunnel_key))

@@ -762,11 +762,71 @@ static void testPromptAcrossReads(void)
     writeFile("C:\\PTEST.TXT", prompt);
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
     x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = "M1\nM2";
+    x.skills = "";
     x.cache = 0; x.ttl1h = 0;
     sink_buffer(&buf, out, 6600);
     CHECK("prompt across reads: rendered", api_prefix(&buf, &x) == 0 && !strcmp(out, want));
     remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
     free(prompt); free(want); free(out);
+}
+
+/* {skills} beside {memories}: each gets its own list, and an empty or absent
+   one shows as "(none)". */
+static void testPromptSkills(void)
+{
+    static char body[200];
+    static const char head[] = "\"system\":[{\"type\":\"text\",\"text\":\"";
+    static const char tail[] = "\"}],\"tools\":[{\"name\":\"t\"}]";
+    static char want[200];
+    ApiPrefix x;
+    Sink buf;
+
+    writeFile("C:\\PTEST.TXT", "S:{skills}|M:{memories}|{skill}");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.cache = 0; x.ttl1h = 0;
+    x.skills = "C:\\SKILLS\\A.TXT  12  First\n"; x.memories = "";
+    sink_buffer(&buf, body, sizeof body);
+    sprintf(want, "%sS:C:\\\\SKILLS\\\\A.TXT  12  First\\n|M:(none)|{skill}%s", head, tail);
+    CHECK("prompt skills: filled, memories none", api_prefix(&buf, &x) == 0 && !strcmp(body, want));
+    x.skills = NULL; x.memories = "M\n";
+    sink_buffer(&buf, body, sizeof body);
+    sprintf(want, "%sS:(none)|M:M\\n|{skill}%s", head, tail);
+    CHECK("prompt skills: none, memories filled", api_prefix(&buf, &x) == 0 && !strcmp(body, want));
+    remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
+}
+
+/* The skills list for the prompt: C:\SKILLS\*.TXT with each whole path (what
+   the read tool takes), size and first line, the shipped ones among them; the
+   memory tools see none of it. */
+static void testSkillList(void)
+{
+    ToolCtx t;
+    char *line;
+
+    writeFile(SKILL_DIR "\\ZZSKILL.TXT", "Unit test skill\r\nmore\r\n");
+    tout_reset(&t);
+    CHECK("skill list ok", skill_list(&t) == TS_OK);
+    line = strstr(t.out, SKILL_DIR "\\ZZSKILL.TXT ");
+    CHECK("skill list has the path", line != NULL);
+    if (line) {
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = 0;
+        CHECK("skill list summary", strstr(line, "    23  Unit test skill") != NULL);
+    }
+    tout_reset(&t);
+    skill_list(&t);
+    CHECK("skill list shipped", strstr(t.out, SKILL_DIR "\\DEVTOOLS.TXT ") != NULL
+          && strstr(t.out, SKILL_DIR "\\DEMOFX.TXT ") != NULL);
+    tout_reset(&t);
+    targ_reset();
+    CHECK("skill not a memory: list", tool_memory_list(&t) == TS_OK && strstr(t.out, "ZZSKILL") == NULL
+          && strstr(t.out, "DEVTOOLS") == NULL);
+    tout_reset(&t);
+    targ_reset();
+    targ_set("name", "ZZSKILL", 7);
+    CHECK("skill not a memory: read", tool_memory_read(&t) == TS_ERROR);
+    remove(SKILL_DIR "\\ZZSKILL.TXT");
 }
 
 static void testApiReq(void)
@@ -795,6 +855,7 @@ static void testApiReq(void)
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
     remove("C:\\PTEST.PRE");
     x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = ""; x.cache = 1;
+    x.skills = "";
     x.ttl1h = 0;
     sink_buffer(&buf, body, sizeof body);
     CHECK("prefix ok", api_prefix(&buf, &x) == 0);
@@ -922,6 +983,7 @@ static void testApiThreads(void)
     api_fixed_from(&fx, p);
     CHECK("threads: a fixed setting", fx.threads == 1);
     x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = "";
+    x.skills = "";
     x.cache = fx.cache; x.ttl1h = fx.ttl1h;
     len = api_prefix_file("C:\\PTEST.PRE", &x);
     r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
@@ -1176,6 +1238,7 @@ static void testApiFixed(void)
         p->dropThinking = (i & 2) != 0;
         api_fixed_from(&fx, p);
         x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = "";
+        x.skills = "";
         x.cache = fx.cache; x.ttl1h = fx.ttl1h;
         len = api_prefix_file("C:\\PTEST.PRE", &x);
         r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
@@ -2152,6 +2215,8 @@ int main(void)
     testCfg();
     testHistory();
     testApiReq();
+    testPromptSkills();
+    testSkillList();
     testApiFixed();
     testApiThreads();
     testThreadDecision();

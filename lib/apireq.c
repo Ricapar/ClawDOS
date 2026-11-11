@@ -63,9 +63,10 @@ static int copyFile(Sink *s, const char *path, long want)
     return rc;
 }
 
-/* The prompt file, JSON-escaped, with CRLF -> LF and {name}/{memories} filled in.
-   Runs of ordinary text go to the escaper whole; a '{' starts a possible
-   placeholder, and up to 12 bytes are held back until the '}' decides.
+/* The prompt file, JSON-escaped, with CRLF -> LF and {name}, {memories} and
+   {skills} filled in. Runs of ordinary text go to the escaper whole; a '{'
+   starts a possible placeholder, and up to 12 bytes are held back until the
+   '}' decides.
    0 ok, -1 unreadable, -2 sink failed. */
 static int promptText(Sink *s, const ApiPrefix *x)
 {
@@ -95,8 +96,10 @@ static int promptText(Sink *s, const ApiPrefix *x)
                     hold[held] = 0;
                     if (!strcmp(hold, "{name}"))
                         rc = json_escape_cp437(s, x->name, strlen(x->name)) ? -2 : 0;
-                    else if (!strcmp(hold, "{memories}")) {
-                        const char *m = x->memories && x->memories[0] ? x->memories : "(none)";
+                    else if (!strcmp(hold, "{memories}") || !strcmp(hold, "{skills}")) {
+                        const char *m = hold[1] == 'm' ? x->memories : x->skills;
+                        if (m == NULL || !m[0])
+                            m = "(none)";
                         rc = json_escape_cp437(s, m, strlen(m)) ? -2 : 0;
                     } else
                         rc = json_escape_cp437(s, hold, held) ? -2 : 0;

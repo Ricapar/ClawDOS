@@ -847,6 +847,7 @@ class Handler(BaseHTTPRequestHandler):
             gen = chat.respond(command, text)
         choice = req.get('tool_choice')
         chat.no_tools = isinstance(choice, dict) and choice.get('type') == 'none'
+        chat.system = text_of(req.get('system') or '')
         thinking = req.get('thinking') or {}
         chat.progress = thinking.get('display') == 'updates'
         self.binding = BETA_BINDING in betas_of({k.lower(): v for k, v in self.headers.items()})

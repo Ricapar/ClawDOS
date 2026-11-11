@@ -2,10 +2,11 @@
  * conversation's prefix file and the history file.
  *
  * The prefix ("system" and "tools") is rendered once per conversation into a
- * file beside the chat (CHATS\MMDDnnn.PRE), from PROMPT.TXT with {name} and
- * {memories} filled in and TOOLS.JSN, and every request of the conversation
- * sends those bytes unchanged: thinking blocks are bound to the exact prefix
- * that produced them, and the prompt cache wants it too. A request is
+ * file beside the chat (CHATS\MMDDnnn.PRE), from PROMPT.TXT with {name},
+ * {memories} and {skills} filled in and TOOLS.JSN, and every request of the
+ * conversation sends those bytes unchanged: thinking blocks are bound to the
+ * exact prefix that produced them, and the prompt cache wants it too. A
+ * request is
  *
  *   {<fields>,<prefix>,"messages":[<history>]}
  *
@@ -49,10 +50,11 @@ void api_fixed_from(ApiFixed *f, const Provider *p);
 
 /* What a conversation's prefix is made from. */
 typedef struct ApiPrefix {
-    const char *promptPath;      /* PROMPT.TXT: CP437 text with {name} and {memories} */
+    const char *promptPath;      /* PROMPT.TXT: CP437 text with {name}, {memories} and {skills} */
     const char *toolsPath;       /* TOOLS.JSN: the tools array, copied verbatim */
     const char *name;            /* for {name} */
     const char *memories;        /* for {memories}; "" shows as "(none)" */
+    const char *skills;          /* for {skills}; "" (or NULL) shows as "(none)" */
     int cache;                   /* the system block's cache_control marker */
     int ttl1h;                   /* its ttl: one hour, else five minutes */
 } ApiPrefix;

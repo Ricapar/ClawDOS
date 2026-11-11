@@ -1,4 +1,4 @@
-/* ClawDOS memories: see memory.h. */
+/* ClawDOS memories, and the list of skills: see memory.h. */
 
 #include <stdio.h>
 #include <string.h>
@@ -56,14 +56,14 @@ static const char *mem_path(ToolCtx *t, int *status)
     return path;
 }
 
-/* The summary of C:\MEMORY\<file> (an 8.3 name), "" if it can't be read. */
-static void file_summary(const char *file, char *summary)
+/* The summary of <dir>\<file> (an 8.3 name), "" if it can't be read. */
+static void file_summary(const char *dir, const char *file, char *summary)
 {
     char path[32];
     unsigned got;
     int h;
 
-    sprintf(path, "%s\\%s", MEM_DIR, file);
+    sprintf(path, "%s\\%s", dir, file);
     summary[0] = 0;
     if (_dos_open(path, 0, &h) == 0) {
         if (_dos_read(h, buf, sizeof(buf), &got) == 0)
@@ -86,7 +86,7 @@ int mem_scan(MemEntry *out, int max)
         if (strchr(e.name, '.'))
             *strchr(e.name, '.') = 0;
         e.size = f.size;
-        file_summary(f.name, e.summary);
+        file_summary(MEM_DIR, f.name, e.summary);
         n = count < max ? count : max;          /* insertion sort by name */
         for (i = n; i > 0 && strcmp(out[i - 1].name, e.name) > 0; i--)
             if (i < max)
@@ -149,28 +149,52 @@ int mem_delete(const char *name)
     return remove(p) ? -1 : 0;
 }
 
-int tool_memory_list(ToolCtx *t)
+/* One line per <dir>\*.TXT: its name (a memory's, or with paths set the
+   file's whole path, which is what the read tool takes), size and summary.
+   How many, or -1 after an Esc. */
+static int list_dir(ToolCtx *t, const char *dir, int paths)
 {
     struct find_t f;
-    char summary[MEM_SUMMARY + 1], name[sizeof(f.name)];  /* 8.3 + NUL */
-    unsigned count = 0;
+    char summary[MEM_SUMMARY + 1], name[24], pattern[20];
+    int count = 0;
 
-    if (_dos_findfirst(MEM_DIR "\\*.TXT", _A_NORMAL | _A_RDONLY | _A_ARCH, &f)) {
+    sprintf(pattern, "%s\\*.TXT", dir);
+    if (_dos_findfirst(pattern, _A_NORMAL | _A_RDONLY | _A_ARCH, &f))
+        return 0;
+    do {
+        if (tool_esc())
+            return -1;
+        if (paths)
+            sprintf(name, "%s\\%s", dir, f.name);
+        else {
+            strcpy(name, f.name);
+            *strchr(name, '.') = 0;
+        }
+        file_summary(dir, f.name, summary);
+        tout_printf(t, paths ? "%-22s %5lu  %s\n" : "%-8s %5lu  %s\n", name, (unsigned long)f.size, summary);
+        count++;
+    } while (_dos_findnext(&f) == 0);
+    return count;
+}
+
+int tool_memory_list(ToolCtx *t)
+{
+    int count = list_dir(t, MEM_DIR, 0);
+
+    if (count < 0)
+        return TS_STOPPED;
+    if (count == 0) {
         strcpy(t->summary, "none yet");
         tout_puts(t, "no memories yet\n");
         return TS_OK;
     }
-    do {
-        if (tool_esc())
-            return TS_STOPPED;
-        strcpy(name, f.name);
-        *strchr(name, '.') = 0;
-        file_summary(f.name, summary);
-        tout_printf(t, "%-8s %5lu  %s\n", name, (unsigned long)f.size, summary);
-        count++;
-    } while (_dos_findnext(&f) == 0);
-    sprintf(t->summary, "%u memor%s", count, count == 1 ? "y" : "ies");
+    sprintf(t->summary, "%d memor%s", count, count == 1 ? "y" : "ies");
     return TS_OK;
+}
+
+int skill_list(ToolCtx *t)
+{
+    return list_dir(t, SKILL_DIR, 1) < 0 ? TS_STOPPED : TS_OK;
 }
 
 int tool_memory_read(ToolCtx *t)

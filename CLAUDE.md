@@ -14,7 +14,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Update a real PC's image in place instead of replacing it: `python scripts/build.py --update PATH/CLAWDOS.IMG [--dry-run]
   [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). Unless nothing would change, it copies
   the old image to IMG.bak (never overwritten: .bak.2, .bak.3, ...), then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
-  nothing else: MEMORY/ (`--memories`: only the memory files the build ships), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
+  nothing else (SKILLS/ is the build's, replaced like any shipped file): MEMORY/ (`--memories`: only the memory files the build ships, none now; a memory named like a shipped skill, left by an older build, gets a note saying it can go with F4), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
   (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
 - The API key can stay off the DOS PC: `build.py --no-key` (remembered, `--key` undoes it; image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
   --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
@@ -48,7 +48,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (the turn ends), and a relaunch that finds its thread gone (`thread replay after CODE: PASS` lines, and each run's
   `exit code`);
   `fixed.bat` a conversation keeping its thinking and cache settings across a relaunch whose run changed CLAWDOS.CFG
-  (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
+  (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `skills.bat`
+  the system prompt listing C:\SKILLS (not as memories) and a skill read in two parts with `read` (`skills: PASS`); `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
   (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
@@ -86,7 +87,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   tick count). mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far
   heap in this build (DOSUNIT shows it after one malloc).
 - HARNESS.EXE (src/harness) is the whole harness: it speaks the Messages API itself (src/harness/chat.cpp drives the turn;
-  lib/apireq.c renders PROMPT.TXT (with the memories) and TOOLS.JSN once per conversation into CHATS\*.PRE, the frozen
+  lib/apireq.c renders PROMPT.TXT (with the memories and the skills) and TOOLS.JSN once per conversation into CHATS\*.PRE, the frozen
   `system` and `tools` a conversation's creating requests send, and writes each request from that and the history file
   (with `threads 1`, a continue request sends only the history since the last reply: docs/API.md "Threads"), whose writes
   lib/history.c buffers; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
@@ -105,7 +106,11 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   the state they change `volatile`. The status row's spinner and seconds run from INT 1Ch (lib/screen.c scr_ticker),
   so they move while the harness is busy; mTCP hooks INT 1Ch too, so scr_ticker_off() before Net::stopStack().
 - Dev tools on the image (C:\DEVEL, C:\TC; Turbo C comes from the user's own floppies in external/, never commit
-  them): see docs/research/ and image/memory/DEVTOOLS.TXT, the memory that tells Claude about them.
+  them): see docs/research/ and image/skills/DEVTOOLS.TXT, the skill that tells Claude about them.
+- Skills (image/skills -> C:\SKILLS, manifest `SKILLS/`) are knowledge written for Claude: the build owns them, the
+  system prompt lists them (`{skills}`: path, size, first line, frozen with the prefix like `{memories}`) and the model
+  reads them with `read`. Memories (C:\MEMORY, shipped empty) are what the model learned on the PC; the memory tools
+  and F4 never see the skills. A new skill: a .TXT in image/skills whose first line (60 characters) says when to read it.
 - Disk images: `python scripts/fatimg.py ls|tree|get|put IMG ...`. In Git Bash, don't start image paths with `/` (MSYS rewrites them).
 - Commit to main freely as checkpoints.
 

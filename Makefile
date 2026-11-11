@@ -80,6 +80,7 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "threadretry 400 exit code 1" --expect "threadlost run exit code 0" --reject ": FAIL" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/skills.bat --mock --expect "skills: PASS" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/overload.bat --mock --expect "before any text); trying again" --expect "stop=end_turn" \
 	    --reject "link lost" --reject "VALIDATION:"
