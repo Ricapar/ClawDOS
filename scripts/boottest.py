@@ -12,17 +12,22 @@ may not have flushed them to the image yet. Exit status is 0 only if the marker 
 every --expect TEXT is in the serial or mock log and no --reject TEXT is, and (with
 --mock) the mock API started and was still running at the end. --mock2 runs a second,
 separate mock on the next port (10.0.2.2:18024, log build/mock2.log): another provider
-section, as a test that switches providers with /model needs. A test fails if it set the
+section, as a test that switches providers with /model needs. --key-tunnel puts tunnel.py's key
+mode on 10.0.2.2:18025 in front of the mock (plain TCP instead of TLS), adding a made-up key.
+A test fails if it set the
 clock by NTP (C:\\NET\\SNTP.LOG on its image: pool.ntp.org or NIST reached through SLiRP)
 unless --online says it may: the others call NETUP NOCLOCK and reach nothing but the mocks.
 """
 
 import argparse
+import asyncio
 import contextlib
+import logging
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 try:
@@ -33,6 +38,9 @@ except ImportError:         # Windows
 
 import build
 import fatimg
+
+sys.path.insert(0, os.path.join(build.ROOT, 'tunnel'))
+import tunnel  # noqa: E402  pylint: disable=wrong-import-position
 
 DONE = b'CLAWDOS-TEST-DONE'
 
@@ -48,6 +56,8 @@ CPUTYPE = '80186'
 # isn't reached by test traffic). Tests use 10.0.2.2:18023.
 TEST_API_PORT = 18023
 TEST_API_PORT2 = TEST_API_PORT + 1     # --mock2: a second provider, a mock with its own memory
+KEY_TUNNEL_PORT = TEST_API_PORT + 2    # --key-tunnel: tunnel.py's key mode in front of the mock
+KEY_TUNNEL_KEY = 'sk-ant-made-up-for-the-key-tunnel-test'    # not a key: the mock logs only its length
 
 
 def dosbox():
@@ -85,6 +95,9 @@ def parse_args():
                     help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_API_PORT} during the test')
     ap.add_argument('--online', action='store_true',
                     help='the test may reach the internet (NETUP setting the clock by NTP)')
+    ap.add_argument('--key-tunnel', action='store_true',
+                    help=f'run tunnel/tunnel.py\'s key mode on port {KEY_TUNNEL_PORT}, in front of the mock '
+                         'over plain TCP, adding a made-up key (log build/keytunnel.log)')
     ap.add_argument('--mock2', action='store_true',
                     help=f'also run a second mock on port {TEST_API_PORT2} (log build/mock2.log)')
     return ap.parse_args()
@@ -220,6 +233,37 @@ def set_clock_by_ntp(img_path):
         return False
 
 
+@contextlib.contextmanager
+def key_tunnel(log_path):
+    """tunnel.py's key mode (tunnel.start with a key) on KEY_TUNNEL_PORT for the block, its upstream a plain
+    connection to the mock instead of TLS to api.anthropic.com: the same parsing of the harness's requests and
+    the same header rewrite, end to end and offline. Its log (addresses and counts, never the key) to log_path."""
+    handler = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+    handler.setFormatter(logging.Formatter('key tunnel: %(message)s'))
+    tunnel.log.addHandler(handler)
+    tunnel.log.setLevel(logging.INFO)
+    loop = asyncio.new_event_loop()
+
+    async def connect(_host, _rport):
+        return await asyncio.open_connection('127.0.0.1', TEST_API_PORT)
+
+    servers = loop.run_until_complete(tunnel.start('127.0.0.1', [(KEY_TUNNEL_PORT, tunnel.KEY_HOST, 443)],
+                                                   key=KEY_TUNNEL_KEY, connect=connect))
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        async def stop():
+            for server in servers:
+                server.close()
+        asyncio.run_coroutine_threadsafe(stop(), loop).result(5)
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(5)
+        tunnel.log.removeHandler(handler)
+        handler.close()
+
+
 def run_dosbox(cmd, serial, timeout):
     """Run DOSBox-X until the test's marker appears in the serial log, DOSBox-X exits or timeout seconds pass."""
     with subprocess.Popen(cmd, cwd=build.BUILD, stdin=subprocess.DEVNULL,
@@ -257,15 +301,19 @@ def run_test(a):
     cmd = dosbox_command(a.set)
     mock_log = os.path.join(build.BUILD, 'mock.log')
     mock2_log = os.path.join(build.BUILD, 'mock2.log')
+    key_log = os.path.join(build.BUILD, 'keytunnel.log')
     serial = os.path.join(build.BUILD, 'serial.log')
     with contextlib.ExitStack() as mocks:
         mock = mocks.enter_context(mock_api(mock_log)) if a.mock else None
         mock2 = mocks.enter_context(mock_api(mock2_log, TEST_API_PORT2)) if a.mock2 else None
+        if a.key_tunnel:
+            mocks.enter_context(key_tunnel(key_log))
         run_dosbox(cmd, serial, a.timeout)
         mock_exit = [m.poll() for m in (mock, mock2) if m and m.poll() is not None]
     log = read_log(serial)
     sys.stdout.write(log.decode('cp437', 'replace').replace('\r\n', '\n'))
-    for on, title, path in ((a.mock, 'mock API log', mock_log), (a.mock2, 'second mock API log', mock2_log)):
+    for on, title, path in ((a.mock, 'mock API log', mock_log), (a.mock2, 'second mock API log', mock2_log),
+                            (a.key_tunnel, 'key tunnel log', key_log)):
         if on:
             print(f'--- {title} ---')
             sys.stdout.write(read_log(path).decode('utf-8', 'replace'))

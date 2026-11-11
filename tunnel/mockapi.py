@@ -898,6 +898,9 @@ class Handler(BaseHTTPRequestHandler):
         messages = req['messages']
         print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}, {settings_of(req)}, '
               f'{use.describe()}, {len(body)} bytes', flush=True)
+        for name in ('x-api-key', 'authorization'):    # the boot tests send none; the key itself is never logged
+            for value in self.headers.get_all(name) or ():
+                print(f'auth: {name}, {len(value)} characters', flush=True)
         self.server.note_images(messages)
         self.answer(req, conv, use, len(body))
 

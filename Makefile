@@ -152,6 +152,9 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "model: [plain] settings: thinking 0 0, cache 0, threads 0; prefix marker rewritten" \
 	    --expect "request: 5 messages, last role user, thinking none, cache off, no thread" \
 	    --expect "request: 7 messages, last role user, thinking none, cache off, no thread" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/keytunnel.bat --mock --key-tunnel --expect "HARNESS.EXE exit code 0" \
+	    --expect "auth: x-api-key, 38 characters" --expect "(adds the key)" --expect "down, 2 requests)" \
+	    --reject "No API key" --reject "refused" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \
 	    --reject '"content":"!runrefuse"' --reject toolu_mock --reject "VALIDATION:"
 
