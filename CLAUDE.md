@@ -39,7 +39,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical, the message
   thread rules) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
   that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
-  every DOS tool (and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
+  every DOS tool (its stdin step runs C:\TESTS\STDINEOF.COM, from tests/unit/stdineof.asm, started directly: it must
+  read end-of-file from the NUL the run tool gives it; and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
   that every request after the first continued a message thread, each small); `notes.bat` a progress note's blank
   lines trimmed and its break joined (`progress note: Two lines`), and a tool header after reply text starting in
   column 0 (`!headercol` peeks CGA memory: `tool header column: 0 (PASS)`); `threads.bat --timeout 300` a thread lost, a

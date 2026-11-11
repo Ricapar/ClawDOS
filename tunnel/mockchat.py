@@ -256,9 +256,10 @@ def tour_steps():
         ('memory_list', {}, 'ok', 'DOSTOUR'),
         ('memory_read', {'name': 'dostour'}, 'ok', 'Second line.'),
         ('memory_write', {'name': 'NO/GOOD', 'text': 'x'}, 'error', None),
-        # a program that reads standard input gets end-of-file, not a hang (FIND with
-        # no file reads stdin); the exit code is reported and the rest of the list skipped
-        ('run', {'command': 'FIND /C "x"\nVER'}, 'ok', lambda r: '> FIND' in r and 'exit code' in r),
+        # a program that reads standard input gets end-of-file, not a hang: STDINEOF.COM
+        # (tests/unit/stdineof.asm), started directly (no COMMAND.COM), reads to the end and says so
+        ('run', {'command': 'C:\\TESTS\\STDINEOF.COM'}, 'ok',
+         lambda r: 'STDIN EOF after 0 bytes' in r and 'exit code 0' in r),
         # a list of commands stops at the first that fails; full_memory makes it a
         # relaunch under CLAWDOS.EXE (HARNESS.EXE alone runs it in place and says so)
         ('run', {'command': 'VER\nDIR C:\\NOPE.XYZ\nREM never', 'full_memory': True}, 'ok',

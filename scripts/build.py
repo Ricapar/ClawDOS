@@ -129,13 +129,16 @@ def run(cmd, show_output=True, **kw):
 
 
 def build_boot():
-    """Assemble the MBR and the FAT16 boot sector."""
+    """Assemble the MBR, the FAT16 boot sector and the tour's stdin probe."""
     os.makedirs(BUILD, exist_ok=True)
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'mbr.bin'),
          os.path.join(ROOT, 'src', 'boot', 'mbr.asm')])
     fd = os.path.join(ROOT, 'src', 'boot', 'freedos')
     run([nasm(), '-dISFAT16', '--before', 'cpu 8086', '-i', fd + os.sep,
          '-o', os.path.join(BUILD, 'fat16.bin'), os.path.join(fd, 'boot.asm')])
+    # the tool tour's standard-input probe (C:\TESTS\STDINEOF.COM)
+    run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'stdineof.com'),
+         os.path.join(ROOT, 'tests', 'unit', 'stdineof.asm')])
 
 
 # yyyymmdd.hhmm, local time, when this build ran.
