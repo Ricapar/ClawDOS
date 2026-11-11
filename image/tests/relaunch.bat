@@ -5,6 +5,9 @@ REM starts HARNESS and, for a run with full_memory, takes the program while the
 REM harness is out of memory, then starts it again on the same conversation. MEM
 REM run that way shows what a program gets; a plain run stays inside the harness
 REM (no RUN.OUT); the tool tour then runs one in place and one through a relaunch.
+REM The tour writes a memory before that relaunch, so the resumed harness sees
+REM a memory list unlike the one the conversation began with: the mock rejects
+REM (VALIDATION:) any request whose system or tools differ from the first.
 ECHO CLAWDOS-RELAUNCH-TEST > COM1
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!bigrun MEM /C"

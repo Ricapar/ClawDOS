@@ -20,7 +20,7 @@ typedef struct Convo {
 void convo_init(Convo *c);
 void convo_turn_begin(Convo *c);                     /* hist_turn_begin + remember mergeNext */
 int  convo_user_text(Convo *c, const char *cp437);   /* a user message, or a text block joining the results */
-int  convo_assistant_done(Convo *c);                 /* the streamed assistant message is complete */
+int  convo_assistant_done(Convo *c);                 /* the streamed assistant message is complete; -1 not written */
 int  convo_tool_result(Convo *c, const char *id, const char *cp437Text, int isError, const char *note);
 /* The turn ended early. No assistant message yet: the whole turn is rolled
    back. Otherwise the file ends with a tool results message, which the next

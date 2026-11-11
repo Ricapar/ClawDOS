@@ -5,6 +5,10 @@
  *
  * A turn may be cut short (Esc, lost link, API error): the file is then
  * truncated back to the last complete message or to where the turn started.
+ *
+ * Writes are buffered (2 KB) and reach the disk when the buffer fills and at
+ * every point that reads, cuts or completes the file: hist_message_done (which
+ * also commits), the rollbacks, hist_reopen_last, hist_copy and hist_close.
  */
 #ifndef CLAWDOS_HISTORY_H
 #define CLAWDOS_HISTORY_H
@@ -21,6 +25,7 @@ extern "C" {
 int  hist_open(const char *path);
 #ifdef DOSUNIT
 extern int hist_test_scan_reads;      /* >= 0: the scan's read after that many fails */
+extern int hist_test_writes;          /* DOS writes made so far */
 #endif
 void hist_close(void);
 long hist_size(void);                 /* bytes hist_copy would produce */
@@ -28,7 +33,9 @@ long hist_size(void);                 /* bytes hist_copy would produce */
    (in a non-empty file) first emits the ",\r\n" separator. */
 int  hist_write(const char *p, unsigned n);
 int  hist_puts(const char *z);
-int  hist_message_done(void);         /* the message is complete: new boundary */
+/* The message is complete: it is written out and committed, and becomes the
+   new boundary. -1 if it could not be written (no new boundary). */
+int  hist_message_done(void);
 void hist_turn_begin(void);           /* remember where this turn started */
 int  hist_rollback_message(void);     /* truncate to the last boundary */
 int  hist_rollback_turn(void);        /* truncate to the turn start */

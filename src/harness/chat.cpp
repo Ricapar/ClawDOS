@@ -17,11 +17,11 @@
 #include "tools.h"
 #include "utf8.h"
 #include "convo.h"
+#include "dosfs.h"
 
 #define SSE_MAX        16384u
 #define TOOL_INPUT_MAX 16384u
 #define RX_MAX         2048u
-#define MEMORIES_MAX   4200u
 #define READ_TIMEOUT   300          /* seconds without a byte: the link is dead */
 #define MAX_ROUNDS     25           /* tool rounds per user message */
 #define PROMPT_PATH    "C:\\CLAWDOS\\PROMPT.TXT"
@@ -30,11 +30,12 @@
 #define CFG_PATH       "C:\\CLAWDOS\\CLAWDOS.CFG"
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 
-Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
+Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
                rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
                upTicks(0), reqLen(0)
 {
-    addr[0] = path[0] = desc[0] = 0;
+    addr[0] = path[0] = prePath[0] = desc[0] = 0;
+    preLen = -1;
     ctxTokens = 0;
     turnsDone = 0;
     convo_init(&convo);
@@ -64,15 +65,12 @@ int8_t Chat::setup(Cfg *c, const char *providerId, const char *hostOverride, Cha
         sseBuf = (char *)malloc(SSE_MAX);
     if (!toolInput)
         toolInput = (char *)malloc(TOOL_INPUT_MAX);
-    if (!memories)
-        memories = (char *)malloc(MEMORIES_MAX);
     if (!rxBuf)
         rxBuf = (char *)malloc(RX_MAX);
-    if (!sseBuf || !toolInput || !memories || !rxBuf) {
+    if (!sseBuf || !toolInput || !rxBuf) {
         err = "Out of memory for the API buffers.";
         return -1;
     }
-    memories[0] = 0;
     http.idle = ui->idle;
     return 0;
 }
@@ -109,7 +107,7 @@ int8_t Chat::resume(Cfg *c, const char *providerId, const char *model, const cha
         return -1;
     }
     convo = *state;
-    loadMemories();
+    setPrefixPath();                  /* the prefix the conversation started with */
     return connect();
 }
 
@@ -193,20 +191,44 @@ int8_t Chat::newConversation(void)
         return -1;
     }
     convo_init(&convo);
-    loadMemories();
+    setPrefixPath();
+    remove(prePath);                  /* one left by a chat file deleted since */
     return 0;
 }
 
-void Chat::loadMemories(void)
+/* CHATS\MMDDnnn.PRE beside CHATS\MMDDnnn.JSN. */
+void Chat::setPrefixPath(void)
 {
+    char *dot;
+    strcpy(prePath, path);
+    if ((dot = strrchr(prePath, '.')) != NULL)
+        strcpy(dot, ".PRE");
+    preLen = -1;
+}
+
+/* The conversation's prefix file: rendered the first time a request needs it
+   (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN and the memories
+   as they are then, and the same bytes on every request after that, through
+   /model, F5 and a relaunch. Edits to those apply to the next conversation. */
+int8_t Chat::preparePrefix(void)
+{
+    ApiPrefix x;
     ToolCtx t;
+    char line[60];
+
+    if ((preLen = fs_size(prePath)) > 0)
+        return 0;
     tout_reset(&t);
-    memories[0] = 0;
-    if (tool_memory_list(&t) == TS_OK) {
-        unsigned n = t.len < MEMORIES_MAX - 1 ? t.len : MEMORIES_MAX - 1;
-        memcpy(memories, t.out, n);
-        memories[n] = 0;
-    }
+    x.promptPath = PROMPT_PATH;
+    x.toolsPath = TOOLS_PATH;
+    x.name = prov->name[0] ? prov->name : cfg->name;
+    x.memories = tool_memory_list(&t) == TS_OK ? t.out : "";
+    x.cache = prov->cache;
+    if ((preLen = api_prefix_file(prePath, &x)) < 0)
+        return -1;
+    sprintf(line, "prefix %.30s: %ld bytes", prePath, preLen);
+    ui->log(line);
+    return 0;
 }
 
 /* An error note: on the screen and in CLAWDOS.LOG (the boot tests read the log). */
@@ -424,22 +446,20 @@ int8_t Chat::request(int noTools)
     int attempt = 0;
     int fresh, wait;
 
+    if (preparePrefix()) {
+        warn("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".");
+        return -1;
+    }
     r.p = prov;
-    r.promptPath = PROMPT_PATH;
-    r.toolsPath = TOOLS_PATH;
-    r.name = prov->name[0] ? prov->name : cfg->name;
-    r.memories = memories;
+    r.prefixPath = prePath;
+    r.prefixLen = preLen;
     r.noTools = noTools;
 
     for (;;) {
-        Sink count;
+        unsigned long length = api_length(&r);
         int8_t rc;
+        int body = 0;
 
-        sink_count(&count);
-        if (api_body(&count, &r) != 0) {
-            warn("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".");
-            return -1;
-        }
         fresh = 0;
         if (http.isOpen() && !http.alive())
             http.close();                 /* an idle keep-alive the far end gave up on */
@@ -451,14 +471,19 @@ int8_t Chat::request(int noTools)
             fresh = 1;
         }
         reqStart = TICKS_NOW;
-        rc = http.sendHead(prov, count.count);
-        if (rc == 0 && api_body(http.sink(), &r) != 0)
+        rc = http.sendHead(prov, length);
+        if (rc == 0 && (body = api_body(http.sink(), &r)) != 0)
             rc = -1;
+        if (body == -1) {                 /* a file short of its size: no use retrying */
+            http.close();
+            warn("Cannot read the conversation's files in " CHATS_DIR ".");
+            return -1;
+        }
         if (rc == 0 && http.flush())
             rc = -1;
         if (rc == 0) {                    /* the last body byte is with the socket */
             upTicks = ticks_elapsed(TICKS_NOW, reqStart);
-            reqLen = count.count;
+            reqLen = length;
             rc = waitHead(&h);
         }
         if (rc == 1) {
@@ -555,11 +580,15 @@ int8_t Chat::rounds(int round)
         ToolCtx t;
         int status;
         int8_t rc = request(round >= MAX_ROUNDS);
+        if (rc == 0 && convo_assistant_done(&convo)) {
+            warn("Cannot write the conversation file.");
+            hist_rollback_message();
+            rc = -1;
+        }
         if (rc != 0) {
             convo_settle(&convo);
             return rc;
         }
-        convo_assistant_done(&convo);
         if (convo.assistantInTurn == 1)
             turnsDone++;              /* the turn's first reply */
         if (as.inTok || as.cacheRead)

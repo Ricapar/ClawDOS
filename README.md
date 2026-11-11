@@ -237,8 +237,13 @@ OpenAI-style `/chat/completions` hosts are not supported.
 `image/clawdos/PROMPT.TXT`). It casts the assistant as ClawDOS, an AI coding
 assistant for DOS; `{name}` becomes the model behind it (`name` in the config) and
 `{memories}` the list of memories. It must tell the model about the screen
-(plain text, 80 columns, no Markdown). It is read for every request, so an edit
-on the DOS PC applies to the next message; ClawDOS can edit it itself.
+(plain text, 80 columns, no Markdown). It is read when a conversation starts,
+together with `C:\CLAWDOS\TOOLS.JSN` and the memories, and the result is kept
+beside the chat (`CHATS\MMDDnnn.PRE`): every request of that conversation sends
+the same system prompt and tools, through `/model`, F5 and a relaunch, because
+the model's thinking is bound to them (and the prompt cache wants them
+unchanged). So an edit on the DOS PC, by you or by ClawDOS, or a new or deleted
+memory, applies from the next conversation (F2).
 
 ### Chats and logs
 

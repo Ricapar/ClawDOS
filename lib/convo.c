@@ -49,9 +49,11 @@ int convo_user_text(Convo *c, const char *text)
 
 int convo_assistant_done(Convo *c)
 {
+    if (hist_message_done())
+        return -1;                             /* not written: the caller rolls the message back */
     c->assistantInTurn++;
     c->mergeNext = 0;
-    return hist_message_done();
+    return 0;
 }
 
 int convo_tool_result(Convo *c, const char *id, const char *text, int isError, const char *note)

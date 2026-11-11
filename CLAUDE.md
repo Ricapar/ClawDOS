@@ -7,7 +7,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Setup once: `python3 scripts/setup-tools.py` (Homebrew on macOS, winget on Windows). Toolchains live in `tools/`
   (gitignored), outputs in `build/`. The Python (tunnel/) is stdlib only: no venv.
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
-- The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (mock API unit tests),
+- The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (host unit tests: the mock API, bench.py's table),
   `make boottests` (the DOSBox-X tests that run offline), `make boottests-online` (those that need the internet:
   clock.bat), `make check` (test and boottests, all offline), `make bench` (the 86Box benchmark), `make run`,
   `make tunnel`, `make mock`. Keep it in step with them.
@@ -62,9 +62,10 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   reuse the local TCP port its predecessor just closed (lib/net.cpp takes it from the BIOS time of day, not mTCP's
   tick count). mTCP's "End: heap is corrupted!" at exit is a false alarm: Open Watcom's `_fheapchk` flags any far
   heap in this build (DOSUNIT shows it after one malloc).
-- HARNESS.EXE (src/harness) is the whole harness: it speaks the Messages API itself (src/harness/chat.cpp drives the turn; lib/apireq.c
-  writes the request from C:\CLAWDOS\PROMPT.TXT, TOOLS.JSN and the history file; lib/apistream.c turns the SSE stream into
-  screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
+- HARNESS.EXE (src/harness) is the whole harness: it speaks the Messages API itself (src/harness/chat.cpp drives the turn;
+  lib/apireq.c renders PROMPT.TXT (with the memories) and TOOLS.JSN once per conversation into CHATS\*.PRE, the frozen
+  `system` and `tools` every request of it sends, and writes each request from that and the history file, whose writes
+  lib/history.c buffers; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
   C:\CLAWDOS\CHATS\*.JSN in the API's own message format, notes and per-round usage in C:\CLAWDOS\CLAWDOS.LOG.
   `python3 tunnel/mockapi.py` fakes the API offline on plain HTTP (point CLAWDOS at it: `CLAWDOS 10.0.2.2:18023`); in a chat,

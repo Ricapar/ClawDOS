@@ -201,6 +201,10 @@ def tour_steps():
 # close to the 4 KB tool output cap, so the history passes 100 KB by the end.
 BENCH_READS = 20
 BENCH_FILE = 'C:\\TESTS\\BENCH\\BENCH.TXT'
+# What a whole read result holds: 59 of the 60 lines fit the 4 KB output cap
+# (each is 67 bytes with its number), then the line saying where to go on.
+BENCH_READ_LAST = 'Bench line 59: '
+BENCH_READ_END = '...(more lines from 60; use start)'
 BENCH_PIECE = 16          # characters per text delta of the final reply
 BENCH_PARAGRAPH = (
     "The 8088 reads every byte of this reply off the network card, parses the "
@@ -496,8 +500,10 @@ class MockChat:
         for i, call in enumerate(calls, 1):
             yield f'Bench call {i} of {len(calls)}: {call.name}.'
             yield call
-            if call.result.status != 'ok' and failure is None:
-                failure = f'call {i} {call.name}: {call.result.status} {call.result.text[:60]!r}'
+            got = call.result
+            whole = call.name != 'read' or BENCH_READ_LAST in got.text and got.text.rstrip().endswith(BENCH_READ_END)
+            if (got.status != 'ok' or not whole) and failure is None:
+                failure = f'call {i} {call.name}: {got.status} {got.text[:60]!r}...{got.text[-40:]!r}'
         print('bench: PASS' if failure is None else f'bench: FAIL {failure}', flush=True)
         for i in range(0, len(BENCH_REPLY), BENCH_PIECE):
             yield BENCH_REPLY[i:i + BENCH_PIECE]

@@ -7,10 +7,11 @@
 #include <dos.h>
 #include "history.h"
 
-#define COPY_BUF 512
+#define COPY_BUF 2048           /* reads of the scan and of hist_copy (heap, freed after) */
+#define WBUF_MAX 2048           /* the write-behind buffer */
 
 static int fd = -1;
-static long end;                /* bytes in the file */
+static long end;                /* bytes in the file, those still in wbuf included */
 static long boundary;           /* end of the last complete message */
 static long turnStart;
 static int turnMessages;
@@ -18,9 +19,17 @@ static int needSep;             /* at a boundary in a non-empty file: next write
 static char savedTail[8];       /* what hist_reopen_last took off, so a rollback can put it back */
 static unsigned savedTailLen;
 static long savedTailAt;
+/* Writes collect in wbuf and reach DOS a buffer at a time: a tool result
+   escaped a character at a time, or a reply streamed a few bytes per delta,
+   would otherwise be a DOS write per piece. wbuf holds the file's last
+   `pending` bytes; the DOS file pointer is at end - pending unless seekNeeded. */
+static char *wbuf;
+static unsigned pending;
+static int seekNeeded;
 
 #ifdef DOSUNIT
 int hist_test_scan_reads = -1;
+int hist_test_writes;
 
 /* dosunit.c's way to a scan that cannot finish: after hist_test_scan_reads
    good reads, one fails as a bad sector would. */
@@ -34,9 +43,36 @@ static int scanRead(char *buf)
         hist_test_scan_reads--;
     return read(fd, buf, COPY_BUF);
 }
+#define COUNT_WRITE() (hist_test_writes++)
 #else
 #define scanRead(buf) read(fd, buf, COPY_BUF)
+#define COUNT_WRITE() ((void)0)
 #endif
+
+/* Write out what wbuf holds. On a failure those bytes are gone from `end`
+   too, as an unbuffered write that failed would never have counted them. */
+static int flushBuf(void)
+{
+    unsigned n = pending;
+
+    if (n == 0)
+        return 0;
+    pending = 0;
+    if (seekNeeded) {
+        if (lseek(fd, end - (long)n, SEEK_SET) < 0) {
+            end -= n;
+            return -1;
+        }
+        seekNeeded = 0;
+    }
+    COUNT_WRITE();
+    if (write(fd, wbuf, n) != (int)n) {
+        end -= n;
+        seekNeeded = 1;             /* a short write left the pointer who knows where */
+        return -1;
+    }
+    return 0;
+}
 
 /* Find the end of the last complete top-level object in the file; -1 if the
    file can't be read to its end (no memory, a read error). */
@@ -75,6 +111,8 @@ static long scanBoundary(void)
 int hist_open(const char *path)
 {
     hist_close();
+    if (!wbuf && (wbuf = (char *)malloc(WBUF_MAX)) == NULL)
+        return -1;
     fd = open(path, O_RDWR | O_CREAT | O_BINARY, S_IREAD | S_IWRITE);
     if (fd < 0)
         return -1;
@@ -88,6 +126,7 @@ int hist_open(const char *path)
         chsize(fd, boundary);
         end = boundary;
     }
+    seekNeeded = 1;
     turnStart = boundary;
     turnMessages = 0;
     needSep = end > 0;
@@ -96,12 +135,15 @@ int hist_open(const char *path)
 
 void hist_close(void)
 {
-    if (fd >= 0)
+    if (fd >= 0) {
+        flushBuf();
         close(fd);
+    }
     fd = -1;
     end = boundary = turnStart = 0;
     turnMessages = 0;
     needSep = 0;
+    pending = 0;
 }
 
 long hist_size(void)
@@ -109,21 +151,35 @@ long hist_size(void)
     return end;
 }
 
+/* Into wbuf, writing it out each time it fills. */
+static int put(const char *p, unsigned n)
+{
+    while (n) {
+        unsigned take;
+        if (pending == WBUF_MAX && flushBuf())
+            return -1;
+        take = WBUF_MAX - pending;
+        if (take > n)
+            take = n;
+        memcpy(wbuf + pending, p, take);
+        pending += take;
+        end += take;
+        p += take;
+        n -= take;
+    }
+    return 0;
+}
+
 int hist_write(const char *p, unsigned n)
 {
     if (fd < 0)
         return -1;
-    lseek(fd, end, SEEK_SET);
     if (needSep) {
-        if (write(fd, ",\r\n", 3) != 3)
-            return -1;
-        end += 3;
         needSep = 0;
+        if (put(",\r\n", 3))
+            return -1;
     }
-    if (n && write(fd, p, n) != (int)n)
-        return -1;
-    end += n;
-    return 0;
+    return put(p, n);
 }
 
 int hist_puts(const char *z)
@@ -143,6 +199,8 @@ static void commit(void)
 
 int hist_message_done(void)
 {
+    if (fd >= 0 && flushBuf())
+        return -1;                    /* not on disk: no boundary, a rollback takes it away */
     boundary = end;
     needSep = end > 0;
     turnMessages++;
@@ -157,10 +215,18 @@ void hist_turn_begin(void)
     savedTailLen = 0;
 }
 
+/* Cut the file at pos. The bytes before pos are on disk already (every
+   rollback point is a boundary, written out by hist_message_done), so what
+   wbuf holds lies past pos and is dropped unwritten. */
 static int truncateTo(long pos)
 {
     if (fd < 0)
         return -1;
+    if (pos > end - (long)pending && flushBuf())
+        return -1;
+    end -= pending;
+    pending = 0;
+    seekNeeded = 1;
     if (chsize(fd, pos))
         return -1;
     end = boundary = pos;
@@ -181,6 +247,7 @@ int hist_rollback_turn(void)
         if (truncateTo(savedTailAt))
             return -1;
         lseek(fd, savedTailAt, SEEK_SET);
+        COUNT_WRITE();
         if (write(fd, savedTail, savedTailLen) != (int)savedTailLen)
             return -1;
         end = boundary = turnStart;
@@ -198,8 +265,9 @@ int hist_turn_messages(void)
 
 int hist_reopen_last(unsigned n)
 {
-    if (fd < 0 || (long)n > end || n > sizeof savedTail)
+    if (fd < 0 || flushBuf() || (long)n > end || n > sizeof savedTail)
         return -1;
+    seekNeeded = 1;
     lseek(fd, end - (long)n, SEEK_SET);
     if (read(fd, savedTail, n) != (int)n)
         return -1;
@@ -216,14 +284,16 @@ int hist_reopen_last(unsigned n)
 int hist_copy(Sink *s)
 {
     char *buf;
-    long left = end;
+    long left;
     int rc = 0;
 
-    if (fd < 0)
+    if (fd < 0 || flushBuf())
         return -1;
+    left = end;
     buf = (char *)malloc(COPY_BUF);
     if (!buf)
         return -1;
+    seekNeeded = 1;
     lseek(fd, 0, SEEK_SET);
     while (left > 0) {
         unsigned want = left > COPY_BUF ? COPY_BUF : (unsigned)left;

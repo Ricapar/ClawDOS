@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The ClawDOS benchmark: a fixed agent turn in 86Box (an 8088 at 4.77 MHz) against the mock API.
 
-  python scripts/bench.py [--dosbox] [--timeout 3600] [--no-build]
+  python scripts/bench.py [--dosbox] [--timeout SECONDS] [--no-build]
 
 Runs image/tests/bench.bat through scripts/test8088.py --mock: the mock's
 !bench scenario (tunnel/mockchat.py) makes HARNESS.EXE do 20 reads of a 4 KB
@@ -18,6 +18,8 @@ changes rerun this and compare, so the scenario and the format stay as they are.
 
 --dosbox runs the same in DOSBox-X through boottest.py, for a quick check that
 it works: its numbers are not comparable (an 80186 at full host speed).
+--timeout is how long to wait for the run: by default 5400 s in 86Box, 600 s
+in DOSBox-X.
 """
 
 import argparse
@@ -33,6 +35,7 @@ sys.path.insert(0, os.path.join(build.ROOT, 'tunnel'))
 from mockchat import BENCH_REPLY  # noqa: E402  pylint: disable=wrong-import-position
 
 TEST = os.path.join(build.ROOT, 'image', 'tests', 'bench.bat')
+TIMEOUT = {'86box': 5400, 'dosbox': 600}       # seconds to wait for the run, by default
 LINE = re.compile(r'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) ((?:api|relaunch:|stack:) .*)$', re.M)
 FIELD = re.compile(r'(\w+)=(\S+)')
 
@@ -126,16 +129,18 @@ def main():
     """Run the benchmark and print its table."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dosbox', action='store_true', help='DOSBox-X instead of 86Box (a quick check)')
-    ap.add_argument('--timeout', type=int, default=5400, help='seconds to wait for the run')
+    ap.add_argument('--timeout', type=int, help=f'seconds to wait for the run (default {TIMEOUT["86box"]} in 86Box, '
+                                                f'{TIMEOUT["dosbox"]} in DOSBox-X)')
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     a = ap.parse_args()
-    print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about half an hour)"}...',
+    timeout = a.timeout or TIMEOUT['dosbox' if a.dosbox else '86box']
+    print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about ten minutes)"}...',
           file=sys.stderr, flush=True)
     if a.dosbox:
-        output = run_dosbox(min(a.timeout, 600), a.no_build)
+        output = run_dosbox(timeout, a.no_build)
         where = 'DOSBox-X (80186, not comparable)'
     else:
-        output = run_86box(a.timeout, a.no_build)
+        output = run_86box(timeout, a.no_build)
         where = '86Box IBM PC 5160 (8088 4.77 MHz, NE1000, SLiRP) against the mock'
     print(table(output, where))
 

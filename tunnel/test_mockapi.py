@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mockapi  # noqa: E402
 import mockchat  # noqa: E402
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def sse_events(body):
     """(event, data dict) pairs from a text/event-stream body."""
@@ -386,7 +388,9 @@ class MockApiTest(unittest.TestCase):
         self.assertIn('1 earlier message', text)
         self.assertIn('first', text)
 
-    def test_bench_is_twenty_reads_a_full_memory_run_and_a_long_reply(self):
+    def bench(self, read_result):
+        """Run !bench to the end, answering every read with read_result; the calls, the final reply's
+        text, stop reason and text deltas."""
         messages = [{'role': 'user', 'content': '!bench'}]
         calls, deltas = [], []
         for _ in range(30):
@@ -401,13 +405,27 @@ class MockApiTest(unittest.TestCase):
             tool = tool_block(blocks)
             calls.append((tool['name'], json.loads(tool_json)))
             messages += [{'role': 'assistant', 'content': blocks},
-                         {'role': 'user', 'content': [tool_result(tool, 'x' * 4000)]}]
+                         {'role': 'user', 'content': [tool_result(tool, read_result if tool['name'] == 'read'
+                                                                  else 'VER\nFreeDOS kernel')]}]
+        return calls, text, stop, deltas
+
+    def test_bench_is_twenty_reads_a_full_memory_run_and_a_long_reply(self):
+        with open(os.path.join(ROOT, 'image', 'tests', 'bench', 'BENCH.TXT'), encoding='ascii') as f:
+            lines = f.read().splitlines()
+        whole = ''.join(f'{n:5} {line}\n' for n, line in enumerate(lines[:59], 1)) + mockchat.BENCH_READ_END + '\n'
+        self.assertLessEqual(len(whole), 4096)
+        calls, text, stop, deltas = self.bench(whole)
         self.assertEqual(calls, [('read', {'path': mockchat.BENCH_FILE})] * 20
                          + [('run', {'command': 'VER', 'full_memory': True})])
         self.assertEqual(stop, 'end_turn')
         self.assertEqual(text, mockchat.BENCH_REPLY)
         self.assertTrue(3900 <= len(text) <= 4300)
         self.assertEqual(len({len(d) for d in deltas[:-1]}), 1)    # fixed-size pieces: no randomness
+        self.assertIn('bench: PASS', self.log.getvalue())
+
+    def test_bench_fails_on_a_cut_read_result(self):
+        self.bench('    1 Bench line 01: the quick brown fox jumps over the lazy dog 0\n')
+        self.assertIn('bench: FAIL call 1 read', self.log.getvalue())
 
 
 SIG = 'sig-' * 500
@@ -577,27 +595,18 @@ class ValidatorTest(unittest.TestCase):
         other = {'type': 'text', 'text': 'b'}
         self.bad('not a reply', [USER, assistant(dict(THINKING, thinking='other'), other), USER])
 
-    def test_system_and_tools_changing_within_a_conversation_only_warns_for_now(self):
+    def test_system_and_tools_changing_within_a_conversation_are_rejected(self):
         said = {'type': 'text', 'text': 'a'}
 
-        def later(**fields):       # a request deeper into the conversation begun below
-            return self.ok([USER, assistant(THINKING, said), USER], **fields)
+        def deeper():              # the messages of a request deeper into the conversation begun below
+            return [USER, assistant(THINKING, said), USER]
 
-        log = io.StringIO()
-        with contextlib.redirect_stdout(log):
-            self.v.record(self.ok([USER], system='one', tools=self.tools)[1], THINKING, 'a', None)
-            later(system='one', tools=self.tools)
-            self.assertEqual(log.getvalue(), '')
-            later(system='two', tools=self.tools)
-            later(system='two', tools=self.tools)
-            later(system='two')
-        self.assertEqual(log.getvalue().count('VALIDATION-WARN: system changed'), 1)
-        self.assertEqual(log.getvalue().count('VALIDATION-WARN: tools changed'), 1)
-        self.assertNotIn('VALIDATION:', log.getvalue())
-        log = io.StringIO()
-        with contextlib.redirect_stdout(log):                  # another conversation: its own system
-            self.ok([{'role': 'user', 'content': 'other'}], system='three')
-        self.assertEqual(log.getvalue(), '')
+        self.v.record(self.ok([USER], system='one', tools=self.tools)[1], THINKING, 'a', None)
+        self.ok(deeper(), system='one', tools=self.tools)
+        self.bad('system: changed within a conversation', deeper(), system='two', tools=self.tools)
+        self.bad('tools: changed within a conversation', deeper(), system='one')
+        self.ok(deeper(), system='one', tools=self.tools)      # a rejected request changed nothing
+        self.ok([{'role': 'user', 'content': 'other'}], system='three')    # another conversation: its own
 
     def test_a_request_of_one_message_starts_the_conversation_anew(self):
         said = {'type': 'text', 'text': 'a'}

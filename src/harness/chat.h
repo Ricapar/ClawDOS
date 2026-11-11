@@ -34,7 +34,7 @@ class Chat {
     int8_t init(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
     void   close(void);
 
-    int8_t newConversation(void);          /* a new CHATS file; memories re-read */
+    int8_t newConversation(void);          /* a new CHATS file, and a new prefix with the memories as they are */
     /* Send the user's text and run the whole turn, tool rounds included.
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
        -1 failed (a note has been shown), 2 a run waits for the launcher
@@ -80,10 +80,11 @@ class Chat {
     ApiStream as;
     char *sseBuf;
     char *toolInput;
-    char *memories;
     char *rxBuf;
     char addr[48];
     char path[40];
+    char prePath[40];                      /* the conversation's prefix file (apireq.h) */
+    long preLen;                           /* its size; -1 until a request looks */
     char desc[80];
     char errBuf[160];
     const char *err;
@@ -109,7 +110,8 @@ class Chat {
     void   drain(void);
     void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
     void   logRound(int round);
-    void   loadMemories(void);
+    void   setPrefixPath(void);
+    int8_t preparePrefix(void);            /* 0: prePath holds preLen bytes */
     void   pause(int secs);
     void   warn(const char *text);
 

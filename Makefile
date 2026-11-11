@@ -41,8 +41,9 @@ clean: ## delete build/ except settings.json (the remembered tunnel address)
 
 # --- tests --------------------------------------------------------------------
 
-test: ## unit tests of the mock API (fast, no emulator)
+test: ## host unit tests: the mock API and the benchmark's table (fast, no emulator)
 	$(PYTHON) tunnel/test_mockapi.py
+	$(PYTHON) scripts/test_bench.py
 
 check: test boottests ## everything offline: the mock API tests and the offline DOSBox-X boot tests
 

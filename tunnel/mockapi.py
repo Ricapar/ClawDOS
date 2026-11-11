@@ -324,17 +324,16 @@ class Validator:
                                  f'did not come back unchanged as the first block')
 
     def check_stable(self, conv, req):
-        """Within a conversation system and tools must not change, or the API drops or rejects thinking
-        blocks bound to the old ones. Task 5 makes the harness keep them stable; until it lands a change
-        only warns (VALIDATION-WARN:). Then make this raise BadRequest."""
+        """Within a conversation system and tools must not change: the API drops or rejects thinking
+        blocks bound to the old ones, and the prompt cache misses from the first byte."""
         now = {'system': req.get('system'), 'tools': req.get('tools')}
         if not conv['seen']:
             conv.update(now, seen=True)
             return
         for field in ('system', 'tools'):
             if not same_json(now[field], conv[field]):
-                print(f'VALIDATION-WARN: {field} changed within a conversation', flush=True)
-                conv[field] = now[field]
+                raise BadRequest(f'{field}: changed within a conversation (thinking blocks are bound to '
+                                 f'the system prompt and tools they were made under)')
 
 
 class Pending:
@@ -443,7 +442,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 raise BadRequest(f'Content-Length says {length} bytes but the client closed after {len(body)}')
             body += chunk
-        if select.select([self.connection], [], [], 0.05)[0] and self.connection.recv(1, socket.MSG_PEEK):
+        # no wait: bytes past the body sent with it are already here, and a request whose length is
+        # right must not be held up (the benchmark's ttft-up would count it)
+        if select.select([self.connection], [], [], 0)[0] and self.connection.recv(1, socket.MSG_PEEK):
             self.close_connection = True
             self.drain()
             raise BadRequest(f'Content-Length says {length} bytes but more of the body follows')

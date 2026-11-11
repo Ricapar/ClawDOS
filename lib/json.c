@@ -265,14 +265,25 @@ unsigned json_unescape(const char *raw, unsigned n, char *out, unsigned outmax)
     return len;
 }
 
+/* The escaped text goes to the sink in runs of up to ESC_RUN bytes (a call per
+   byte made a 4 KB tool result 4,000 history writes). */
+#define ESC_RUN 128
+
 int json_escape_cp437(Sink *s, const char *text, unsigned n)
 {
     static const char hex[] = "0123456789abcdef";
-    char buf[8];
-    unsigned i, k;
+    char run[ESC_RUN];
+    unsigned i, k, len = 0;
 
     for (i = 0; i < n; i++) {
         unsigned char c = (unsigned char)text[i];
+        char *buf;
+        if (len > ESC_RUN - 6) {           /* room for the longest escape, \u00XX */
+            if (sink_put(s, run, len))
+                return -1;
+            len = 0;
+        }
+        buf = run + len;
         if (c == '"' || c == '\\') {
             buf[0] = '\\'; buf[1] = (char)c; k = 2;
         } else if (c == '\n') {
@@ -290,8 +301,7 @@ int json_escape_cp437(Sink *s, const char *text, unsigned n)
                 buf[4] = hex[c >> 4]; buf[5] = hex[c & 15]; k = 6;
             }
         }
-        if (sink_put(s, buf, k))
-            return -1;
+        len += k;
     }
-    return 0;
+    return len && sink_put(s, run, len) ? -1 : 0;
 }

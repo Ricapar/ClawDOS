@@ -10,9 +10,10 @@ stream it reads and how the history stays valid.
 | File | What |
 |---|---|
 | `C:\CLAWDOS\CLAWDOS.CFG` | Settings and providers (below). The image build fills in the tunnel address and the key from `.env` (not in the test images `boottest.py` and `test8088.py` build: the mock needs no key). |
-| `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. |
+| `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
+| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the provider's `cache` setting and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Written as `.PR$` and renamed, so it is whole or absent. |
 | `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event. A line per notable event (retries, `connection #n`, errors, `relaunch:`), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). |
 
@@ -48,9 +49,14 @@ One `POST {path} HTTP/1.1` per API round on a keep-alive connection to the
 tunnel, with `Host`, `x-api-key` (or `Authorization: Bearer`),
 `anthropic-version: 2023-06-01`, `anthropic-beta` (only with `betas`),
 `Content-Type: application/json`, `Accept: text/event-stream`,
-`Connection: keep-alive` and `Content-Length`. The body is written twice, once
-into a counting sink for the length and once into the socket, streaming the
-prompt, the tools file and the history file from disk (lib/apireq.c):
+`Connection: keep-alive` and `Content-Length`. The body is written once per
+attempt, straight into the socket: a few fields from the provider's settings,
+then the conversation's `.PRE` file and the history file streamed from disk
+(lib/apireq.c). `Content-Length` is the sum of their sizes, known before a byte
+is sent. `system` and `tools` are the `.PRE` file's bytes, the same on every
+request of a conversation (through `/model`, F5 and a relaunch): the model's
+thinking blocks are bound to the exact prefix that produced them, and the
+prompt cache keys on it.
 
 ```
 {"model":"...","max_tokens":64000,"stream":true,              maxtokens, default 64000
@@ -58,7 +64,8 @@ prompt, the tools file and the history file from disk (lib/apireq.c):
  "cache_control":{"type":"ephemeral"},                      unless cache 0
  "tool_choice":{"type":"auto","disable_parallel_tool_use":true},
                                                             {"type":"none"} on the 26th round
- "system":[{"type":"text","text":<PROMPT.TXT, escaped>,"cache_control":{"type":"ephemeral"}}],
+ "system":[{"type":"text","text":<PROMPT.TXT, escaped>,     system and tools: the .PRE file
+           "cache_control":{"type":"ephemeral"}}],           unless cache 0 when it was made
  "tools":<TOOLS.JSN>,
  "messages":[<the CHATS file>]}
 ```
@@ -97,6 +104,12 @@ text goes back into the input box); an unanswered `tool_use`, a stopped result
 is appended so the next request is valid. A reply cut by `max_tokens` keeps
 what arrived and shows `[reply cut off: too long]`. `/new` starts a new file;
 nothing deletes them.
+
+Writes collect in a 2 KB buffer (lib/history.c) and go to DOS when it fills
+and whenever the file is read, cut or completed: each finished message is
+written out and committed (INT 21h function 68h) before anything else happens,
+a rollback writes nothing it would cut, and the request copies the file only
+after everything is on disk.
 
 ## The response
 
@@ -176,6 +189,6 @@ text blocks, known block types; each `tool_use` answered by exactly one
 `tool_result` in the next message, ahead of any text block; and, in a conversation
 the mock saw begin (a request of one message starts one), every assistant message
 being a reply the mock sent, its thinking or redacted_thinking block coming back
-byte-identical and first. `system` and `tools` changing within a conversation only
-logs `VALIDATION-WARN:` until the harness keeps them stable. With `tool_choice`
+byte-identical and first; and `system` and `tools` the same on every request of a
+conversation. With `tool_choice`
 none the mock makes no tool call.

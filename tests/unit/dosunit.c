@@ -687,60 +687,110 @@ static void writeFile(const char *path, const char *text)
     fclose(f);
 }
 
+/* A body's computed length against the bytes api_body writes. */
+static int lengthMatches(const ApiReq *r)
+{
+    Sink count;
+    sink_count(&count);
+    return api_body(&count, r) == 0 && count.count == api_length(r);
+}
+
 static void testApiReq(void)
 {
     static char body[900], head[600];
-    Provider *p = (Provider *)malloc(sizeof(Provider));
-    ApiReq r;
-    Sink count, buf;
+    static const char wantPrefix[] =
+        "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none) {x} {notaplaceholder}\","
+        "\"cache_control\":{\"type\":\"ephemeral\"}}],\"tools\":[{\"name\":\"t\"}]";
     static const char want[] =
         "{\"model\":\"claude-opus-5-5\",\"max_tokens\":64000,\"stream\":true,"
         "\"output_config\":{\"effort\":\"low\"},\"cache_control\":{\"type\":\"ephemeral\"},"
         "\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},"
-        "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none)\",\"cache_control\":{\"type\":\"ephemeral\"}}],"
+        "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none) {x} {notaplaceholder}\","
+        "\"cache_control\":{\"type\":\"ephemeral\"}}],"
         "\"tools\":[{\"name\":\"t\"}],\"messages\":[";
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    char *big = (char *)malloc(3001);
+    ApiPrefix x;
+    ApiReq r;
+    Sink buf;
+    long len;
+    int i;
 
-    writeFile("C:\\PTEST.TXT", "Hi {name}.\r\nMem:\r\n{memories}");
+    writeFile("C:\\PTEST.TXT", "Hi {name}.\r\nMem:\r\n{memories} {x} {notaplaceholder}");
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
-    remove("C:\\HISTTEST.JSN");
-    hist_open("C:\\HISTTEST.JSN");
-    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
-    hist_message_done();
+    remove("C:\\PTEST.PRE");
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = ""; x.cache = 1;
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("prefix ok", api_prefix(&buf, &x) == 0);
+    CHECK_STR("prefix text", body, wantPrefix);
+    len = api_prefix_file("C:\\PTEST.PRE", &x);
+    CHECK("prefix file size", len == (long)strlen(wantPrefix) && fs_size("C:\\PTEST.PRE") == len);
+    CHECK("prefix file no temp left", fs_size("C:\\PTEST.PR$") == -1);
+    x.cache = 0; x.memories = "M1\n";
+    sink_buffer(&buf, body, sizeof body);
+    api_prefix(&buf, &x);
+    CHECK("prefix no cache, memories", strstr(body, "cache_control") == NULL && strstr(body, "Mem:\\nM1\\n {x}") != NULL);
+    x.toolsPath = "C:\\NOPE.JSN";
+    CHECK("prefix file missing tools", api_prefix_file("C:\\PTEST2.PRE", &x) == -1
+          && fs_size("C:\\PTEST2.PRE") == -1 && fs_size("C:\\PTEST2.PR$") == -1);
 
     memset(p, 0, sizeof *p);
     strcpy(p->host, "api.anthropic.com"); strcpy(p->path, "/v1/messages"); strcpy(p->auth, "x-api-key");
     strcpy(p->key, "sk-ant-abc"); strcpy(p->model, "claude-opus-5-5"); strcpy(p->effort, "low"); p->cache = 1;
     p->maxTokens = 64000L;
-    r.p = p; r.promptPath = "C:\\PTEST.TXT"; r.toolsPath = "C:\\TTEST.JSN"; r.name = "Claude";
-    r.memories = ""; r.noTools = 0;
+    r.p = p; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
 
-    sink_count(&count);
-    CHECK("req count ok", api_body(&count, &r) == 0);
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("req empty history", api_body(&buf, &r) == 0 && !strncmp(body, want, sizeof want - 1)
+          && !strcmp(body + strlen(body) - 2, "]}") && strlen(body) == sizeof want - 1 + 2);
+    CHECK("req length, empty history", lengthMatches(&r) && api_length(&r) == strlen(body));
+
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
     sink_buffer(&buf, body, sizeof body);
     CHECK("req write ok", api_body(&buf, &r) == 0);
-    CHECK("req count matches", count.count == strlen(body));
+    CHECK("req length matches", api_length(&r) == strlen(body));
     CHECK("req prefix", !strncmp(body, want, sizeof want - 1));
     CHECK_STR("req tail", body + strlen(body) - 31, "{\"role\":\"user\",\"content\":\"a\"}]}");
+
+    /* a multi-message history past the write buffer, one message unflushed-sized */
+    memset(big, 'b', 3000); big[3000] = 0;
+    hist_puts("{\"role\":\"assistant\",\"content\":\"");
+    hist_puts(big);
+    hist_puts("\"}");
+    hist_message_done();
+    for (i = 0; i < 3; i++) {
+        hist_puts(i & 1 ? "{\"role\":\"assistant\",\"content\":\"ok\"}" : "{\"role\":\"user\",\"content\":\"more\"}");
+        hist_message_done();
+    }
+    CHECK("req length, multi-message history", lengthMatches(&r) && api_length(&r) > 3100);
 
     p->maxTokens = 128000L;
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
-    CHECK("req maxtokens", strstr(body, "\"max_tokens\":128000,\"stream\"") != NULL);
+    CHECK("req maxtokens", strstr(body, "\"max_tokens\":128000,\"stream\"") != NULL && lengthMatches(&r));
     p->effort[0] = 0;
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
-    CHECK("req no effort", strstr(body, "output_config") == NULL);
+    CHECK("req no effort", strstr(body, "output_config") == NULL && lengthMatches(&r));
     p->cache = 0;
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
-    CHECK("req no cache", strstr(body, "cache_control") == NULL);
+    CHECK("req no top-level cache, prefix as rendered",
+          !strncmp(body, "{\"model\":\"claude-opus-5-5\",\"max_tokens\":128000,\"stream\":true,\"tool_choice\"", 72)
+          && strstr(body, wantPrefix) != NULL && lengthMatches(&r));
     r.noTools = 1;
     sink_buffer(&buf, body, sizeof body);
     api_body(&buf, &r);
-    CHECK("req tool_choice none", strstr(body, "\"tool_choice\":{\"type\":\"none\"}") != NULL);
-    r.toolsPath = "C:\\NOPE.JSN";
+    CHECK("req tool_choice none", strstr(body, "\"tool_choice\":{\"type\":\"none\"}") != NULL && lengthMatches(&r));
+    r.prefixLen = len + 1;
     sink_buffer(&buf, body, sizeof body);
-    CHECK("req missing file", api_body(&buf, &r) == -1);
+    CHECK("req prefix file short of its size", api_body(&buf, &r) == -1);
+    r.prefixLen = len; r.prefixPath = "C:\\NOPE.PRE";
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("req missing prefix file", api_body(&buf, &r) == -1);
 
     sink_buffer(&buf, head, sizeof head);
     api_head(&buf, p, 123);
@@ -756,7 +806,8 @@ static void testApiReq(void)
     CHECK("head bearer and betas", strstr(head, "Authorization: Bearer sk-or-x\r\n") && !strstr(head, "x-api-key")
           && strstr(head, "anthropic-beta: b-2026\r\n"));
     hist_close();
-    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
+    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
+    free(big);
     free(p);
 }
 
@@ -1245,7 +1296,7 @@ static void testHistoryScanFails(void)
 
     remove("C:\\HISTTEST.JSN");
     hist_open("C:\\HISTTEST.JSN");
-    for (i = 0; i < 40; i++) {        /* 40 messages, about 1.6 KB: four reads */
+    for (i = 0; i < 150; i++) {       /* 150 messages, about 6 KB: three 2 KB reads */
         hist_puts("{\"role\":\"user\",\"content\":\"0123456789\"}");
         hist_message_done();
     }
@@ -1254,7 +1305,7 @@ static void testHistoryScanFails(void)
     hist_test_scan_reads = 1;
     CHECK("hist open fails when its scan can't finish", hist_open("C:\\HISTTEST.JSN") == -1);
     hist_close();                     /* DOS updates the directory's size on close */
-    CHECK("hist open after a failed scan leaves the file", fs_size("C:\\HISTTEST.JSN") == size && size > 1024);
+    CHECK("hist open after a failed scan leaves the file", fs_size("C:\\HISTTEST.JSN") == size && size > 4096);
     hist_test_scan_reads = -1;
     CHECK("hist open after the failure works", hist_open("C:\\HISTTEST.JSN") == 0 && hist_size() == size);
     hist_close();
@@ -1269,6 +1320,128 @@ static void testHistoryCommit(void)
     hist_message_done();
     CHECK("hist: message_done commits to the directory", fs_size("C:\\HISTTEST.JSN") == hist_size());
     hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
+/* The write-behind buffer: few DOS writes, and every rollback path with
+   bytes still in it, or with a message bigger than it. */
+static long histFileSize(void)
+{
+    Sink count;
+    sink_count(&count);
+    return hist_copy(&count) == 0 ? (long)count.count : -1L;
+}
+
+/* The file's last 32 bytes, through hist_copy. */
+static char tail[33];
+static int tailPut(Sink *s, const char *p, unsigned n)
+{
+    unsigned keep;
+    (void)s;
+    if (n >= 32) {
+        memcpy(tail, p + n - 32, 32);
+    } else {
+        keep = strlen(tail) + n > 32 ? 32 - n : strlen(tail);
+        memmove(tail, tail + strlen(tail) - keep, keep);
+        memcpy(tail + keep, p, n);
+        n += keep;
+    }
+    tail[n < 32 ? n : 32] = 0;
+    return 0;
+}
+
+static const char *histTail(void)
+{
+    Sink s;
+    s.put = tailPut; s.ctx = 0; s.count = 0;
+    tail[0] = 0;
+    hist_copy(&s);
+    return tail;
+}
+
+static int endsWith(const char *text, const char *end)
+{
+    unsigned n = strlen(text), k = strlen(end);
+    return n >= k && !strcmp(text + n - k, end);
+}
+
+static void testHistoryBuffer(void)
+{
+    static char text[4097];
+    Convo c;
+    long before, size;
+    int writes;
+    FILE *f;
+
+    memset(text, 'x', 4096); text[4096] = 0;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    convo_init(&c);
+    convo_turn_begin(&c);
+    writes = hist_test_writes;
+    convo_user_text(&c, "first");
+    CHECK("hist buffer: a short message is one write", hist_test_writes - writes == 1);
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read\",\"input\":{}}]}");
+    convo_assistant_done(&c);
+    writes = hist_test_writes;
+    convo_tool_result(&c, "t1", text, 0, NULL);
+    CHECK("hist buffer: a 4 KB result is three writes", hist_test_writes - writes == 3);
+    CHECK("hist buffer: done means on disk", fs_size("C:\\HISTTEST.JSN") == hist_size()
+          && histFileSize() == hist_size());
+    before = hist_size();
+
+    /* a reply bigger than the buffer, cut off: partly on disk, partly not */
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+    hist_puts(text);
+    CHECK("hist buffer: size counts what is held", hist_size() > before + 4096);
+    CHECK("hist buffer: rollback message past the buffer", hist_rollback_message() == 0
+          && hist_size() == before && histFileSize() == before);
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}");
+    CHECK("hist buffer: separator after a rollback", convo_assistant_done(&c) == 0
+          && hist_size() == before + 3 + 60 && histFileSize() == hist_size());
+    before = hist_size();
+
+    /* a turn whose text joins nothing, rolled back with a big reply half written */
+    convo_turn_begin(&c);
+    convo_user_text(&c, "second");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+    hist_puts(text);
+    convo_rollback_turn(&c);
+    CHECK("hist buffer: rollback turn past the buffer", hist_size() == before && histFileSize() == before);
+
+    /* a turn that reopened the results message, rolled back with bytes held */
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"read\",\"input\":{}}]}");
+    hist_message_done();
+    convo_tool_result(&c, "t2", "short", 0, NULL);
+    before = hist_size();
+    convo_turn_begin(&c);
+    convo_user_text(&c, "third");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+    hist_puts(text);
+    convo_rollback_turn(&c);
+    CHECK("hist buffer: rollback after reopen with bytes held", hist_size() == before && histFileSize() == before
+          && c.mergeNext == 1 && endsWith(histTail(), "\"short\",\"is_error\":false}]}"));
+
+    /* closed with half a message held: it reaches the file, and the next open drops it */
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"te");
+    hist_close();
+    size = fs_size("C:\\HISTTEST.JSN");
+    CHECK("hist buffer: close writes what is held", size > before);
+    CHECK("hist buffer: reopen drops the half message", hist_open("C:\\HISTTEST.JSN") == 0 && hist_size() == before
+          && fs_size("C:\\HISTTEST.JSN") <= size);
+    hist_puts("{\"role\":\"user\",\"content\":\"x\"}");
+    CHECK("hist buffer: appends after reopen", hist_message_done() == 0 && histFileSize() == before + 3 + 29);
+    hist_close();
+    f = fopen("C:\\HISTTEST.JSN", "rb");
+    if (f) {
+        fseek(f, before, SEEK_SET);
+        CHECK("hist buffer: the file's own bytes", fgets(text, 40, f) != NULL
+              && !strcmp(text, ",\r\n") && fgets(text, 40, f) != NULL
+              && !strcmp(text, "{\"role\":\"user\",\"content\":\"x\"}"));
+        fclose(f);
+    } else {
+        CHECK("hist buffer: the file's own bytes", 0);
+    }
     remove("C:\\HISTTEST.JSN");
 }
 
@@ -1390,6 +1563,7 @@ int main(void)
     testLongDeltas();
     testConvo();
     testHistoryCommit();
+    testHistoryBuffer();
     testHistoryScanFails();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
