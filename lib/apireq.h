@@ -124,9 +124,11 @@ unsigned long api_fingerprint(const Provider *p, int noTools);
 int  api_thread_kind(ApiThread *t, const ApiFixed *f, unsigned long fp);
 /* After a reply is in the history: keep it as the thread to continue only if
    the request was in a thread (sent != API_TH_NONE), the id is one to send
-   back and it stopped at end_turn or tool_use (the API stores no refusal, no
-   reply cut by max_tokens); otherwise t is forgotten. */
-void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, unsigned long fp);
+   back, it stopped at end_turn or tool_use (the API stores no refusal, no
+   reply cut by max_tokens) and its tool input was not cut (inputCut: the
+   history holds {} where the API keeps what it sent); otherwise t is forgotten. */
+void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, int inputCut,
+                     unsigned long fp);
 /* t read back after a relaunch: 0 and kept if it fits the reopened history. */
 int  api_thread_set(ApiThread *t, const ApiThread *from);
 long api_thread_from(const ApiThread *t);    /* where a continue's messages start in the history */

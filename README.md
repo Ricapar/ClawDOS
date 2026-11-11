@@ -161,9 +161,12 @@ networking. It is faster but less exact (it emulates an 80186).
    replaces the old one it is read back: every file written must read back as built,
    every other file must be there unchanged and the FAT copies must agree, or the old
    image stays; an image whose file system is already damaged (cross-linked files,
-   FATs that differ) is refused before the build starts, with a word to boot the PC and
-   run `CHKDSK C: /F` first (FreeDOS's, `C:\DOS\CHKDSK.EXE`, on images built since it
-   shipped). Run `--dry-run`
+   FATs that differ) is refused before the build starts: repair it with
+   `C:\DOS\CHKDSK.EXE C: /F` on the PC (FreeDOS's, on images built since it shipped);
+   on an older card, repair the image on the host (`fsck_msdos` on a Mac, `dosfsck` or
+   `fsck.vfat` on Linux, `chkdsk` on Windows, on the image's FAT partition), or put
+   CHKDSK on a copy of it (`scripts/fatimg.py get build/CLAWDOS.IMG DOS/CHKDSK.EXE
+   CHKDSK.EXE`, then `fatimg.py put IMG CHKDSK.EXE DOS/CHKDSK.EXE`) and boot that. Run `--dry-run`
    first, and keep the first `.bak` until the PC has booted and reopened an old chat.
    It lists the files it
    added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists

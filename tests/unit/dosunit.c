@@ -1104,10 +1104,10 @@ static void testThreadDecision(void)
     histMsg(U1);
     CHECK("decide: the first request creates", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", 0, fp);
     CHECK("decide: end_turn kept", !strcmp(t.id, "msg_1") && t.at == hist_size());
     CHECK("decide: nothing new yet: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE && !t.id[0]);
-    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", 0, fp);
     hist_turn_begin();
     histMsg(U1);
     CHECK("decide: end_turn, then the next user message: continue", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
@@ -1138,26 +1138,28 @@ static void testThreadDecision(void)
 
     /* replies the API does not store, or that were not in a thread */
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CONTINUE, "msg_2", "refusal", fp);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_2", "refusal", 0, fp);
     histMsg(U1);
     CHECK("decide: after a refusal: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CONTINUE, "msg_3", "max_tokens", fp);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_3", "max_tokens", 0, fp);
     histMsg(U1);
     CHECK("decide: after a max_tokens cut: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
     histMsg(A1);
-    api_thread_keep(&t, API_TH_NONE, "msg_4", "end_turn", fp);
+    api_thread_keep(&t, API_TH_NONE, "msg_4", "end_turn", 0, fp);
     histMsg(U1);
     CHECK("decide: a reply sent without a thread: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CREATE, "msg\"5", "tool_use", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg\"5", "tool_use", 0, fp);
     CHECK("decide: an id not to send back is not kept", !t.id[0]);
+    api_thread_keep(&t, API_TH_CREATE, "msg_5c", "tool_use", 1, fp);
+    CHECK("decide: a reply whose tool input was cut is not kept", !t.id[0]);
 
     /* a turn rolled back past the reply (a refusal on a later round) */
     hist_turn_begin();
     histMsg(U1);
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CREATE, "msg_6", "tool_use", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg_6", "tool_use", 0, fp);
     histMsg(U1);
     CHECK("decide: tool round: continue", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
     hist_rollback_turn();
@@ -1166,7 +1168,7 @@ static void testThreadDecision(void)
 
     /* a message rolled back that lies after the offset keeps the thread */
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CREATE, "msg_7", "tool_use", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg_7", "tool_use", 0, fp);
     hist_puts("{\"role\":\"user\",\"con");
     hist_rollback_message();
     histMsg(U1);
@@ -1175,7 +1177,7 @@ static void testThreadDecision(void)
     /* a failed history write that took the turn back */
     hist_turn_begin();
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CONTINUE, "msg_8", "tool_use", fp);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_8", "tool_use", 0, fp);
     hist_test_write_ok = 0; hist_test_write_bad = 0;     /* every write fails: a full disk */
     hist_puts(U1);
     CHECK("decide: the write fails", hist_message_done() == -1);
@@ -1186,7 +1188,7 @@ static void testThreadDecision(void)
 
     /* carried across a relaunch */
     histMsg(A1);
-    api_thread_keep(&t, API_TH_CREATE, "msg_9", "end_turn", fp);
+    api_thread_keep(&t, API_TH_CREATE, "msg_9", "end_turn", 0, fp);
     back = t;
     t.id[0] = 0;
     hist_close();

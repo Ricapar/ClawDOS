@@ -429,10 +429,11 @@ static int idOk(const char *id)
     return n > 0 && n < sizeof ((ApiThread *)0)->id - 1;
 }
 
-void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, unsigned long fp)
+void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, int inputCut,
+                     unsigned long fp)
 {
     t->id[0] = 0;
-    if (sent == API_TH_NONE || !idOk(id) || (strcmp(stopReason, "end_turn") && strcmp(stopReason, "tool_use")))
+    if (sent == API_TH_NONE || inputCut || !idOk(id) || (strcmp(stopReason, "end_turn") && strcmp(stopReason, "tool_use")))
         return;
     strcpy(t->id, id);
     t->at = hist_size();

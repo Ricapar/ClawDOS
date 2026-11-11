@@ -50,11 +50,11 @@ int  hist_puts(const char *z);
    new boundary. -1 if it could not be written (no new boundary). */
 int  hist_message_done(void);
 void hist_turn_begin(void);           /* remember where this turn started */
-int  hist_rollback_message(void);
+int  hist_rollback_message(void);     /* truncate to the last boundary */
 /* Cut the message being written back to pos (no earlier than its start, the
    last boundary): what follows is dropped, unwritten if it is still buffered.
    0, or -1 (pos out of range, or the file could not be cut). */
-int  hist_cut_back(long pos);     /* truncate to the last boundary */
+int  hist_cut_back(long pos);
 int  hist_rollback_turn(void);        /* truncate to the turn start */
 int  hist_turn_messages(void);        /* complete messages since turn_begin */
 /* Where the current turn started and what hist_reopen_last took off, so a

@@ -386,6 +386,37 @@ class MockApiTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn('did not come back unchanged', json.loads(data)['error']['message'])
 
+    def test_cutcall_stops_the_input_mid_string_and_cutcheck_judges_the_follow_up(self):
+        events = self.ask('!cutcall')
+        tool = [i for i, (e, d) in enumerate(events) if e == 'content_block_start'
+                and d['content_block']['type'] == 'tool_use']
+        index = events[tool[0]][1]['index']
+        pieces = [d['delta']['partial_json'] for e, d in events
+                  if e == 'content_block_delta' and d['index'] == index]
+        self.assertEqual(len(pieces), 1)
+        self.assertTrue(pieces[0].endswith('"text": "a lin'), pieces[0])       # inside the last string
+        with self.assertRaises(ValueError):
+            json.loads(pieces[0])
+        self.assertEqual([d['delta']['stop_reason'] for e, d in events if e == 'message_delta'], ['max_tokens'])
+        # the reply as HARNESS.EXE stores it: the cut call with "input":{}
+        kept = [(e, d) for e, d in events
+                if not (e in ('content_block_delta', 'content_block_stop') and d.get('index') == index)]
+        blocks = reply(kept)[1]
+        call = dict(blocks[index], input={})
+        blocks[index] = call
+
+        def follow_up(block, is_error=True):
+            return [{'role': 'user', 'content': '!cutcall'}, {'role': 'assistant', 'content': [*blocks[:index], block]},
+                    {'role': 'user', 'content': [tool_result(block, 'Error: reply cut off before the call was complete',
+                                                             is_error), {'type': 'text', 'text': '!cutcheck'}]}]
+
+        self.assertEqual(self.post(follow_up(call))[0], 200)
+        self.assertIn('cut call round trip: PASS', self.log.getvalue())
+        for bad in (follow_up(dict(call, input={'path': 'C:\\CUT.TXT'})), follow_up(call, is_error=False)):
+            self.log = io.StringIO()
+            self.assertEqual(self.post(bad)[0], 200)
+            self.assertIn('cut call round trip: FAIL', self.log.getvalue())
+
     def test_thinktool_escapes_come_back_through_the_validator(self):
         events = self.ask('!thinktool')
         thinking = reply(events)[1][0]['thinking']

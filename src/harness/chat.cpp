@@ -909,7 +909,7 @@ int8_t Chat::rounds(int round)
             convo_settle(&convo);
             return rc;
         }
-        api_thread_keep(&th, thSent, as.id, as.stopReason, sentFp);
+        api_thread_keep(&th, thSent, as.id, as.stopReason, as.toolInputCut, sentFp);
         if (convo.assistantInTurn == 1)
             turnsDone++;              /* the turn's first reply */
         if (as.inTok || as.cacheRead)

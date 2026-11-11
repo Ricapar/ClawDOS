@@ -304,9 +304,13 @@ def check_target(img, prefix=''):
     except fatimg.FatError as e:
         damage = [str(e)]
     if damage:
-        raise UpdateError(f'{prefix}its file system is damaged ({"; ".join(damage[:3])}). Boot the PC and run '
-                          'CHKDSK C: /F (C:\\DOS\\CHKDSK.EXE, on images built since it shipped), then copy the image '
-                          'back and update again.')
+        raise UpdateError(f'{prefix}its file system is damaged ({"; ".join(damage[:3])}). Repair it first: on '
+                          'the PC, C:\\DOS\\CHKDSK.EXE C: /F if the card has it (images built since it shipped); '
+                          'or repair the image on the host (fsck_msdos on macOS, dosfsck or fsck.vfat on Linux, '
+                          'CHKDSK on Windows, pointed at the image\'s FAT partition); or, on a copy of the image, '
+                          'put CHKDSK there and boot the PC with it: `python3 scripts/fatimg.py get '
+                          'build/CLAWDOS.IMG DOS/CHKDSK.EXE CHKDSK.EXE`, then `python3 scripts/fatimg.py put IMG '
+                          'CHKDSK.EXE DOS/CHKDSK.EXE`. Then update again.')
     return fs
 
 

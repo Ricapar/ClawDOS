@@ -338,6 +338,12 @@ void testHistCutBack(void)
     CHECK("hist cut back: the message ends whole", hist_message_done() == 0
           && hist_size() == (long)strlen(U1) + 3 + 45);
     hist_close();
+    /* the file itself, read back whole after the close (the directory entry's
+       size changes only then): without the truncate, the 3,000 x's the cut
+       reached on disk would follow the message */
+    CHECK("hist cut back: the file's length", fs_size("C:\\HISTTEST.JSN") == (long)strlen(U1) + 3 + 45);
+    CHECK_STR("hist cut back: the file as cut", fileText("C:\\HISTTEST.JSN"),
+              U1 ",\r\n{\"role\":\"assistant\",\"content\":[{\"input\":{}}]}");
     remove("C:\\HISTTEST.JSN");
     free(big);
 }

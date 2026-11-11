@@ -231,7 +231,14 @@ link, an API error, a refusal) truncates the file back to the last complete
 message and then: no assistant message this turn, back to the turn start (the
 text goes back into the input box); an unanswered `tool_use`, a stopped result
 is appended so the next request is valid. A reply cut by `max_tokens` keeps
-what arrived and shows `[reply cut off: too long]`. A turn carried on after a
+what arrived and shows `[reply cut off: too long]`. If the cut falls inside a
+tool call's input (with fine-grained input streaming the input arrives in
+pieces, so the stored JSON would stop mid-value), lib/apistream.c cuts the
+message back to where the input began and stores the block with
+`"input":{}`; the call is not run, an error result (`Error: reply cut off
+before the call was complete`) answers it, and the thread is not continued
+(the API's copy of that reply is not the history's): the next request is a
+create with the whole conversation. A turn carried on after a
 relaunch keeps its start: RESUME.TXT holds the offset (and the closing bytes of
 a results message the turn's text joined), so a rollback there takes the whole
 turn as it would have before the relaunch. `/new` starts a new file;
