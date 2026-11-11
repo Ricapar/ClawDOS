@@ -73,7 +73,12 @@ def main():
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the log or the mock API log (repeatable)')
     a = ap.parse_args()
+    with boottest.exclusive('test8088'):      # build/ and the mock's port are shared with boottest.py
+        run_test(a)
 
+
+def run_test(a):
+    """main's work, with build/ to itself."""
     if not a.no_build:
         build.build_boot()
         build.build_apps()

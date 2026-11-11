@@ -21,6 +21,12 @@ import subprocess
 import sys
 import time
 
+try:
+    import fcntl
+except ImportError:         # Windows
+    fcntl = None
+    import msvcrt
+
 import build
 
 DONE = b'CLAWDOS-TEST-DONE'
@@ -105,18 +111,86 @@ def listening(proc, log_path, timeout=10):
     return False
 
 
+def port_holder(port):
+    """Who listens on the port, as lsof says (empty where there is no lsof)."""
+    try:
+        out = subprocess.run(['lsof', '-nP', f'-iTCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True,
+                             timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return ' '.join(out.split('\n')[1:2]).strip()
+
+
+# A boot test owns build/ while it runs: test.img, serial.log, mock.log and the mock's port. A second one started
+# meanwhile (another shell, another session) used to truncate the first's mock.log and fail to bind the port,
+# which made both fail with "mock API did not start". So runs take this lock and the later one waits.
+LOCK = os.path.join(build.BUILD, 'boottest.lock')
+
+
+@contextlib.contextmanager
+def exclusive(who):
+    """Hold LOCK for the block, waiting (and saying so) while another boot test has it."""
+    os.makedirs(build.BUILD, exist_ok=True)
+    with open(LOCK, 'a+', encoding='utf-8') as f:
+        if not _lock(f, block=False):
+            f.seek(0)
+            print(f'{who}: waiting for the boot test already running ({f.read().strip() or "pid unknown"})',
+                  flush=True)
+            _lock(f, block=True)
+        f.seek(0)
+        f.truncate()
+        f.write(f'pid {os.getpid()}: {" ".join(sys.argv)}')
+        f.flush()
+        try:
+            yield
+        finally:
+            _unlock(f)
+
+
+def _lock(f, block):
+    """Lock the file; False if it is held and block is False."""
+    if fcntl:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
+            return True
+        except BlockingIOError:
+            return False
+    f.seek(0)
+    while True:
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            if not block:
+                return False
+            time.sleep(1)
+
+
+def _unlock(f):
+    if fcntl:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    else:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 @contextlib.contextmanager
 def mock_api(log_path):
     """Run the mock Messages API (tunnel/mockapi.py), logging to log_path; it is killed when the block ends.
-    Exits if it does not start (say, the port is taken)."""
+    Exits if it does not start, saying why: it exited (the port taken: by whom), or it said nothing."""
     cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
            '--speed', '0', '--port', str(TEST_API_PORT)]
     with open(log_path, 'wb') as f:
         with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as mock:
             try:
                 if not listening(mock, log_path):
-                    sys.exit(f'mock API did not start on port {TEST_API_PORT} (in use?): '
-                             + read_log(log_path).decode('utf-8', 'replace').strip()[-300:])
+                    tail = read_log(log_path).decode('utf-8', 'replace').strip()[-300:]
+                    if mock.poll() is None:
+                        why = 'it said nothing for 10 s'
+                    else:
+                        holder = port_holder(TEST_API_PORT)
+                        why = f'it exited with code {mock.returncode}' + (f'; port held by: {holder}' if holder else '')
+                    sys.exit(f'mock API did not start on port {TEST_API_PORT} ({why}): {tail}')
                 yield mock
             finally:
                 mock.kill()
@@ -143,7 +217,12 @@ def run_dosbox(cmd, serial, timeout):
 def main():
     """Build the test image, boot it in DOSBox-X and report whether the test passed."""
     a = parse_args()
+    with exclusive('boottest'):
+        run_test(a)
 
+
+def run_test(a):
+    """main's work, with build/ to itself."""
     if not a.no_build:
         build.build_boot()
         build.build_apps()

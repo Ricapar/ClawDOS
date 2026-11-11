@@ -22,7 +22,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   and end with `TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1` so CLAWDOS's own notes (retries, lost links, errors) reach the log;
   `image/tests/net.bat` checks networking. `--mock` runs the mock Messages API (tunnel/mockapi.py) alongside on port 18023, so
   tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log; the test fails if that mock cannot start,
-  say the port is taken, or dies during the run), `--expect TEXT` fails unless TEXT is in the
+  say the port is taken (the message names the holder), or dies during the run). A boot test (and test8088.py) holds
+  build/boottest.lock while it runs, so one started meanwhile waits instead of sharing build/ and the port.
+  `--expect TEXT` fails unless TEXT is in the
   serial or mock log and `--reject TEXT` fails if it is. The mock checks every request against its own list of rules
   (docs/API.md, "The tunnel": headers, fields, the thinking object and its beta headers, cache markers agreeing on their
   ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical, the message
