@@ -5,8 +5,9 @@
  *
  * At exit the picture is still in video memory until the chat screen comes
  * back, so it needs no copy. A timed shot (shot_at) is copied from the timer
- * interrupt into a 16 KB buffer that exists only for that run: an EMS page
- * when there is EMS, else a DOS block given back afterwards.
+ * interrupt into a 16 KB buffer that exists only for that run: in the harness
+ * an EMS page when there is EMS, else (and always in the launcher, built
+ * with SHOT_NO_EMS to stay small) a DOS block given back afterwards.
  */
 #ifndef CLAWDOS_SHOT_H
 #define CLAWDOS_SHOT_H

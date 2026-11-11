@@ -59,11 +59,17 @@ static void __interrupt __far shotIsr(void)
 }
 
 /* The EMS page's segment, or 0: the frame address normalized so that the
-   copy starts at offset 0. */
+   copy starts at offset 0. CLAWDOS.EXE is built without EMS (SHOT_NO_EMS):
+   it stays resident under every full_memory run, and the code would cost
+   it more than the DOS block it holds only during a timed shot. */
 static unsigned emsSeg(void)
 {
+#ifdef SHOT_NO_EMS
+    return 0;
+#else
     void __far *p = ems_map(EMS_SHOT_PAGE);
     return p ? FP_SEG(p) + (FP_OFF(p) >> 4) : 0;
+#endif
 }
 
 /* shell_run's program is about to start: the count begins. The hook goes in

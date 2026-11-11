@@ -93,9 +93,9 @@ is in [API.md](API.md).
   - [x] **M6.3 - Screenshots**: Claude sees what its programs draw. `run`
         takes `screenshot` (the screen as the last program left it, taken
         before the chat comes back) or `shot_at` (seconds after the first
-        command starts, copied from the timer interrupt into an EMS page or a
-        16 KB block that exists for that run only, for programs that set text
-        mode again on exit). The mode comes from the BIOS data area (mode,
+        command starts, copied from the timer interrupt into an EMS page (in
+        the harness) or a 16 KB DOS block that exists for that run only, for
+        programs that set text mode again on exit). The mode comes from the BIOS data area (mode,
         mode and colour register shadows) unless `shot_mode` / `shot_color`
         say otherwise. The PC makes the PNG itself (indexed, rows taken from
         both CGA banks, one stored deflate block, CRC-32 and Adler-32: about
