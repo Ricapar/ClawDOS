@@ -49,6 +49,7 @@ TESTS/                  build:dosunit.exe
 TESTS/DEV/              repo:image/tests/dev/*
 TESTS/DEMO/             repo:image/tests/demo/*
 TESTS/BENCH/            repo:image/tests/bench/*
+TESTS/CHATS/            repo:image/tests/chats/*
 
 # Development tools that run on the 8088 (docs/research/8088 development tools.md;
 # fetched by scripts/setup-tools.ps1). Each tool's licence goes along in DEVEL/DOC.

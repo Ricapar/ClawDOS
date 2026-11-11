@@ -105,6 +105,7 @@ class Report:
         self.cfg_note = ''
         self.warnings = []
         self.old_skills = []                         # [(memory path, skill path, same text)]: a skill that was a memory
+        self.stray_skills = []                       # skills on the image the build does not ship (still in the prompt)
         self.boot_differs = False                    # the build's MBR/boot sector code is not the image's
         self.backup = None                           # the name the old image was copied to, if it was
 
@@ -134,6 +135,10 @@ class Report:
                        + ('it holds the same text as the skill, so delete it with F4.' if same else
                           'its text differs from the skill\'s (an older version, or edited on the PC): if nobody '
                           'edited it, delete it with F4.'))
+        for path in self.stray_skills:
+            out.append(f'Note: {path} is a skill this build does not ship (one an older build shipped and has since '
+                       'renamed or dropped, or one added on the PC): every new conversation\'s prompt still lists '
+                       'it. It was left alone; if it is not wanted, delete it on the PC.')
         if self.cfg_note:
             out.append(self.cfg_note)
         if self.new_settings:
@@ -227,7 +232,15 @@ def update_fs(target, fresh, memories=False, cfg=False, dry_run=False):
         if not ent.is_dir and norm(path) not in shipped:
             rep.not_ours += 1
     rep.old_skills = old_skill_memories(target, fresh)
+    rep.stray_skills = stray_skills(target, shipped)
     return rep
+
+
+def stray_skills(target, shipped):
+    """The .TXT files directly in the target's SKILLS/ (what the prompt lists) that the build does not ship."""
+    return sorted(path.lstrip('/') for path, ent in target.walk()
+                  if not ent.is_dir and norm(path).rpartition('/')[0] == SKILLS_DIR
+                  and norm(path).endswith('.TXT') and norm(path) not in shipped)
 
 
 def old_skill_memories(target, fresh):

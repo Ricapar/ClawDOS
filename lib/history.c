@@ -350,6 +350,21 @@ int hist_reopen_last(unsigned n)
     return 0;
 }
 
+int hist_read(void *ctx, long pos, char *buf, unsigned n)
+{
+    (void)ctx;
+    if (fd < 0 || pos < 0 || flushBuf())
+        return -1;
+    if (pos >= end)
+        return 0;
+    if ((long)n > end - pos)
+        n = (unsigned)(end - pos);
+    seekNeeded = 1;
+    if (lseek(fd, pos, SEEK_SET) < 0)
+        return -1;
+    return read(fd, buf, n);
+}
+
 int hist_copy(Sink *s)
 {
     return hist_copy_from(s, 0);

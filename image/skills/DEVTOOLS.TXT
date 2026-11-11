@@ -1,4 +1,4 @@
-Dev tools: TINYASM WASM JWASMR TCC BCC GWBASIC LDEBUG
+Dev tools (asm, C, BASIC, debug): read before writing code
 All tested on this 8088 at 4.77 MHz; times are for a hello program. Write the
 source with the write tool, then build and run it with the run tool. Working
 examples of each are in C:\TESTS\DEV (T*.ASM, H*.C, T*.BAS).

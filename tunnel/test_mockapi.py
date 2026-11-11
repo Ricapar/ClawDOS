@@ -171,7 +171,8 @@ class MockApiTest(unittest.TestCase):
     def test_skills_turn_checks_the_prompt_and_both_reads(self):
         system = [{'type': 'text', 'text': self.skills_prompt(
             'C:\\SKILLS\\DEVTOOLS.TXT 1 x\nC:\\SKILLS\\DEMOFX.TXT 1 y\n', '(none)')}]
-        results = ['    1 Dev tools: TINYASM\n   40 x\n...(more lines from 41; use start)\n',
+        results = ['    1 Dev tools (asm, C, BASIC, debug): read before writing code\n   40 x\n'
+                   '...(more lines from 41; use start)\n',
                    '   41 y\n   61   C:\\DEVEL\\DOC\\LDEBUG\\LDEBUG.TXT. Plain DEBUG still works too.\n']
         for second, verdict in ((results[1], 'skills: PASS'), ('   41 y\n', 'skills: FAIL second part')):
             messages, calls = [{'role': 'user', 'content': '!skills'}], []
@@ -189,6 +190,17 @@ class MockApiTest(unittest.TestCase):
                                      {'path': 'C:\\SKILLS\\DEVTOOLS.TXT', 'start': 41}])
             self.assertIn(verdict, said)
             self.assertIn(verdict, self.log.getvalue())
+
+    def test_text_joining_an_unanswered_message_can_be_a_command(self):
+        # a reopened chat whose typed message got no reply: the next text joins it after a blank line
+        messages = [{'role': 'user', 'content': 'Remember teapot.'},
+                    {'role': 'assistant', 'content': [{'type': 'text', 'text': 'I will.'}]},
+                    {'role': 'user', 'content': 'Are you there?\n\n!reopened unans'}]
+        status, _, data = self.post(messages)
+        self.assertEqual(status, 200, data)
+        self.assertIn('reopened unans: 3 messages: user[text] assistant[text] user[text]; '
+                      'text: Are you there? | !reopened unans', self.log.getvalue())
+        self.assertIn('Reopened chat unans continued', reply(sse_events(data))[0])
 
     def test_tool_values_have_the_schema_types(self):
         events = self.ask('!tool read path=C:\\A.TXT start=3 lines=x')
@@ -518,6 +530,32 @@ def assistant(*blocks):
 def results(*ids, after=()):
     return {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': i, 'content': 'x'} for i in ids]
             + list(after)}
+
+
+class TailScreenTest(unittest.TestCase):
+    """!tailscreen's idea of a reopened chat's transcript (lib/chatfile.c draws it)."""
+
+    def test_rows_start_from_the_third_last_typed_message(self):
+        messages = [{'role': 'user', 'content': 'one'},
+                    {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Reply one'}]},
+                    {'role': 'user', 'content': 'two'},
+                    {'role': 'assistant', 'content': [
+                        {'type': 'thinking', 'thinking': '', 'signature': 's'},
+                        {'type': 'text', 'text': 'Calling it.\nMore'},
+                        {'type': 'tool_use', 'id': 't1', 'name': 'sysinfo', 'input': {}}]},
+                    {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': 'x'},
+                                                 {'type': 'text', 'text': 'joined'}]},
+                    {'role': 'user', 'content': 'three caf\u00e9 au lait'},
+                    {'role': 'user', 'content': 'four'}]
+        self.assertEqual(mockchat.tail_rows(messages),
+                         ['> two', '\x07 Calling it.', '\x07 SysInfo', '> joined', '> three caf', '> four'])
+
+    def test_rows_must_come_in_order(self):
+        rows = ['', '> two', '', '\x07 Calling it. and more', '\x07 SysInfo', '  \xc0 note']
+        self.assertEqual(mockchat.rows_missing(rows, ['> two', '\x07 Calling it.', '\x07 SysInfo']), [])
+        self.assertEqual(mockchat.rows_missing(rows, ['\x07 SysInfo', '> two']), ['> two'])
+        vram = b''.join(bytes(c for ch in row.ljust(80) for c in (ord(ch), 7)) for row in ('> two', 'x'))
+        self.assertEqual(mockchat.screen_rows(vram)[0].rstrip(), '> two')
 
 
 class ValidatorTest(unittest.TestCase):

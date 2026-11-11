@@ -1,0 +1,3 @@
+{"role":"user","content":"Read the autoexec."},
+{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fix2","name":"read","input":{"path":"C:\\AUTOEXEC.BAT"}}]},
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fix2","content":"Interrupted by the user.","is_error":true}]}

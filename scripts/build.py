@@ -60,16 +60,17 @@ APPS = {
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
                              'lib/relaunch.c'], 'model': 's'},
     'harness.exe': {'sources': ['src/harness/harness.cpp', 'src/harness/chat.cpp', 'src/harness/tools.cpp', 'src/harness/memui.cpp',
-                               'lib/screen.c',
+                               'src/harness/chatui.cpp', 'lib/screen.c',
                                'lib/console.c', 'lib/toolapi.c', 'lib/dosfs.c', 'lib/edit.c',
                                'lib/search.c', 'lib/sysinfo.c', 'lib/play.c', 'lib/sound.c', 'lib/shell.c',
                                'lib/memory.c', 'lib/ems.c', 'lib/ticks.c', 'lib/relaunch.c',
                                'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c',
                                'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c',
-                               'lib/net.cpp', 'lib/http.cpp'],
+                               'lib/chatfile.c', 'lib/net.cpp', 'lib/http.cpp'],
                    'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
     'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
-                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c'],
+                                'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c',
+                                'lib/chatfile.c'],
                     'model': 'l', 'defines': ['DOSUNIT']},
 }
 
@@ -506,7 +507,8 @@ def parse_args(argv=None):
     ap.add_argument('--dry-run', action='store_true',
                     help='with --update: change nothing, say what would change')
     ap.add_argument('--memories', action='store_true',
-                    help='with --update: also replace the memory files the build ships (others are kept)')
+                    help='with --update: also replace the memory files the build ships (others are kept); '
+                         'no memory files ship today (C:\\MEMORY starts empty), so this changes nothing yet')
     ap.add_argument('--cfg', action='store_true',
                     help='with --update: also replace CLAWDOS.CFG (the build\'s tunnel address and key line)')
     ap.add_argument('--no-backup', action='store_true', help='with --update: do not copy IMG to IMG.bak first')

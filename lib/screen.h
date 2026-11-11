@@ -45,6 +45,10 @@ void scr_putn(int row, int col, const unsigned short *cells, int n);  /* char|at
 void scr_fill(int row, int col, int n, unsigned char ch, unsigned char attr);
 void scr_clear(unsigned char attr);
 
+/* Read back n cells (char|attr<<8) of a row from video memory. Reads are not
+   synced to retrace, so they may snow on the IBM CGA: for tests only. */
+void scr_getn(int row, int col, unsigned short *cells, int n);
+
 void scr_scroll(unsigned char attr); /* rows above the footer up one, new row blank */
 
 /* Pin the bottom `rows` rows (0..SCR_FOOT_MAX). Rows given up by a smaller

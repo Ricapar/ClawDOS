@@ -2,3 +2,5 @@
 *.bat text eol=crlf
 *.BAT text eol=crlf
 *.ps1 text eol=crlf
+image/tests/chats/*.JSN -text
+image/tests/chats/*.PRT -text

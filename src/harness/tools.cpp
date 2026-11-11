@@ -355,6 +355,23 @@ static void showLastLines(const ToolCtx *t)
     }
 }
 
+/* The argument shown in d's header (from the store): a run's first command,
+   with how many follow in *cmds. NULL if it has none. */
+static const char *headerArg(const ToolDef *d, unsigned *cmds)
+{
+    static char first[SHELL_CMD_MAX + 16];
+    const char *arg = d->headerKey ? targ(d->headerKey) : NULL;
+
+    *cmds = 0;
+    if (!strcmp(d->name, "run") && arg) {   /* a list of commands: the first, and how many */
+        *cmds = shell_count(arg, first);
+        if (*cmds > 1)
+            sprintf(first + strlen(first), " +%u more", *cmds - 1);
+        arg = first;
+    }
+    return arg;
+}
+
 /* Show, approve and run the call named `name` whose arguments are in the store. */
 static int execute(const char *name, int overflow, ToolCtx *t)
 {
@@ -369,15 +386,8 @@ static int execute(const char *name, int overflow, ToolCtx *t)
         sprintf(text, "unknown tool %.20s", name);
         status = tool_fail(t, text);
     } else {
-        static char first[SHELL_CMD_MAX + 16];
-        unsigned cmds = 0;
-        arg = d->headerKey ? targ(d->headerKey) : NULL;
-        if (!strcmp(d->name, "run") && arg) {   /* a list of commands: the first, and how many */
-            cmds = shell_count(arg, first);
-            if (cmds > 1)
-                sprintf(first + strlen(first), " +%u more", cmds - 1);
-            arg = first;
-        }
+        unsigned cmds;
+        arg = headerArg(d, &cmds);
         ui_tool_header(d->title, arg ? arg : "");
         if (cmds > 1)
             runDetails(targ("command"));
@@ -478,6 +488,20 @@ int tools_call(const char *name, const char *input, unsigned len, ToolCtx *t)
     int status = execute(name, overflow, t);
     ui_tool_done();
     return status;
+}
+
+void tools_show_call(const char *name, const char *input, unsigned len)
+{
+    const ToolDef *d = findTool(name);
+    const char *arg;
+    unsigned cmds;
+    int overflow = 0;
+
+    targ_reset();
+    if (len)                          /* an input cut short still sets the members before the cut */
+        json_each(input, len, setArg, &overflow);
+    arg = d ? headerArg(d, &cmds) : NULL;
+    ui_tool_header(d ? d->title : name, arg ? arg : "");
 }
 
 const char *tools_result_text(int status, const ToolCtx *t)

@@ -184,6 +184,38 @@ long api_prefix_file(const char *path, const ApiPrefix *x)
     return (long)s.count;
 }
 
+/* The prefix starts "system":[{"type":"text","text":"<prompt>" and the
+   prompt's closing quote is the tenth one not escaped; what follows it up to
+   "tools" holds the marker, if there is one. */
+int api_prefix_cache(const char *path, int *cache, int *ttl1h)
+{
+    FILE *f = fopen(path, "rb");
+    char after[72];
+    unsigned n = 0;
+    int c, quotes = 0, esc = 0;
+
+    if (!f)
+        return -1;
+    while (quotes < 10 && (c = getc(f)) != EOF) {
+        if (esc)
+            esc = 0;
+        else if (c == '\\')
+            esc = 1;
+        else if (c == '"')
+            quotes++;
+    }
+    while (quotes == 10 && n < sizeof after - 1 && (c = getc(f)) != EOF)
+        after[n++] = (char)c;
+    after[n] = 0;
+    fclose(f);
+    if (strstr(after, "\"tools\":") == NULL)
+        return -1;
+    *strstr(after, "\"tools\":") = 0;
+    *cache = strstr(after, "\"cache_control\":") != NULL;
+    *ttl1h = *cache && strstr(after, "\"ttl\":\"1h\"") != NULL;
+    return 0;
+}
+
 /* The fields before the prefix, each followed by a comma. thinking and the
    top-level cache_control come from the conversation's fixed settings, the
    rest from the provider as it is now. */

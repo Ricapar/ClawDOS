@@ -36,14 +36,17 @@ int convo_user_text(Convo *c, const char *text)
     Sink s;
     int rc = 0;
     histSink(&s);
-    if (c->mergeNext) {
+    if (c->mergeNext == CONVO_JOIN_TEXT) {
+        rc |= hist_reopen_last(2);             /* the "} of the typed message never answered */
+        rc |= hist_puts("\\n\\n");
+    } else if (c->mergeNext) {
         rc |= hist_reopen_last(2);             /* the "]}" of the tool results message */
         rc |= hist_puts(",{\"type\":\"text\",\"text\":\"");
     } else {
         rc |= hist_puts("{\"role\":\"user\",\"content\":\"");
     }
     rc |= json_escape_cp437(&s, text, strlen(text));
-    rc |= hist_puts(c->mergeNext ? "\"}]}" : "\"}");
+    rc |= hist_puts(c->mergeNext == CONVO_JOIN_RESULTS ? "\"}]}" : "\"}");
     rc |= hist_message_done();
     c->mergeNext = 0;
     return rc ? -1 : 0;
@@ -83,14 +86,14 @@ static int writeResult(const char *id, const char *text, int isError, const char
 int convo_tool_result(Convo *c, const char *id, const char *text, int isError, const char *note)
 {
     if (writeResult(id, text, isError, note) == 0) {
-        c->mergeNext = 1;                      /* a results message is last until the next request answers it */
+        c->mergeNext = CONVO_JOIN_RESULTS;     /* a results message is last until the next request answers it */
         return 0;
     }
     /* The call must still be answered for the file to stay valid: a short
        error result, or failing that the whole turn goes. */
     hist_rollback_message();
     if (writeResult(id, RESULT_LOST, 1, NULL) == 0) {
-        c->mergeNext = 1;
+        c->mergeNext = CONVO_JOIN_RESULTS;
         return -1;
     }
     hist_rollback_message();

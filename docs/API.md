@@ -10,10 +10,10 @@ stream it reads and how the history stays valid.
 | File | What |
 |---|---|
 | `C:\CLAWDOS\CLAWDOS.CFG` | Settings and providers (below). The image build fills in the tunnel address and the key from `.env` (with `build.py --no-key`, no key and `auth tunnel`; not in the test images `boottest.py` and `test8088.py` build: the mock needs no key). |
-| `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`), `{skills}` one line per `C:\SKILLS\*.TXT`: its whole path, size and first line (or `(none)`). CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
+| `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`), `{skills}` one line per `C:\SKILLS\*.TXT`: its whole path, size and first line (or `(none)`). Each list holds at most 4,096 bytes; a longer one ends on a whole line and then `(more memories, not listed)` or `(more skills in C:\SKILLS, not listed)`. CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
-| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}`, `{memories}` and `{skills}` as they were then), the conversation's cache settings (`cache`, `cachettl`) and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Esc while the memories or skills are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
+| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}`, `{memories}` and `{skills}` as they were then), the conversation's cache settings (`cache`, `cachettl`) and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) and a reopened chat (F6, `-c`) use it as it is; if it is missing it is rendered again. Esc while the memories or skills are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
 | `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev= th=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event, `th` what that attempt did with message threads (`create`, `cont` or `none`; below). A line per notable event (retries, `connection #n`, errors, `relaunch:`, `progress note:` with the first 60 characters of each progress note drawn, `thread <error_code>: replaying the conversation`, `leaving: <why>`, the reason the harness left its main loop), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). The image ships none. |
 | `C:\SKILLS\*.TXT` | Skills: knowledge the build ships (`image/skills/`), listed in the prompt and read with `read`; the memory tools never reach them. |
@@ -202,7 +202,8 @@ what arrived and shows `[reply cut off: too long]`. A turn carried on after a
 relaunch keeps its start: RESUME.TXT holds the offset (and the closing bytes of
 a results message the turn's text joined), so a rollback there takes the whole
 turn as it would have before the relaunch. `/new` starts a new file;
-nothing deletes them.
+only the chat list's Del deletes one (with its `.PRE`), and opening another chat
+deletes the current one if nothing was said in it.
 
 Writes collect in a 2 KB buffer (lib/history.c) and go to DOS when it fills
 and whenever the file is read, cut or completed: each finished message is
@@ -212,6 +213,44 @@ after everything is on disk. A write that fails (a full disk) ends the turn
 with "Cannot write the conversation file.": the message is rolled back, and a
 call left unanswered gets a short error result, or if even that cannot be
 written the turn is rolled back.
+
+## Reopening a chat
+
+F6 (`/chats`) or `-c NAME` makes an earlier CHATS file the conversation. Nothing
+reads the whole file into memory: lib/chatfile.c reads it a piece at a time,
+once to count the typed messages and find where the last three begin (a typed
+message starts with `,\r\n{"role":"user","content":"`, a string, where results
+and the text that joins them are a list; raw CR and LF never occur inside a JSON
+string), then from there to the end to draw them as the live transcript did
+(the typed text after `> `, reply text after a bullet, a header per tool call;
+thinking blocks and results are not drawn; text past 1,000 characters is cut
+with ` ...`; at most the last 48 KB is drawn). The list itself reads only the
+first 160 bytes of each file.
+
+The conversation's `.PRE` file is kept, so `system` and `tools` are the bytes
+its thinking blocks were made under. The fixed settings are the provider's as
+it is now, except the cache marker, which is read back from the `.PRE` (the
+top-level `cache_control` must carry the system block's ttl); a `.PRE` that is
+missing is rendered afresh at the first request, with today's prompt,
+memories, skills and settings (its thinking blocks then no longer match the
+prefix: with `dropthinking` the API drops them, without it the API answers
+400). No thread is assumed: the first request is a create with the whole
+conversation. The box above the input shows the turns (typed messages that
+got a reply) until the first reply brings the token count.
+
+What the file ends with decides what the next user text does, so that roles
+still alternate:
+
+| The file ends with | When | Opening it | The next text |
+|---|---|---|---|
+| a reply without a tool call | a turn that finished | nothing | a new user message |
+| a typed message, unanswered | the PC went off while waiting, or mid-reply (the half reply is cut by `hist_open`) | a note says so | joins it after a blank line: `"...earlier\n\nnew"` |
+| a tool call without its result | the PC went off while the tool ran (or during a `full_memory` run) | the result `Error: no result: ClawDOS stopped before this call finished, and the chat was reopened later.` (`is_error`) is written, and a RESUME.TXT for this chat is deleted so a later `-resume` cannot answer the call twice | joins that results message as a text block |
+| a tool results message | a stopped or denied call, or a result written just before the PC went off | nothing | joins it as a text block |
+
+The current conversation, if nothing was said in it, is deleted when another is
+opened (each start and F2 make one). A chat that cannot be read leaves the
+current one as it was.
 
 ## The response
 

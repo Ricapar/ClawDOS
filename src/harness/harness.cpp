@@ -7,7 +7,7 @@
  * input box pinned to the bottom of the screen.
  *
  *   CLAWDOS [host[:port]] [-p provider] [-unsafe] [-q] [-m message] [-i text]
- *           [-memories]
+ *           [-c chat] [-memories] [-k keys]
  *
  * Claude can also use tools on this machine (tools.cpp); in safe mode (F3)
  * anything that would change files, memory or ports asks first.
@@ -40,6 +40,8 @@
 #include "relaunch.h"
 #include "ui.h"
 #include "memui.h"
+#include "chatui.h"
+#include "chatfile.h"
 
 #ifndef BUILD_STAMP                 /* yyyymmdd.hhmm, from the build (scripts/build.py) */
 #define BUILD_STAMP "dev"
@@ -107,6 +109,7 @@
 #define SCAN_F3   0x3D
 #define SCAN_F4   0x3E
 #define SCAN_F5   0x3F
+#define SCAN_F6   0x40
 #define SCAN_F10  0x44
 #define SCAN_ALTX 0x2D
 #define SCAN_HOME 0x47
@@ -131,6 +134,7 @@ static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
 static int quickFlag;                 /* -q as given, for the relaunch state */
 static int resumeMode;                /* -resume: back from a run under CLAWDOS.EXE */
+static int typedAhead;                /* -k: a test types for us (the chat list logs its screen) */
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
@@ -396,7 +400,8 @@ static void drawHint(void)
 }
 
 /* The rule above the input, with the conversation's size on its right:
-   "18.2K tokens \xFA 6 turns" once a reply has come. */
+   "18.2K tokens \xFA 6 turns" once a reply has come ("6 turns" in a reopened
+   chat until then). */
 static void drawBoxTop(void)
 {
     Row r;
@@ -407,11 +412,14 @@ static void drawBoxTop(void)
     rowFill(r, 0, SCR_COLS, G_H, A_BOX);
     if (turns > 0) {
         int n;
-        if (tok < 1000)
+        if (tok == 0)                 /* a reopened chat before its first reply: no count yet */
+            n = sprintf(label, " %d turn%s ", turns, turns == 1 ? "" : "s");
+        else if (tok < 1000)
             n = sprintf(label, " %ld tokens", tok);
         else
             n = sprintf(label, " %ld.%ldK tokens", tok / 1000, tok % 1000 / 100);
-        sprintf(label + n, " \xFA %d turn%s ", turns, turns == 1 ? "" : "s");
+        if (tok)
+            sprintf(label + n, " \xFA %d turn%s ", turns, turns == 1 ? "" : "s");
         rowText(r, SCR_COLS - 2 - (int)strlen(label), label, A_BOX_HINT);
     }
     scr_putn(footerTop() + 1, 0, r.c, SCR_COLS);
@@ -560,6 +568,7 @@ static void showHelp(void)
         "F3 toggles safe mode (asks before tools change files, memory or ports)",
         "F4 or /memories looks through Claude's memories and deletes them",
         "F5 cycles effort for the next message: low, medium, high, xhigh, max",
+        "F6 or /chats lists earlier chats: Enter reopens one, Del deletes one",
         0
     };
     breakReply();
@@ -631,15 +640,26 @@ static void welcome(void)
     }
 }
 
-static void echoUser(const char *text)
+/* " ..." after text that was cut (a reopened chat's long message) */
+static void cutMark(int cut)
 {
+    if (cut) {
+        con_attr(A_DIM);
+        con_write(" ...");
+    }
+}
+
+static void echoUser(const char *text, int cut = 0)
+{
+    con_margins(0, SCR_COLS - 1);     /* first: the new line starts at column 0, not at
+                                         the margin of a note or reply above */
     blankLine();
-    con_margins(0, SCR_COLS - 1);
     con_attr(A_DIM);
     con_write("> ");
     con_margins(2, SCR_COLS - 1);
     con_attr(A_TEXT);
     con_write(text);
+    cutMark(cut);
     con_newline();
 }
 
@@ -704,6 +724,122 @@ static void memories(void)
         note("Deleted memories take effect in a new chat (F2).", A_DIM);
 }
 
+/* --- reopening a chat (chatfile.h) ------------------------------------------ */
+
+/* The tail of a reopened chat, drawn as the live transcript drew it: "> "
+   for what was typed, a bullet for reply text, a header per tool call. */
+static void tailUser(void *ctx, const char *text, int cut)
+{
+    (void)ctx;
+    echoUser(text, cut);
+}
+
+static void tailReply(void *ctx, const char *text, int cut)
+{
+    (void)ctx;
+    startReply();
+    con_write(text);
+    cutMark(cut);
+}
+
+static void tailTool(void *ctx, const char *name, const char *input, unsigned len)
+{
+    (void)ctx;
+    tools_show_call(name, input, len);
+}
+
+static int readState(struct Resume *r);
+
+/* The chat file at path becomes the conversation, its tail on a fresh
+   transcript. 0, or -1 with a note (the conversation stays the one we were
+   in). */
+static int openChat(const char *path)
+{
+    static const ChatShow show = { NULL, tailUser, tailReply, tailTool };
+    const char *name = strrchr(path, '\\');
+    char line[100];
+    ChatScan scan;
+    int end;
+
+    statusNote = "Opening the chat...";
+    drawStatus();
+    if (chat.openConversation(path, &scan, &end)) {
+        statusNote = NULL;
+        drawStatus();
+        note(chat.errorText(), A_ERR);
+        return -1;
+    }
+    statusNote = NULL;
+    /* A full_memory run of this chat whose result never came: its call now
+       has the error result, so RESUME.TXT must not answer it again. */
+    if (readState(&resumeState) == 0 && !stricmp(resumeState.chat, chat.chatPath())) {
+        remove(RELAUNCH_STATE);
+        uiLog("resume state dropped: its chat was reopened");
+    }
+    con_init();
+    if (scan.from > 0)
+        note("Earlier messages are not shown.", A_DIM);
+    if (chatfile_read(hist_read, NULL, scan.from, hist_size(), &show, NULL))
+        note("Not enough memory to show the conversation.", A_ERR);
+    sprintf(line, "Reopened chat %.12s: %d turn%s, %ld KB.", name ? name + 1 : path, chat.turns(),
+            chat.turns() == 1 ? "" : "s", (hist_size() + 1023) / 1024);
+    note(line, A_DIM);
+    if (end == CHAT_END_CALL)
+        note("Its last tool call never finished: Claude is told so with your next message.", A_DIM);
+    else if (end == CHAT_END_USER)
+        note("Your last message there got no reply: the next one goes with it.", A_DIM);
+    drawFooter();
+    return 0;
+}
+
+/* F6 or /chats: the chat list (chatui.cpp) has the screen until Esc or Enter. */
+static void chats(void)
+{
+    static char chosen[40];
+
+    if (state != IDLE)
+        return;
+    switch (chatui_run(A_ACCENT, memIdle, uiLog, typedAhead, chat.chatPath(), chosen)) {
+    case -1:
+        note("Not enough memory to open the chat list.", A_ERR);
+        break;
+    case 1:
+        openChat(chosen);
+        break;
+    }
+}
+
+/* -k: keys into the BIOS keyboard buffer, as if typed (the boot tests drive
+   the chat list so). ~e Enter, ~x Esc, ~d Del, ~u Up, ~n Down, ~q F10, ~~ a
+   tilde; the buffer holds 15. */
+static void typeAhead(const char *keys)
+{
+    unsigned __far *head = (unsigned __far *)MK_FP(0x40, 0x1A);
+    unsigned __far *tail = (unsigned __far *)MK_FP(0x40, 0x1C);
+
+    for (; *keys; keys++) {
+        unsigned key = (unsigned char)*keys, next;
+        if (*keys == '~' && keys[1]) {
+            switch (*++keys) {
+            case 'e': key = 0x1C0D; break;
+            case 'x': key = 0x011B; break;
+            case 'd': key = 0x5300; break;
+            case 'u': key = 0x4800; break;
+            case 'n': key = 0x5000; break;
+            case 'q': key = 0x4400; break;
+            default:  key = (unsigned char)*keys; break;
+            }
+        }
+        _disable();
+        next = *tail + 2 >= 0x3E ? 0x1E : *tail + 2;
+        if (next != *head) {
+            *(unsigned __far *)MK_FP(0x40, *tail) = key;
+            *tail = next;
+        }
+        _enable();
+    }
+}
+
 static void submit(void);
 static void handleKey(unsigned key);
 static void modelCommand(const char *arg);
@@ -755,6 +891,11 @@ static void submit(void)
     if (!stricmp(input, "/memories")) {
         setInput("");
         memories();
+        return;
+    }
+    if (!stricmp(input, "/chats")) {
+        setInput("");
+        chats();
         return;
     }
     if (!stricmp(input, "/help")) {
@@ -1075,6 +1216,7 @@ static void handleKey(unsigned key)
         case SCAN_F1:   showHelp(); break;
         case SCAN_F2:   if (state == IDLE) newChat(); break;
         case SCAN_F4:   memories(); return;
+        case SCAN_F6:   chats(); return;
         case SCAN_F5:
             if (chat.provider()) {
                 char msg[48];
@@ -1244,7 +1386,7 @@ static int writeState(void)
 #define STATE_STR(key, field) if (!strcmp(line, key)) { strncpy(r->field, v, sizeof r->field - 1); continue; }
 #define STATE_INT(key, field) if (!strcmp(line, key)) { r->field = atoi(v); continue; }
 
-static int readState(Resume *r)
+static int readState(struct Resume *r)
 {
     FILE *f = fopen(RELAUNCH_STATE, "r");
     char line[200];
@@ -1415,6 +1557,8 @@ int main(int argc, char *argv[])
     const char *firstMessage = NULL;
     const char *prefill = NULL;
     const char *providerArg = NULL;
+    const char *chatArg = NULL, *keys = NULL;
+    static char chatFile[40];
     int i, bad, openMemories = 0;
 
     stackFill();
@@ -1431,6 +1575,11 @@ int main(int argc, char *argv[])
             providerArg = argv[++i];
         } else if (!stricmp(argv[i], "-launched")) {
             tools_set_launched(1);    /* CLAWDOS.EXE is our parent: runs go to it */
+        } else if (!stricmp(argv[i], "-c") && i + 1 < argc) {
+            chatArg = argv[++i];
+        } else if (!stricmp(argv[i], "-k") && i + 1 < argc) {
+            keys = argv[++i];
+            typedAhead = 1;
         } else if (!stricmp(argv[i], "-memories")) {
             openMemories = 1;         /* open the memory manager once connected (screenshots) */
         } else if (!stricmp(argv[i], "-resume")) {
@@ -1441,7 +1590,7 @@ int main(int argc, char *argv[])
                    "       (CLAWDOS.EXE launches this program, HARNESS.EXE, and takes over\n"
                    "       while a run tool program needs the memory; HARNESS alone keeps\n"
                    "       programs inside its own memory)\n"
-                   "              [-m message] [-i text] [-memories]\n\n"
+                   "              [-m message] [-i text] [-c chat] [-memories]\n\n"
                    "Settings come from " CFG_PATH ". A host replaces the\n"
                    "provider's tunnel address (plain HTTP, e.g. the mock API in tests).\n"
                    "-p       use this [provider] section instead of the configured one\n"
@@ -1449,6 +1598,7 @@ int main(int argc, char *argv[])
                    "-q       quit once the -m message is answered (unattended tests)\n"
                    "-m       send this message as soon as we're connected\n"
                    "-i       start with this text in the input box\n"
+                   "-c       reopen this chat: CHATS\\NAME.JSN (F6 lists them)\n"
                    "-memories  open the memory manager (F4) once connected\n");
             return 1;
         } else {
@@ -1520,11 +1670,27 @@ int main(int argc, char *argv[])
         drawFooter();
         resumeTurn();
     } else {
-        if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi))
+        if (chatArg) {                /* a name in CHATS, or a path; .JSN if no extension */
+            const char *base = strrchr(chatArg, '\\');
+            if (strchr(chatArg, '\\') || strchr(chatArg, ':'))
+                sprintf(chatFile, "%.30s", chatArg);
+            else
+                sprintf(chatFile, CHATS_DIR "\\%.12s", chatArg);
+            if (!strchr(base ? base : chatArg, '.'))
+                strcat(chatFile, ".JSN");
+        }
+        if (chat.init(cfg, providerArg, host[0] ? host : NULL, &chatUi, chatArg == NULL))
             fatal(chat.errorText());
-        welcome();
         statusNote = NULL;
-        drawFooter();
+        if (chatArg) {
+            if (openChat(chatFile))
+                fatal(chat.errorText());
+        } else {
+            welcome();
+            drawFooter();
+        }
+        if (keys)
+            typeAhead(keys);
         if (firstMessage)
             setInput(firstMessage), submit();
         if (prefill)

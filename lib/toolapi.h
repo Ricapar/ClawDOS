@@ -59,6 +59,10 @@ void tout_printf(ToolCtx *t, const char *fmt, ...);
 int  tout_room(ToolCtx *t, unsigned n);
 /* Append a whole line if tout_room allows it: 0, or -1 with nothing written. */
 int  tout_line(ToolCtx *t, const char *fmt, ...);
+/* A list whose lines were cut short when the output filled (truncated): end
+   it on its last whole line that leaves room for the line `more` (no '\n'),
+   then that line. Nothing changes when nothing was cut. */
+void tout_end_list(ToolCtx *t, const char *more);
 /* 16 bytes per line. seg is printed as "SSSS:OOOO"; seg 0xFFFF prints file
    offsets ("00000100") instead. */
 void tout_hexdump(ToolCtx *t, const unsigned char __far *p, unsigned n,

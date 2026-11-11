@@ -145,7 +145,9 @@ networking. It is faster but less exact (it emulates an 80186).
    ship (your own programs) stay as they are, and it says so for each shipped file it left
    alone. The skills in `SKILLS\` are the build's and are replaced like the programs; a
    memory with a shipped skill's name (older builds shipped `DEVTOOLS` and `DEMOFX` as
-   memories) is kept, with a note that it is now a skill and can go with F4. Other shipped files you edited on the PC (`AUTOEXEC.BAT`, `CONFIG.SYS`,
+   memories) is kept, with a note that it is now a skill and can go with F4, and a skill
+   on the card the build does not ship (renamed or dropped since, or added on the PC) is
+   kept with a note that every new conversation still lists it. Other shipped files you edited on the PC (`AUTOEXEC.BAT`, `CONFIG.SYS`,
    `TC\TURBOC.CFG`, the programs) are replaced, and survive only in the backup. An existing
    backup is never overwritten: the next one is `CLAWDOS.IMG.bak.2`, then `.bak.3`, and the
    output names the one written. A run that would add and change nothing writes nothing
@@ -169,10 +171,11 @@ networking. It is faster but less exact (it emulates an 80186).
 
 Enter sends. Esc stops a reply or clears the input. Arrows, Home, End and Del
 edit; Up/Down recall earlier messages; PgUp/PgDn scroll back; F1 help, F2 new
-chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), F10 quit. `CLAWDOS host:port` replaces the tunnel address
+chat, F3 safe mode, F4 memories, F5 effort (cycles low to max for the session), F6 earlier chats, F10 quit. `CLAWDOS host:port` replaces the tunnel address
 (plain HTTP, for the mock); `-p NAME` picks a provider section; `-m text` sends
-a message at startup and `-i text` pre-fills the input box. Type `/model` to
-list the providers in `CLAWDOS.CFG` and switch.
+a message at startup, `-i text` pre-fills the input box and `-c NAME` reopens
+the chat `CHATS\NAME.JSN`. Type `/model` to list the providers in `CLAWDOS.CFG`
+and switch.
 
 While Claude works through a run of tool calls it says what it is about to do:
 those progress notes appear dim, above the tool call they lead to (`progress`
@@ -187,6 +190,17 @@ five minutes, and after a longer pause the PC sends it all again.
 `C:\MEMORY` (name, size, first line). Enter shows one, Del deletes it after a
 y/n, Esc goes back. The conversation you're in keeps the list it started with;
 deletions take effect in a new chat (F2). `-memories` opens it at startup.
+
+**Earlier chats** (F6 or `/chats`, when Claude is not busy): a full screen
+listing `C:\CLAWDOS\CHATS`, newest first (name, when it was last written, size,
+the start of its first message; `*` marks the one you are in). Enter reopens
+one: the transcript shows its last three exchanges (what you typed, the reply
+text, a line per tool call) and your next message carries it on, with the
+system prompt and tools it started with. Del deletes one after a y/n, Esc goes
+back. A chat the PC left mid-turn opens too: a message that never got its reply
+takes your next one after it, and a tool call that never finished is answered
+with an error result. Until the first reply the box above the input shows only
+the reopened chat's turns; the reply brings its size in tokens.
 
 ## Reference
 
@@ -302,7 +316,8 @@ memory or skill, applies from the next conversation (F2).
 
 Every conversation is a file in `C:\CLAWDOS\CHATS\` (`MMDDnnn.JSN`): the
 messages exactly as the API sees them, which is also the log of what was said
-and done. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
+and done. F6 lists them to reopen or delete (above); `MMDDnnn.PRE` beside each
+is the system prompt and tools it was started with, and goes with it. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
 token, total, upload time and size, stop reason, tokens in/out, cache reads)
 and one per event worth knowing about (retries, lost links, errors, the start
 of each progress note shown).

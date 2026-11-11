@@ -1,0 +1,2 @@
+{"role":"user","content":"Look at the root."},
+{"role":"assistant","content":[{"type":"text","text":"Listing C:\\."},{"type":"tool_use","id":"toolu_fix1","name":"dir","input":{"path":"C:\\"}}]}

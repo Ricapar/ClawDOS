@@ -142,7 +142,17 @@ SCENARIOS = {
                    'logs the column its bullet starts in (0 is right)',
     '!nothreads': 'two sysinfo calls; from the second request on, thread_unsupported_request for any thread',
     '!skills': 'checks the system prompt lists the shipped skills (not as memories), then reads one in two parts',
+    '!tailscreen': 'peeks CGA memory for a reopened chat\'s transcript: each earlier message\'s first row, in order',
+    '!reopened': 'logs the messages a reopened chat sent (!reopened NAME labels the line)',
 }
+
+# The tool headers' titles (src/harness/tools.cpp), for !tailscreen.
+TOOL_TITLES = {'sysinfo': 'SysInfo', 'dir': 'Dir', 'read': 'Read', 'peek': 'Peek', 'search': 'Search',
+               'write': 'Write', 'edit': 'Edit', 'delete': 'Delete', 'mkdir': 'MkDir', 'rename': 'Rename',
+               'poke': 'Poke', 'port': 'Port', 'textart': 'TextArt', 'play': 'Play', 'run': 'Run',
+               'memory_list': 'Memories', 'memory_read': 'Memory', 'memory_write': 'Remember'}
+SHOWN_TYPED = 3         # a reopened chat shows its messages from the third last typed one (lib/chatfile.h)
+TAIL_PEEKS = 20         # !tailscreen reads at most this many 256-byte pieces of the screen
 
 # A thinking signature longer than the DOS PC's 16 KB event buffer (see !bigsig).
 BIG_SIGNATURE = base64.b64encode(bytes(range(256)) * 72).decode()   # 24576 bytes
@@ -171,7 +181,7 @@ REDACTED_DATA = base64.b64encode(bytes(range(256)) * 3).decode()
 SKILLS = ('C:\\SKILLS\\DEVTOOLS.TXT', 'C:\\SKILLS\\DEMOFX.TXT')
 SKILL_READ = SKILLS[0]
 SKILL_PART = 40
-SKILL_FIRST = '    1 Dev tools: '
+SKILL_FIRST = '    1 Dev tools'
 SKILL_LAST = 'Plain DEBUG still works too.'
 
 
@@ -343,6 +353,50 @@ SMALL_TALK = [
 ]
 
 
+def peek_bytes(text):
+    """The bytes of a peek result: each line "B800:0000 " then " XX" sixteen times, then the characters."""
+    return bytes(int(h, 16) for line in text.splitlines()
+                 if re.match(r'[0-9A-F]{4}:[0-9A-F]{4} ', line) for h in line[10:58].split())
+
+
+def screen_rows(vram):
+    """The text of each whole screen row (160 bytes: character, attribute) in vram."""
+    return [bytes(vram[r * 160:(r + 1) * 160:2]).decode('cp437') for r in range(len(vram) // 160)]
+
+
+def tail_rows(messages):
+    """How a reopened chat's transcript starts each shown message's part, in order: "> " and the start of
+    typed text, a bullet and the start of reply text, a bullet and the title of a tool call."""
+    typed = [i for i, m in enumerate(messages) if m['role'] == 'user' and isinstance(m['content'], str)]
+    rows = []
+    for m in messages[typed[-SHOWN_TYPED] if len(typed) >= SHOWN_TYPED else 0:]:
+        blocks = [{'type': 'text', 'text': m['content']}] if isinstance(m['content'], str) else m['content']
+        for b in blocks:
+            if b.get('type') == 'text':
+                start = b['text'].split('\n')[0][:30]
+                start = re.match(r'[ -~]*', start).group(0).rstrip()      # as far as it is plain ASCII
+                rows.append(('> ' if m['role'] == 'user' else '\x07 ') + start)
+            elif b.get('type') == 'tool_use':
+                rows.append('\x07 ' + TOOL_TITLES.get(b['name'], b['name']))
+    return rows
+
+
+def rows_missing(rows, want):
+    """The rows of want that the screen rows do not hold in that order (each a row's start)."""
+    i = 0
+    for row in rows:
+        if i < len(want) and row.startswith(want[i]):
+            i += 1
+    return want[i:]
+
+
+def message_shape(messages):
+    """role[block types] for each message: user[text] assistant[thinking,text,tool_use] ..."""
+    def kinds(content):
+        return 'text' if isinstance(content, str) else ','.join(b['type'] for b in content)
+    return ' '.join(f"{m['role']}[{kinds(m['content'])}]" for m in messages)
+
+
 def header_column(vram):
     """The column of the bullet on the first screen row (160 bytes: character, attribute) whose text holds
     "SysInfo", the tool header; None until such a row is complete."""
@@ -365,6 +419,7 @@ class MockChat:
         self.tools_path = tools_path                       # the TOOLS.JSN the server checks requests against
         self.no_tools = False                              # the request said tool_choice none (set by the server)
         self.system = ''                                   # the system prompt's text, as the model sees it (the server)
+        self.messages = []                                 # the request's messages (the server)
         self.progress = False                              # the request asked for display "updates" (the server)
         self.progress_note = ''                            # the thinking text sent then, if a scenario sets one
         self.rng = random.Random(seed)
@@ -640,14 +695,42 @@ class MockChat:
         for off in range(0, 0x4000, 256):         # the screen's ring of rows, 160 bytes each from offset 0
             call = ToolCall('peek', {'addr': f'B800:{off:04X}', 'len': 256})
             yield call
-            # each line: "B800:0000 " then " XX" sixteen times, then the characters
-            vram += bytes(int(h, 16) for line in call.result.text.splitlines()
-                          if re.match(r'[0-9A-F]{4}:[0-9A-F]{4} ', line) for h in line[10:58].split())
+            vram += peek_bytes(call.result.text)
             column = header_column(vram)
             if column is not None:
                 break
         print(f'tool header column: {column} ({"PASS" if column == 0 else "FAIL"})', flush=True)
         yield f'The tool header starts in column {column}.'
+
+    def _cmd_tailscreen(self, _text):
+        want, before = tail_rows(self.messages[:-1]), len(self.messages) - 1
+        yield f'Looking for the {len(want)} rows of the reopened chat on the screen.'
+        vram, missing = bytearray(), want
+        for off in range(0, TAIL_PEEKS * 256, 256):
+            call = ToolCall('peek', {'addr': f'B800:{off:04X}', 'len': 256})
+            yield call
+            vram += peek_bytes(call.result.text)
+            missing = rows_missing(screen_rows(vram), want)
+            if not missing:
+                break
+        if missing:                   # what the screen held instead
+            for row in screen_rows(vram)[:40]:
+                print('tail screen row: ' + row.replace('\x07', '*').rstrip(), flush=True)
+        print(f'tail screen: {"PASS" if want and not missing else "FAIL"} ({len(want) - len(missing)} of '
+              f'{len(want)} rows{", missing " + repr(missing[0]) if missing else ""}; '
+              f'{before} messages before this one)', flush=True)
+        yield f'Found {len(want) - len(missing)} of {len(want)} rows.'
+
+    def _cmd_reopened(self, text):
+        label = (text.split() + [''])[1]
+        last = self.messages[-1]['content'] if self.messages else ''
+        blocks = [{'type': 'text', 'text': last}] if isinstance(last, str) else last
+        said = ' | '.join(p for b in blocks if b.get('type') == 'text' for p in b['text'].split('\n\n'))
+        results = '; '.join(f"{'error' if b.get('is_error') else 'ok'} {str(b.get('content'))[:60]}"
+                            for b in blocks if b.get('type') == 'tool_result')
+        print(f'reopened {label}: {len(self.messages)} messages: {message_shape(self.messages)}; text: {said}'
+              + (f'; results: {results}' if results else ''), flush=True)
+        yield f'Reopened chat {label} continued: {len(self.messages)} messages came.'
 
     def _cmd_threadfail(self, _text):
         if self.threads:

@@ -203,6 +203,17 @@ class UpdateFsTest(unittest.TestCase):
         self.assertIn('SKILLS/DEMOFX.TXT', rep.added)
         self.assertNotIn('SKILLS/DEVTOOLS.TXT', dict(rep.left))
 
+    def test_a_skill_the_build_no_longer_ships_is_noted_and_kept(self):
+        pc = dict(PC, **{'SKILLS/OLDNAME.TXT': b'a renamed skill', 'SKILLS/DEEP/X.TXT': b'not listed',
+                         'SKILLS/NOTES.DOC': b'not a skill'})
+        rep, after = self.update(pc=pc)
+        self.assertEqual(rep.stray_skills, ['SKILLS/OLDNAME.TXT'])
+        self.assertEqual(after['SKILLS/OLDNAME.TXT'], b'a renamed skill')
+        text = '\n'.join(rep.lines(True))                                 # a dry run says it too
+        self.assertIn('Note: SKILLS/OLDNAME.TXT is a skill this build does not ship', text)
+        self.assertNotIn('DEEP/X.TXT is a skill', text)
+        self.assertEqual(self.update()[0].stray_skills, [])
+
     def test_a_memory_named_like_a_skill_is_noted_and_kept(self):
         # a card from a build that shipped DEVTOOLS and DEMOFX as memories, one of them edited since
         pc = dict(PC, **{'MEMORY/DEVTOOLS.TXT': b'devtools, edited', 'MEMORY/DEMOFX.TXT': b'demofx'})

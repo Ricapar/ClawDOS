@@ -18,6 +18,7 @@
 #include "utf8.h"
 #include "convo.h"
 #include "dosfs.h"
+#include "chatfile.h"
 
 #define SSE_MAX        16384u
 #define TOOL_INPUT_MAX 16384u
@@ -29,6 +30,7 @@
 #define CHATS_DIR      "C:\\CLAWDOS\\CHATS"
 #define CFG_PATH       "C:\\CLAWDOS\\CLAWDOS.CFG"
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
+#define CALL_LOST      "Error: no result: ClawDOS stopped before this call finished, and the chat was reopened later."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
                rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
@@ -76,11 +78,11 @@ int8_t Chat::setup(Cfg *c, const char *providerId, const char *hostOverride, Cha
     return 0;
 }
 
-int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u)
+int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, ChatUi *u, int fresh)
 {
     if (setup(c, providerId, hostOverride, u))
         return -1;
-    if (newConversation())
+    if (fresh && newConversation())
         return -1;
     if (connect())
         return -1;
@@ -203,6 +205,81 @@ int8_t Chat::newConversation(void)
     return 0;
 }
 
+/* An earlier conversation becomes the current one (docs/API.md, "Reopening
+   a chat"). Its prefix file is kept, and with it the cache marker it was
+   written with; the other fixed settings are the provider's as it is now (a
+   thread is never assumed: the first request creates one). Without a prefix
+   file the first request renders one, as for a new conversation. Whatever the
+   file ends with, the next user text must keep the roles alternating: a call
+   left without its result (the PC went off while it ran) gets one now. */
+int8_t Chat::openConversation(const char *chatPath, ChatScan *scan, int *endKind)
+{
+    char old[sizeof path], oldPre[sizeof prePath], line[90];
+    long oldSize = path[0] ? hist_size() : -1;
+    ChatEnd end;
+    Convo c;
+
+    if (strlen(chatPath) >= sizeof path || fs_size(chatPath) <= 0) {
+        sprintf(errBuf, "No chat %.60s (or it is empty).", chatPath);
+        err = errBuf;
+        return -1;
+    }
+    strcpy(old, path);
+    strcpy(oldPre, prePath);
+    hist_close();
+    strcpy(path, chatPath);
+    convo_init(&c);
+    sprintf(errBuf, "Cannot read %.60s (or no memory for it).", chatPath);
+    if (hist_open(path) == 0 && hist_size() > 0 && chatfile_scan(hist_read, NULL, hist_size(), scan) == 0
+        && chatfile_read(hist_read, NULL, scan->last, hist_size(), NULL, &end) == 0) {
+        switch (end.kind) {
+        case CHAT_END_CALL:
+            convo_turn_begin(&c);
+            if (convo_tool_result(&c, end.toolId, CALL_LOST, 1, NULL) == 0 || c.mergeNext == CONVO_JOIN_RESULTS)
+                break;                /* answered (if only by the short error result) */
+            strcpy(errBuf, "Cannot write the conversation file.");   /* rolled back: still unanswered */
+            end.kind = -1;
+            break;
+        case CHAT_END_RESULTS:
+            c.mergeNext = CONVO_JOIN_RESULTS;
+            break;
+        case CHAT_END_USER:
+            c.mergeNext = CONVO_JOIN_TEXT;
+            break;
+        }
+    } else {
+        end.kind = -1;
+    }
+    if (end.kind < 0) {
+        err = errBuf;
+        hist_close();
+        strcpy(path, old);
+        if (old[0])
+            hist_open(old);           /* back to the conversation we were in, untouched */
+        return -1;
+    }
+    if (oldSize == 0 && stricmp(old, path)) {   /* a new conversation nothing was said in */
+        remove(old);
+        remove(oldPre);
+    }
+    convo = c;
+    setPrefixPath();
+    th.id[0] = 0;
+    ctxTokens = 0;
+    fixedSet = 0;
+    if (fs_size(prePath) > 0) {
+        api_fixed_from(&fix, prov);
+        api_prefix_cache(prePath, &fix.cache, &fix.ttl1h);
+        fixedSet = 1;
+    }
+    turnsDone = scan->exchanges - (end.kind == CHAT_END_USER);
+    *endKind = end.kind;
+    sprintf(line, "opened %.40s: %ld bytes, %d typed, ends %d, prefix %s", path, hist_size(),
+            scan->exchanges, end.kind, fixedSet ? "kept" : "missing");
+    ui->log(line);
+    return 0;
+}
+
 /* CHATS\MMDDnnn.PRE beside CHATS\MMDDnnn.JSN. */
 void Chat::setPrefixPath(void)
 {
@@ -247,6 +324,7 @@ int8_t Chat::preparePrefix(void)
        memories wait on the heap while the skills are listed. */
     if ((status = tool_memory_list(&t)) == TS_STOPPED)
         return 1;
+    tout_end_list(&t, "(more memories, not listed)");
     if ((mems = (char *)malloc(t.len + 1)) == NULL)
         return -1;
     strcpy(mems, status == TS_OK ? t.out : "");
@@ -255,6 +333,7 @@ int8_t Chat::preparePrefix(void)
         free(mems);
         return 1;
     }
+    tout_end_list(&t, "(more skills in C:\\SKILLS, not listed)");
     x.promptPath = PROMPT_PATH;
     x.toolsPath = TOOLS_PATH;
     x.name = prov->name[0] ? prov->name : cfg->name;

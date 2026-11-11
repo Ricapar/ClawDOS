@@ -14,6 +14,7 @@
 #include "convo.h"
 #include "history.h"
 #include "apireq.h"
+#include "chatfile.h"
 
 struct ChatUi {
     void (*text)(const char *cp437, unsigned n);   /* visible reply text */
@@ -31,12 +32,19 @@ class Chat {
     Chat();
 
     /* Pick the provider (providerId, else cfg->provider), use hostOverride as
-       its address if given, allocate buffers, start a conversation and
-       connect. 0 ok; otherwise errorText() says why. */
-    int8_t init(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui);
+       its address if given, allocate buffers, start a conversation (unless
+       fresh is 0: openConversation follows) and connect. 0 ok; otherwise
+       errorText() says why. */
+    int8_t init(Cfg *cfg, const char *providerId, const char *hostOverride, ChatUi *ui, int fresh = 1);
     void   close(void);
 
     int8_t newConversation(void);          /* a new CHATS file, and a new prefix (memories and skills as they are) */
+    /* An earlier CHATS file becomes the conversation (the one we were in is
+       left as it is, or deleted if nothing was said in it). scan says where
+       its tail to show starts (chatfile.h), endKind what it ended with
+       (CHAT_END_*). 0, or -1 with errorText() (the conversation is then the
+       one we were in). */
+    int8_t openConversation(const char *chatPath, ChatScan *scan, int *endKind);
     /* Send the user's text and run the whole turn, tool rounds included.
        0 done, 1 stopped by Esc (answered() says whether anything was shown),
        -1 failed (a note has been shown), 2 a run waits for the launcher

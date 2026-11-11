@@ -2,7 +2,8 @@
  * history file: the user's text, the assistant's reply (streamed in by
  * apistream) and tool results; and the rules that keep the file valid when a
  * turn ends early. Roles must alternate, so a user text that follows a tool
- * results message joins it as a text block.
+ * results message joins it as a text block, and one that follows a typed
+ * message nothing answered joins its text.
  */
 #ifndef CLAWDOS_CONVO_H
 #define CLAWDOS_CONVO_H
@@ -11,8 +12,14 @@
 extern "C" {
 #endif
 
+/* mergeNext: how the next user text joins the user's message that is last. */
+enum { CONVO_NEW, CONVO_JOIN_RESULTS, CONVO_JOIN_TEXT };
+
 typedef struct Convo {
-    int mergeNext;        /* the last message is the user's: the next text joins it */
+    int mergeNext;        /* the last message is the user's: the next text joins it. CONVO_JOIN_RESULTS:
+                             a tool results message, as a text block; CONVO_JOIN_TEXT: a typed message
+                             never answered (a chat reopened after the PC went off mid-turn), as more
+                             of its text after a blank line */
     int mergeAtStart;     /* mergeNext when the turn began, for a rollback */
     int assistantInTurn;  /* assistant messages completed this turn */
 } Convo;
@@ -29,8 +36,8 @@ int  convo_assistant_done(Convo *c);
 int  convo_tool_result(Convo *c, const char *id, const char *cp437Text, int isError, const char *note);
 /* The turn ended early. No assistant message yet: the whole turn is rolled
    back. Otherwise the file ends with a tool results message, which the next
-   user text joins. Returns what the file ends with: 0 the user's text or an
-   assistant message is last, 1 a results message is last. */
+   user text joins. Returns mergeNext: 0 the user's text or an assistant
+   message is last, CONVO_JOIN_RESULTS a results message is last. */
 int  convo_settle(Convo *c);
 void convo_rollback_turn(Convo *c);                  /* hist_rollback_turn + restore mergeNext */
 

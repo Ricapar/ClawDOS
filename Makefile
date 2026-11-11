@@ -78,6 +78,19 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "nothreads exit code 0" --expect "threadfail exit code 1" --expect "threadretry 529 exit code 0" \
 	    --expect "threadretry overload exit code 0" --expect "threadretry 404 exit code 1" \
 	    --expect "threadretry 400 exit code 1" --expect "threadlost run exit code 0" --reject ": FAIL" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/chats.bat --mock --timeout 240 --expect "tail screen: PASS (4 of 4 rows; 4 messages before this one)" \
+	    --expect "tail screen: PASS (2 of 2 rows; 2 messages before this one)" --expect "request: 5 messages, last role user" \
+	    --expect "KB  !tool sysinfo" --expect "KB  Hello again, a second chat" --expect "chats: deleted FIRST" \
+	    --expect "first exit code 0" --expect "second exit code 0" --expect "reopen exit code 0" --expect "list exit code 0" \
+	    --expect "delete exit code 0" --reject "is still there" --reject "tail screen: FAIL" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/chatends.bat --mock \
+	    --expect "reopened unans: 3 messages: user[text] assistant[text] user[text]; text: Are you still there? | !reopened unans" \
+	    --expect "reopened call: 3 messages: user[text] assistant[text,tool_use] user[tool_result,text]; text: !reopened call; results: error Error: no result: ClawDOS stopped" \
+	    --expect "reopened result: 3 messages: user[text] assistant[tool_use] user[tool_result,text]; text: !reopened result; results: error Interrupted by the user." \
+	    --expect "reopened half: 1 messages: user[text]; text: Half a reply came. | !reopened half" \
+	    --expect "unans exit code 0" --expect "call exit code 0" --expect "result exit code 0" --expect "half exit code 0" \
+	    --expect "BIG.JSN: 206060 bytes, 18 typed, ends 1" --expect "reopened big: 37 messages" --expect "big exit code 0" \
+	    --expect "NOSUCH.JSN (or it is empty)" --expect "nosuch exit code 1" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/skills.bat --mock --expect "skills: PASS" --reject "VALIDATION:"

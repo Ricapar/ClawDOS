@@ -67,6 +67,11 @@ int  api_prefix(Sink *s, const ApiPrefix *x);
    be read (or no memory to read them), -2 the file could not be written. */
 long api_prefix_file(const char *path, const ApiPrefix *x);
 
+/* The cache marker a prefix file's system block was written with (a chat
+   reopened later keeps it, so the request's top-level marker agrees): into
+   *cache and *ttl1h. 0, or -1 if the file cannot be read or is not a prefix. */
+int  api_prefix_cache(const char *path, int *cache, int *ttl1h);
+
 enum { API_TH_NONE, API_TH_CREATE, API_TH_CONTINUE };
 
 typedef struct ApiReq {

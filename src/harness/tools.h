@@ -23,6 +23,10 @@ void tools_restore_screen(unsigned short __far *save);
    bytes). Shows the header, asks in safe mode, runs the executor. `t` holds the
    CP437 output; returns TS_*. */
 int  tools_call(const char *name, const char *input, unsigned len, ToolCtx *t);
+/* A call from an earlier part of the conversation (a reopened chat's
+   transcript): its header as tools_call shows it, nothing run. `input` may be
+   cut short. */
+void tools_show_call(const char *name, const char *input, unsigned len);
 /* The text the model gets for a finished call: the output when ok, else the
    fixed error/denied/stopped sentences (the error one prefixed to the output). */
 const char *tools_result_text(int status, const ToolCtx *t);

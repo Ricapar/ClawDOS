@@ -1,0 +1,3 @@
+{"role":"user","content":"Remember the word teapot."},
+{"role":"assistant","content":[{"type":"text","text":"I will remember teapot."}]},
+{"role":"user","content":"Are you still there?"}

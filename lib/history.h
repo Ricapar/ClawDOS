@@ -73,6 +73,9 @@ int  hist_reopen_last(unsigned n);
    read (or written out first), -2 the sink failed. */
 int  hist_copy(Sink *s);
 int  hist_copy_from(Sink *s, long from);  /* the same from byte `from` on */
+/* Up to n bytes of the file from pos (written out first): how many, 0 at the
+   end, -1 on an error. ctx is unused: this is chatfile.h's ChatRead. */
+int  hist_read(void *ctx, long pos, char *buf, unsigned n);
 
 #ifdef __cplusplus
 }

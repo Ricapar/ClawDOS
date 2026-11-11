@@ -25,6 +25,7 @@
 #include "apistream.h"
 #include "convo.h"
 #include "dosfs.h"
+#include "chatfile.h"
 #include <stdlib.h>
 #include <direct.h>
 
@@ -2196,6 +2197,219 @@ static void testLongEvents(void)
     CHECK("long text refused", bigFeed(feed, 50) == -1 && bigRefused == 1);
 }
 
+/* --- reopening a chat (chatfile.c) ------------------------------------------ */
+
+/* A chat file in memory, read at most `step` bytes at a time: every piece
+   boundary the parser and the scan must cope with. */
+typedef struct MemFile {
+    const char *s;
+    long len;
+    unsigned step;
+} MemFile;
+
+static int memRead(void *ctx, long pos, char *buf, unsigned n)
+{
+    MemFile *m = (MemFile *)ctx;
+    if (pos >= m->len)
+        return 0;
+    if (n > m->step)
+        n = m->step;
+    if ((long)n > m->len - pos)
+        n = (unsigned)(m->len - pos);
+    memcpy(buf, m->s + pos, n);
+    return (int)n;
+}
+
+static char *shownLog;                /* what the callbacks were given, "U:...|R:...|T:name:input|" (2000) */
+
+static void logShown(const char *kind, const char *text, int cut)
+{
+    unsigned n = strlen(shownLog);
+    if (n + strlen(text) + 8 < 2000)
+        sprintf(shownLog + n, "%s:%s%s|", kind, text, cut ? "+" : "");
+}
+
+static void shownUser(void *ctx, const char *t, int cut) { (void)ctx; logShown("U", t, cut); }
+static void shownReply(void *ctx, const char *t, int cut) { (void)ctx; logShown("R", t, cut); }
+
+static void shownTool(void *ctx, const char *name, const char *input, unsigned len)
+{
+    unsigned n = strlen(shownLog);
+    (void)ctx;
+    if (n + len + 40 < 2000)
+        sprintf(shownLog + n, "T:%s:%.*s|", name, (int)len, input);
+}
+
+static const ChatShow showLog = { NULL, shownUser, shownReply, shownTool };
+
+/* The four messages of a small chat, separated as the history file does. */
+#define CF_TYPED  "{\"role\":\"user\",\"content\":\"Hi \\\"there\\\"\\nC:\\\\DOS caf\\u00e9\"}"
+#define CF_CALL   "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"x {\\\"text\\\":\\\"no\\\"}\"," \
+                  "\"signature\":\"abc\"},{\"type\":\"text\",\"text\":\"Hello!\"},{\"type\":\"tool_use\",\"id\":\"toolu_1\"," \
+                  "\"name\":\"read\",\"input\":{\"path\":\"C:\\\\A.TXT\",\"x\":{\"y\":[\"}\"]}}}]}"
+#define CF_RESULT "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\"," \
+                  "\"content\":\"{\\\"text\\\":\\\"nope\\\"}\",\"is_error\":false},{\"type\":\"text\",\"text\":\"more\"}]}"
+#define CF_REPLY  "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}"
+#define CF_SEP    ",\r\n"
+
+static void testChatFile(void)
+{
+    static const unsigned steps[3] = { 1, 5, 2048 };
+    const char *chat = CF_TYPED CF_SEP CF_CALL CF_SEP CF_RESULT CF_SEP CF_REPLY;
+    const char *wantShown = "U:Hi \"there\"\nC:\\DOS caf\x82|R:Hello!|T:read:{\"path\":\"C:\\\\A.TXT\",\"x\":{\"y\":[\"}\"]}}|"
+                            "U:more|R:Done.|";
+    char *big = (char *)malloc(2200), name[32], first[20], head[80];
+    MemFile m;
+    ChatScan sc;
+    ChatEnd end;
+    int i, ok;
+
+    shownLog = (char *)malloc(2000);
+    if (!big || !shownLog) {
+        CHECK("chatfile: memory", 0);
+        return;
+    }
+    m.s = chat;
+    m.len = strlen(chat);
+    for (i = 0; i < 3; i++) {
+        m.step = steps[i];
+        shownLog[0] = 0;
+        ok = chatfile_scan(memRead, &m, m.len, &sc) == 0 && sc.exchanges == 1 && sc.from == 0
+             && sc.last == (long)(strlen(CF_TYPED CF_SEP CF_CALL CF_SEP CF_RESULT CF_SEP));
+        sprintf(name, "chatfile: scan %u", steps[i]);
+        CHECK(name, ok);
+        ok = chatfile_read(memRead, &m, 0, m.len, &showLog, &end) == 0 && end.kind == CHAT_END_REPLY;
+        sprintf(name, "chatfile: read %u", steps[i]);
+        CHECK(name, ok);
+        sprintf(name, "chatfile: shown %u", steps[i]);
+        CHECK_STR(name, shownLog, wantShown);
+    }
+
+    /* What each way of ending asks of the next message. */
+    m.step = 7;
+    m.s = CF_TYPED CF_SEP CF_CALL;
+    m.len = strlen(m.s);
+    CHECK("chatfile: ends on a call", chatfile_scan(memRead, &m, m.len, &sc) == 0
+          && chatfile_read(memRead, &m, sc.last, m.len, NULL, &end) == 0
+          && end.kind == CHAT_END_CALL && !strcmp(end.toolId, "toolu_1"));
+    m.s = CF_TYPED CF_SEP CF_CALL CF_SEP CF_RESULT;
+    m.len = strlen(m.s);
+    CHECK("chatfile: ends on results", chatfile_scan(memRead, &m, m.len, &sc) == 0
+          && chatfile_read(memRead, &m, sc.last, m.len, NULL, &end) == 0 && end.kind == CHAT_END_RESULTS);
+    m.s = CF_TYPED CF_SEP CF_CALL CF_SEP CF_RESULT CF_SEP CF_REPLY CF_SEP "{\"role\":\"user\",\"content\":\"again?\"}";
+    m.len = strlen(m.s);
+    CHECK("chatfile: ends on a typed message", chatfile_scan(memRead, &m, m.len, &sc) == 0 && sc.exchanges == 2
+          && chatfile_read(memRead, &m, sc.last, m.len, NULL, &end) == 0 && end.kind == CHAT_END_USER);
+    m.s = "";
+    m.len = 0;
+    CHECK("chatfile: empty", chatfile_scan(memRead, &m, 0, &sc) == 0 && sc.exchanges == 0 && sc.last == -1
+          && chatfile_read(memRead, &m, 0, 0, NULL, &end) == 0 && end.kind == CHAT_END_NONE);
+
+    /* Four exchanges: the shown part starts at the third last typed message. */
+    sprintf(big, "%s%s%s%s%s%s%s%s%s%s%s%s%s", CF_TYPED, CF_SEP, CF_REPLY, CF_SEP,
+            "{\"role\":\"user\",\"content\":\"two\"}", CF_SEP, CF_REPLY, CF_SEP,
+            "{\"role\":\"user\",\"content\":\"three\"}", CF_SEP, CF_REPLY, CF_SEP,
+            "{\"role\":\"user\",\"content\":\"four\"}");
+    m.s = big;
+    m.len = strlen(big);
+    m.step = 3;
+    CHECK("chatfile: from the third last typed", chatfile_scan(memRead, &m, m.len, &sc) == 0 && sc.exchanges == 4
+          && sc.from == (long)(strstr(big, "{\"role\":\"user\",\"content\":\"two") - big));
+    shownLog[0] = 0;
+    chatfile_read(memRead, &m, sc.from, m.len, &showLog, NULL);
+    CHECK_STR("chatfile: tail shown", shownLog, "U:two|R:Done.|U:three|R:Done.|U:four|");
+
+    /* A text longer than the screen gets: cut, and said so. */
+    strcpy(big, "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"");
+    i = strlen(big);
+    memset(big + i, 'a', 1700);
+    big[i + 1700] = 0;
+    strcat(big, "\"}]}");
+    m.s = big;
+    m.len = strlen(big);
+    m.step = 2048;
+    shownLog[0] = 0;
+    CHECK("chatfile: long text", chatfile_read(memRead, &m, 0, m.len, &showLog, &end) == 0 && end.kind == CHAT_END_REPLY
+          && strlen(shownLog) == 2 + CHATFILE_TEXT_MAX + 2 && shownLog[2 + CHATFILE_TEXT_MAX] == '+');
+
+    /* The list's line: the first message's start. */
+    strcpy(head, CF_TYPED);
+    CHECK("chatfile: first", chatfile_first(head, strlen(head), first, sizeof first) == 19);
+    CHECK_STR("chatfile: first text", first, "Hi \"there\" C:\\DOS c");
+    strcpy(head, CF_REPLY);
+    CHECK("chatfile: first not typed", chatfile_first(head, strlen(head), first, sizeof first) == 0 && !first[0]);
+    strcpy(head, "{\"role\":\"user\",\"content\":\"cut \\u00");
+    chatfile_first(head, strlen(head), first, sizeof first);
+    CHECK_STR("chatfile: first cut short", first, "cut ?00");
+    free(big);
+    free(shownLog);
+}
+
+/* A typed message nothing answered (the PC went off mid-turn) takes the next
+   text after a blank line, and a rollback gives it back as it was. */
+static void testConvoJoinText(void)
+{
+    Convo c;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts("{\"role\":\"user\",\"content\":\"lost\"}");
+    hist_message_done();
+    convo_init(&c);
+    c.mergeNext = CONVO_JOIN_TEXT;
+    convo_turn_begin(&c);
+    CHECK("convo join text", convo_user_text(&c, "next") == 0 && c.mergeNext == CONVO_NEW);
+    CHECK_STR("convo join text file", histText(), "{\"role\":\"user\",\"content\":\"lost\\n\\nnext\"}");
+    convo_rollback_turn(&c);
+    CHECK_STR("convo join text rollback", histText(), "{\"role\":\"user\",\"content\":\"lost\"}");
+    CHECK("convo join text rollback merge", c.mergeNext == CONVO_JOIN_TEXT);
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
+/* A reopened chat's cache marker comes from its prefix file. */
+static void testPrefixCache(void)
+{
+    ApiPrefix x;
+    int cache = -1, ttl = -1, ok;
+
+    writeFile("C:\\PTEST.TXT", "Say \"hi\" \\ {name}.");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\",\"cache_control\":{\"ttl\":\"1h\"}}]");
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "\"Q\""; x.memories = "";
+    x.skills = ""; x.cache = 1; x.ttl1h = 1;
+    ok = api_prefix_file("C:\\PTEST.PRE", &x) > 0 && api_prefix_cache("C:\\PTEST.PRE", &cache, &ttl) == 0;
+    CHECK("prefix cache 1h", ok && cache == 1 && ttl == 1);
+    x.ttl1h = 0;
+    ok = api_prefix_file("C:\\PTEST.PRE", &x) > 0 && api_prefix_cache("C:\\PTEST.PRE", &cache, &ttl) == 0;
+    CHECK("prefix cache 5m", ok && cache == 1 && ttl == 0);
+    x.cache = 0;
+    ok = api_prefix_file("C:\\PTEST.PRE", &x) > 0 && api_prefix_cache("C:\\PTEST.PRE", &cache, &ttl) == 0;
+    CHECK("prefix no cache (tools' own marker ignored)", ok && cache == 0 && ttl == 0);
+    writeFile("C:\\PTEST.PRE", "{\"not\":\"a prefix\"}");
+    CHECK("prefix cache: not a prefix", api_prefix_cache("C:\\PTEST.PRE", &cache, &ttl) == -1);
+    CHECK("prefix cache: no file", api_prefix_cache("C:\\NOPE.PRE", &cache, &ttl) == -1);
+    remove("C:\\PTEST.PRE");
+    remove("C:\\PTEST.TXT");
+    remove("C:\\TTEST.JSN");
+}
+
+/* A list cut at the output's size ends on a whole line, then says so. */
+static void testEndList(void)
+{
+    ToolCtx t;
+    int i;
+
+    tout_reset(&t);
+    tout_puts(&t, "one\ntwo\n");
+    tout_end_list(&t, "(more)");
+    CHECK_STR("end list: nothing cut", t.out, "one\ntwo\n");
+    tout_reset(&t);
+    for (i = 0; i < 300; i++)
+        tout_printf(&t, "C:\\SKILLS\\S%03d.TXT  1234  a skill\n", i);
+    tout_end_list(&t, "(more not listed)");
+    CHECK("end list: cut", t.len <= TOOL_OUT_MAX && !strcmp(t.out + t.len - 18, "(more not listed)\n")
+          && t.out[t.len - 19] == '\n' && !strncmp(t.out + t.len - 18 - 34, "C:\\SKILLS\\S", 11));
+}
+
 int main(void)
 {
     CHECK("sanity", 1 + 1 == 2);
@@ -2238,6 +2452,10 @@ int main(void)
     testHistoryWriteFails();
     testHistoryTurnCarried();
     testHistoryScanFails();
+    testChatFile();
+    testConvoJoinText();
+    testPrefixCache();
+    testEndList();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

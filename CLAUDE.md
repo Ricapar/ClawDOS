@@ -14,7 +14,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Update a real PC's image in place instead of replacing it: `python scripts/build.py --update PATH/CLAWDOS.IMG [--dry-run]
   [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). Unless nothing would change, it copies
   the old image to IMG.bak (never overwritten: .bak.2, .bak.3, ...), then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
-  nothing else (SKILLS/ is the build's, replaced like any shipped file): MEMORY/ (`--memories`: only the memory files the build ships, none now; a memory named like a shipped skill, left by an older build, gets a note saying it can go with F4), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
+  nothing else (SKILLS/ is the build's, replaced like any shipped file): MEMORY/ (`--memories`: only the memory files the build ships, none now; a memory named like a shipped skill, left by an older build, gets a note saying it can go with F4; a skill in SKILLS/ the build no longer ships gets a note too, and stays), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
   (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
 - The API key can stay off the DOS PC: `build.py --no-key` (remembered, `--key` undoes it; image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
   --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
@@ -51,7 +51,10 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `skills.bat`
   the system prompt listing C:\SKILLS (not as memories) and a skill read in two parts with `read` (`skills: PASS`); `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
-  (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
+  (`trying again`); `chats.bat --timeout 240` the chat list and reopening (`tail screen: PASS`: `!tailscreen` peeks
+  CGA memory for the reopened transcript; `-k` types keys into the BIOS buffer to drive the list, whose rows go to
+  CLAWDOS.LOG as `chat list:` lines); `chatends.bat` chats the PC left mid-turn, reopened with `-c` and continued
+  (`reopened unans: ...` from the mock's `!reopened`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `loop.bat` the 25-round cap (`!loop` calls a tool until a request says
@@ -76,7 +79,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (macOS: the terminal needs Screen Recording permission; 86Box ignores SIGTERM, quit it with
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
-  `CLAWDOS -m msg` (send) and `-i text` (pre-fill the input box). DOS command lines max out at 127 chars.
+  `CLAWDOS -m msg` (send), `-i text` (pre-fill the input box), `-c NAME` (reopen a chat) and `-k KEYS` (typed ahead:
+  `~e` Enter, `~x` Esc, `~d` Del, `~u`/`~n` Up/Down, `~q` F10; 15 at most). DOS command lines max out at 127 chars.
 - CLAWDOS.EXE (src/clawdos) is the small launcher the user types: it runs HARNESS.EXE with `-launched`, and when a
   `run` tool call with `full_memory` makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
   memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The
@@ -93,6 +97,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   lib/history.c buffers; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
   C:\CLAWDOS\CHATS\*.JSN in the API's own message format, notes and per-round usage in C:\CLAWDOS\CLAWDOS.LOG.
+  F6 or `/chats` (src/harness/chatui.cpp) lists them; reopening one (also `-c NAME`) goes through
+  Chat::openConversation and lib/chatfile.c, which reads the file a piece at a time (never whole: a chat can be
+  200 KB) to draw its tail and to find what it ends with (docs/API.md, "Reopening a chat").
   `python3 tunnel/mockapi.py` fakes the API offline on plain HTTP (point CLAWDOS at it: `CLAWDOS 10.0.2.2:18023`); in a chat,
   `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, `!overload`, `!threadlost`, ...); `!tool NAME k=v` calls one
   DOS tool, `!tooltour` all; tests `python3 tunnel/test_mockapi.py`. Tool schemas: image/clawdos/TOOLS.JSN (the one source;

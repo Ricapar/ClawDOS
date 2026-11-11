@@ -298,6 +298,17 @@ void scr_fill(int row, int col, int n, unsigned char ch, unsigned char attr)
     BUSY_END();
 }
 
+void scr_getn(int row, int col, unsigned short *cells, int n)
+{
+    const unsigned short __far *v = (const unsigned short __far *)MK_FP(VRAM_SEG, 0);
+    unsigned off = cell_off(row, col);
+
+    while (n-- > 0) {
+        *cells++ = v[off];
+        off = WRAP(off + 1);
+    }
+}
+
 void scr_clear(unsigned char attr)
 {
     int r;

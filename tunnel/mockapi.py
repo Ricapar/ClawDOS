@@ -841,6 +841,9 @@ class Handler(BaseHTTPRequestHandler):
             text = text_of(last['content'])
             if results and not text:
                 text = '(tool result)'
+            if not text.startswith('!'):      # a reopened chat's text joins a message nothing answered
+                said = text.rsplit('\n\n', 1)[-1]
+                text = said if said.startswith('!') else text
             command = text.split()[0].lower() if text.startswith('!') else None
             if command == '!tooltour':
                 self.check_tools()
@@ -848,6 +851,7 @@ class Handler(BaseHTTPRequestHandler):
         choice = req.get('tool_choice')
         chat.no_tools = isinstance(choice, dict) and choice.get('type') == 'none'
         chat.system = text_of(req.get('system') or '')
+        chat.messages = messages
         thinking = req.get('thinking') or {}
         chat.progress = thinking.get('display') == 'updates'
         self.binding = BETA_BINDING in betas_of({k.lower(): v for k, v in self.headers.items()})
