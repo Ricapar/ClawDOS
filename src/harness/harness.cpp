@@ -140,7 +140,7 @@ static int typedAhead;                /* -k: a test types for us (the chat list 
 
 /* RELAUNCH_STATE: what a relaunched CLAWDOS needs to carry the turn on. */
 struct Resume {
-    char chat[40], tool[64], provider[16], model[48], host[80], effort[8];
+    char chat[40], tool[64], provider[16], model[48], host[80], effort[8], turnEffort[8];
     int round, merge, mergeAtStart, assistant, safe, quick, quit, turns;
     long tokens;
     HistTurn turn;                    /* where the turn began in the chat file */
@@ -1408,7 +1408,7 @@ static int writeState(void)
     fprintf(f, "safe %d\nquick %d\nquit %d\nhost %s\nprovider %s\nmodel %s\neffort %s\nticks %lu\n",
             tools_safe(), quickFlag, quitAfterReply, host,
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
-    fprintf(f, "tokens %ld\nturns %d\n", chat.contextTokens(), chat.turns());
+    fprintf(f, "turneffort %s\ntokens %ld\nturns %d\n", chat.turnEffort(), chat.contextTokens(), chat.turns());
     if ((fx = chat.fixed()) != NULL)  /* not the provider's: /model may have moved on */
         fprintf(f, "fixed %d %d %d %d %d\n", fx->progress, fx->dropThinking, fx->cache, fx->ttl1h, fx->threads);
     if ((th = chat.thread()) != NULL) /* continued if the run is back within its lifetime */
@@ -1440,6 +1440,7 @@ static int readState(struct Resume *r)
         v[strcspn(v, "\r\n")] = 0;
         STATE_STR("chat", chat) STATE_STR("tool", tool) STATE_STR("provider", provider)
         STATE_STR("model", model) STATE_STR("host", host) STATE_STR("effort", effort)
+        STATE_STR("turneffort", turnEffort)
         STATE_INT("round", round) STATE_INT("merge", merge) STATE_INT("mergeat", mergeAtStart)
         STATE_INT("assistant", assistant) STATE_INT("safe", safe) STATE_INT("quick", quick)
         STATE_INT("quit", quit) STATE_INT("turns", turns)
@@ -1579,7 +1580,7 @@ static void resumeTurn(void)
     sprintf(line, "relaunch: program %s s, CLAWDOS away %s s", a, b);
     uiLog(line);
     stopRequested = 0;
-    rc = chat.continueTurn(resumeState.round, resumeState.tool, status, &t);
+    rc = chat.continueTurn(resumeState.round, resumeState.tool, status, &t, resumeState.turnEffort);
     if (rc == 2)
         relaunchExit();
     if (rc == 1)

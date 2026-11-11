@@ -23,6 +23,11 @@ void api_fixed_from(ApiFixed *f, const Provider *p)
     f->threads = p->threads != 0;
 }
 
+void api_req_settings(ApiReq *r, const Provider *p)
+{
+    r->p = *p;
+}
+
 /* A cache_control value; both markers of a request use this, so their ttl agrees. */
 static const char *cacheMarker(int ttl1h)
 {
@@ -218,10 +223,10 @@ int api_prefix_cache(const char *path, int *cache, int *ttl1h)
 
 /* The fields before the prefix, each followed by a comma. thinking and the
    top-level cache_control come from the conversation's fixed settings, the
-   rest from the provider as it is now. */
+   rest from the provider's settings the request took (api_req_settings). */
 static int fields(Sink *s, const ApiReq *r)
 {
-    const Provider *p = r->p;
+    const Provider *p = &r->p;
     const ApiFixed *f = r->fixed;
     char num[16];
 

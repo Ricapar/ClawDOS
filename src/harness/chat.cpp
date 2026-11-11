@@ -37,7 +37,7 @@
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), err(""), reasked(0), streamRc(0), textShown(0),
                reqStart(0), firstText(0), upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE), repairCut(0)
 {
-    addr[0] = path[0] = prePath[0] = desc[0] = 0;
+    path[0] = prePath[0] = desc[0] = 0;
     th.id[0] = 0;
     preLen = -1;
     ctxTokens = 0;
@@ -556,7 +556,7 @@ void Chat::logRound(int round)
     unsigned long now = TICKS_NOW;
     static const char *const kinds[] = { "none", "create", "cont" };
     sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u th=%s",
-            prov->id, as.model[0] ? as.model : prov->model, round,
+            req.p.id, as.model[0] ? as.model : req.p.model, round,
             textShown ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
             upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?",
             as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen, kinds[thSent]);
@@ -565,10 +565,10 @@ void Chat::logRound(int round)
 
 /* --- message threads (docs/API.md, "Threads") --------------------------------------- */
 
-/* The fixed fields of a request sent now (api_fingerprint). */
+/* The fixed fields of the turn's requests (api_fingerprint). */
 unsigned long Chat::fingerprint(int noTools)
 {
-    return api_fingerprint(prov, noTools);
+    return api_fingerprint(&req.p, noTools);
 }
 
 void Chat::setThread(const ApiThread *t)
@@ -629,7 +629,7 @@ int8_t Chat::stream(void)
                    like an HTTP 529. */
                 if (!textShown && (!strcmp(as.errorType, "overloaded_error") || !strcmp(as.errorType, "api_error")))
                     return 3;
-                warn(as.error);
+                warn(as.error[0] ? as.error : "Cannot write the conversation file.");   /* a failed history write sets none */
                 return -1;
             }
             continue;
@@ -650,7 +650,7 @@ int8_t Chat::stream(void)
 
 int8_t Chat::request(int noTools)
 {
-    ApiReq r;
+    ApiReq &r = req;
     HttpHead h;
     char msg[160], code[32];
     int attempt = 0, threadErrors = 0;
@@ -678,7 +678,6 @@ int8_t Chat::request(int noTools)
         warn(msg);
         return -1;
     }
-    r.p = prov;
     r.fixed = &fix;
     r.prefixPath = prePath;
     r.prefixLen = preLen;
@@ -688,8 +687,10 @@ int8_t Chat::request(int noTools)
     r.histFrom = api_thread_from(&th);
 
     /* Every attempt below sends the same request (a resend after a lost link
-       or a 529 continues the same thread), until a thread error replays it
-       or a key changed a fixed field while it waited (then a create). */
+       or a 529 continues the same thread), until a thread error replays it.
+       Its settings are the turn's copy (api_req_settings), so a key handled
+       while it is written or while it waits (F5) changes none of its bytes. */
+    sentFp = fingerprint(noTools);
     for (;;) {
         unsigned long length = api_length(&r);
         int8_t rc;
@@ -706,13 +707,7 @@ int8_t Chat::request(int noTools)
             fresh = 1;
         }
         reqStart = TICKS_NOW;
-        sentFp = fingerprint(noTools);
-        if (r.thread == API_TH_CONTINUE && sentFp != th.fp) {
-            th.id[0] = 0;                 /* F5 or /model while it waited to resend: not that thread */
-            r.thread = API_TH_CREATE;
-            length = api_length(&r);
-        }
-        rc = http.sendHead(prov, &fix, length);
+        rc = http.sendHead(&r.p, &fix, length);
         if (rc == 0 && (body = api_body(http.sink(), &r)) != 0)
             rc = -1;
         if (body == -1) {                 /* the prefix or history unreadable: no use retrying */
@@ -798,6 +793,7 @@ int8_t Chat::turn(const char *text)
 
     convo_turn_begin(&convo);
     reasked = 0;
+    api_req_settings(&req, prov);     /* F5 from now on applies from the next message */
     if (convo_user_text(&convo, text)) {
         warn("Cannot write the conversation file.");
         convo_rollback_turn(&convo);
@@ -851,11 +847,14 @@ int8_t Chat::finishTool(int round, const char *toolId, int status, ToolCtx *t)
     return -2;
 }
 
-int8_t Chat::continueTurn(int round, const char *toolId, int status, ToolCtx *t)
+int8_t Chat::continueTurn(int round, const char *toolId, int status, ToolCtx *t, const char *effort)
 {
     int8_t rc;
 
     reasked = 0;
+    api_req_settings(&req, prov);
+    if (effort && effort[0])
+        strcpy(req.p.effort, effort);
     rc = finishTool(round, toolId, status, t);
     if (rc == -2)
         rc = rounds(round + 1);

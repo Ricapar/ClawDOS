@@ -63,8 +63,12 @@ class Chat {
     const char *pendingToolId(void) { return pendTool; }
     const Convo *state(void) { return &convo; }
     /* Carry the turn on with the launcher's result for the pending call: the
-       tool_result message, then the remaining rounds. Returns as turn(). */
-    int8_t continueTurn(int round, const char *toolId, int status, ToolCtx *t);
+       tool_result message, then the remaining rounds, with the provider's
+       settings as they are now, except the effort the turn began with
+       (effort; "" for the provider's: an F5 during the turn applies from
+       the next message). Returns as turn(). */
+    int8_t continueTurn(int round, const char *toolId, int status, ToolCtx *t, const char *effort = "");
+    const char *turnEffort(void) { return req.p.effort; }   /* for the relaunch state */
 
     /* The conversation's thinking and cache settings (apireq.h): NULL until
        its first request chose them; setFixed gives a resumed conversation
@@ -101,7 +105,7 @@ class Chat {
     Sse sse;
     ApiStream as;                          /* its buffers are lib/runmem.h's, lent to run programs */
     void useBuffers(void);
-    char addr[48];
+    ApiReq req;                            /* the turn's request: the provider's settings as the turn began */
     char path[40];
     char prePath[40];                      /* the conversation's prefix file (apireq.h) */
     long preLen;                           /* its size; -1 until a request looks */
@@ -131,7 +135,7 @@ class Chat {
     int8_t toolResult(const char *toolId, const char *text, int isError, const char *note, const char *image = NULL);
     void   dropTurn(void);                 /* the whole turn rolled back, its count with it */
     int8_t connect(void);
-    int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, 2 ask again, -1 failed */
+    int8_t request(int noTools);           /* 0 ok (as filled), 1 stopped, -1 failed */
     int8_t stream(void);                   /* as request, or 3: an overload before any text, retry it */
     int    waitRead(char *buf, unsigned max);     /* >0, 0 end, -1 lost, -2 timeout, -3 Esc */
     int8_t waitHead(HttpHead *h);                 /* 0, -1, -2, -3 malformed, 1 Esc */

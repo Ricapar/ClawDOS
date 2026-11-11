@@ -75,7 +75,11 @@ int  api_prefix_cache(const char *path, int *cache, int *ttl1h);
 enum { API_TH_NONE, API_TH_CREATE, API_TH_CONTINUE };
 
 typedef struct ApiReq {
-    const Provider *p;
+    /* The provider's settings as api_req_settings took them: every byte of a
+       request (its length, body, head and thread fingerprint) comes from this
+       copy, never from the provider itself, which F5 changes at any key press,
+       including those handled while the body is being written. */
+    Provider p;
     const ApiFixed *fixed;       /* the conversation's thinking and cache settings */
     const char *prefixPath;      /* the conversation's prefix file */
     long prefixLen;              /* its size */
@@ -84,6 +88,11 @@ typedef struct ApiReq {
     const char *prevId;          /* _CONTINUE: the response it continues from */
     long histFrom;               /* _CONTINUE: where the messages since that response start in the history */
 } ApiReq;
+
+/* Take the provider's settings for the requests to come (the harness does so
+   when a turn begins, so a change made during the turn applies from the next
+   message). */
+void api_req_settings(ApiReq *r, const Provider *p);
 
 /* A message thread the next request may continue (docs/API.md, "Threads"):
    the response it continues from, where that response ended in the history

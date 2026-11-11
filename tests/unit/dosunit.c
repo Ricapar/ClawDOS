@@ -843,10 +843,10 @@ static void testApiReq(void)
         "\"system\":[{\"type\":\"text\",\"text\":\"Hi Claude.\\nMem:\\n(none) {x} {notaplaceholder}\","
         "\"cache_control\":{\"type\":\"ephemeral\"}}],"
         "\"tools\":[{\"name\":\"t\"}],\"messages\":[";
-    Provider *p = (Provider *)malloc(sizeof(Provider));
+    Provider *p;
     char *big = (char *)malloc(3001);
     ApiPrefix x;
-    ApiReq r;
+    ApiReq *rq = (ApiReq *)malloc(sizeof(ApiReq));    /* p is its settings: the copy a request reads */
     ApiFixed fx;
     Sink buf;
     long len;
@@ -872,26 +872,27 @@ static void testApiReq(void)
     CHECK("prefix file missing tools", api_prefix_file("C:\\PTEST2.PRE", &x) == -1
           && fs_size("C:\\PTEST2.PRE") == -1 && fs_size("C:\\PTEST2.PR$") == -1);
 
+    p = &rq->p;
     memset(p, 0, sizeof *p);
     strcpy(p->host, "api.anthropic.com"); strcpy(p->path, "/v1/messages"); strcpy(p->auth, "x-api-key");
     strcpy(p->key, "sk-ant-abc"); strcpy(p->model, "claude-opus-5-5"); strcpy(p->effort, "low"); p->cache = 1;
     p->maxTokens = 64000L;
     api_fixed_from(&fx, p);               /* progress, dropthinking off; cache on, 5 minutes */
-    r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
-    r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
+    rq->fixed = &fx; rq->prefixPath = "C:\\PTEST.PRE"; rq->prefixLen = len; rq->noTools = 0;
+    rq->thread = API_TH_NONE; rq->prevId = ""; rq->histFrom = 0;
 
     remove("C:\\HISTTEST.JSN");
     hist_open("C:\\HISTTEST.JSN");
     sink_buffer(&buf, body, sizeof body);
-    CHECK("req empty history", api_body(&buf, &r) == 0 && !strncmp(body, want, sizeof want - 1)
+    CHECK("req empty history", api_body(&buf, rq) == 0 && !strncmp(body, want, sizeof want - 1)
           && !strcmp(body + strlen(body) - 2, "]}") && strlen(body) == sizeof want - 1 + 2);
-    CHECK("req length, empty history", lengthMatches(&r) && api_length(&r) == strlen(body));
+    CHECK("req length, empty history", lengthMatches(rq) && api_length(rq) == strlen(body));
 
     hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
     hist_message_done();
     sink_buffer(&buf, body, sizeof body);
-    CHECK("req write ok", api_body(&buf, &r) == 0);
-    CHECK("req length matches", api_length(&r) == strlen(body));
+    CHECK("req write ok", api_body(&buf, rq) == 0);
+    CHECK("req length matches", api_length(rq) == strlen(body));
     CHECK("req prefix", !strncmp(body, want, sizeof want - 1));
     CHECK_STR("req tail", body + strlen(body) - 31, "{\"role\":\"user\",\"content\":\"a\"}]}");
 
@@ -905,32 +906,32 @@ static void testApiReq(void)
         hist_puts(i & 1 ? "{\"role\":\"assistant\",\"content\":\"ok\"}" : "{\"role\":\"user\",\"content\":\"more\"}");
         hist_message_done();
     }
-    CHECK("req length, multi-message history", lengthMatches(&r) && api_length(&r) > 3100);
+    CHECK("req length, multi-message history", lengthMatches(rq) && api_length(rq) > 3100);
 
     p->maxTokens = 128000L;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
-    CHECK("req maxtokens", strstr(body, "\"max_tokens\":128000,\"stream\"") != NULL && lengthMatches(&r));
+    api_body(&buf, rq);
+    CHECK("req maxtokens", strstr(body, "\"max_tokens\":128000,\"stream\"") != NULL && lengthMatches(rq));
     p->effort[0] = 0;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
-    CHECK("req no effort", strstr(body, "output_config") == NULL && lengthMatches(&r));
+    api_body(&buf, rq);
+    CHECK("req no effort", strstr(body, "output_config") == NULL && lengthMatches(rq));
     fx.cache = 0;                         /* the conversation's setting, not the provider's */
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
+    api_body(&buf, rq);
     CHECK("req no top-level cache, prefix as rendered",
           !strncmp(body, "{\"model\":\"claude-opus-5-5\",\"max_tokens\":128000,\"stream\":true,\"tool_choice\"", 72)
-          && strstr(body, wantPrefix) != NULL && lengthMatches(&r));
-    r.noTools = 1;
+          && strstr(body, wantPrefix) != NULL && lengthMatches(rq));
+    rq->noTools = 1;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
-    CHECK("req tool_choice none", strstr(body, "\"tool_choice\":{\"type\":\"none\"}") != NULL && lengthMatches(&r));
-    r.prefixLen = len + 1;
+    api_body(&buf, rq);
+    CHECK("req tool_choice none", strstr(body, "\"tool_choice\":{\"type\":\"none\"}") != NULL && lengthMatches(rq));
+    rq->prefixLen = len + 1;
     sink_buffer(&buf, body, sizeof body);
-    CHECK("req prefix file short of its size", api_body(&buf, &r) == -1);
-    r.prefixLen = len; r.prefixPath = "C:\\NOPE.PRE";
+    CHECK("req prefix file short of its size", api_body(&buf, rq) == -1);
+    rq->prefixLen = len; rq->prefixPath = "C:\\NOPE.PRE";
     sink_buffer(&buf, body, sizeof body);
-    CHECK("req missing prefix file", api_body(&buf, &r) == -1);
+    CHECK("req missing prefix file", api_body(&buf, rq) == -1);
 
     sink_buffer(&buf, head, sizeof head);
     api_head(&buf, p, &fx, 123);
@@ -954,7 +955,7 @@ static void testApiReq(void)
     hist_close();
     remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
     free(big);
-    free(p);
+    free(rq);
 }
 
 /* Message threads: a create is the whole request plus its thread object; a
@@ -968,15 +969,16 @@ static void testApiThreads(void)
         "\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},"
         "\"thread\":{\"type\":\"continue\",\"previous_message_id\":\"msg_7\"},"
         "\"messages\":[{\"role\":\"user\",\"content\":\"b\"}]}";
-    Provider *p = (Provider *)malloc(sizeof(Provider));
+    Provider *p;
     ApiPrefix x;
     ApiFixed fx;
-    ApiReq r;
+    ApiReq *rq = (ApiReq *)malloc(sizeof(ApiReq));    /* p is its settings: the copy a request reads */
     Sink buf;
     long len, at;
 
     writeFile("C:\\PTEST.TXT", "Hi.");
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    p = &rq->p;
     memset(p, 0, sizeof *p);
     strcpy(p->host, "h"); strcpy(p->path, "/v1/messages"); strcpy(p->model, "m"); p->maxTokens = 100;
     p->cache = 1;
@@ -987,34 +989,34 @@ static void testApiThreads(void)
     x.skills = "";
     x.cache = fx.cache; x.ttl1h = fx.ttl1h;
     len = api_prefix_file("C:\\PTEST.PRE", &x);
-    r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
-    r.thread = API_TH_CREATE; r.prevId = ""; r.histFrom = 0;
+    rq->fixed = &fx; rq->prefixPath = "C:\\PTEST.PRE"; rq->prefixLen = len; rq->noTools = 0;
+    rq->thread = API_TH_CREATE; rq->prevId = ""; rq->histFrom = 0;
 
     remove("C:\\HISTTEST.JSN");
     hist_open("C:\\HISTTEST.JSN");
     hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
     hist_message_done();
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
+    api_body(&buf, rq);
     CHECK("threads: create has the thread object, the prefix and every message",
           strstr(body, "\"disable_parallel_tool_use\":true},\"thread\":{\"type\":\"create\"},\"system\":") != NULL
-          && strstr(body, "\"messages\":[{\"role\":\"user\",\"content\":\"a\"}]}") != NULL && lengthMatches(&r));
+          && strstr(body, "\"messages\":[{\"role\":\"user\",\"content\":\"a\"}]}") != NULL && lengthMatches(rq));
     hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}");
     hist_message_done();
     at = hist_size();
     hist_low_reset();
     hist_puts("{\"role\":\"user\",\"content\":\"b\"}");
     hist_message_done();
-    r.thread = API_TH_CONTINUE; r.prevId = "msg_7"; r.histFrom = at + 3;
+    rq->thread = API_TH_CONTINUE; rq->prevId = "msg_7"; rq->histFrom = at + 3;
     sink_buffer(&buf, body, sizeof body);
-    CHECK("threads: continue written", api_body(&buf, &r) == 0);
+    CHECK("threads: continue written", api_body(&buf, rq) == 0);
     CHECK_STR("threads: continue sends no prefix and only the new message", body, wantCont);
-    CHECK("threads: continue length", lengthMatches(&r) && api_length(&r) == strlen(wantCont));
+    CHECK("threads: continue length", lengthMatches(rq) && api_length(rq) == strlen(wantCont));
     CHECK("threads: nothing cut since", hist_low() == at);
-    r.thread = API_TH_NONE;
+    rq->thread = API_TH_NONE;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
-    CHECK("threads: none has no thread object", strstr(body, "thread") == NULL && lengthMatches(&r));
+    api_body(&buf, rq);
+    CHECK("threads: none has no thread object", strstr(body, "thread") == NULL && lengthMatches(rq));
 
     sink_buffer(&buf, head, sizeof head);
     api_head(&buf, p, &fx, 1);
@@ -1060,7 +1062,7 @@ static void testApiThreads(void)
 
     hist_close();
     remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
-    free(p);
+    free(rq);
 }
 
 /* A history message for the decision tests. */
@@ -1196,6 +1198,68 @@ static void testThreadDecision(void)
     free(p);
 }
 
+/* F5 while a request is written: the sink below is the socket, whose flushes
+   run the idle callback and so handle keys. The provider it changes is the
+   live one; the request was built from api_req_settings' copy, so the body
+   still matches the length and the fingerprint counted before it began. */
+static Provider *f5Live;
+static int f5Put(Sink *s, const char *p, unsigned n)
+{
+    char *buf = (char *)s->ctx;
+    unsigned have = strlen(buf);
+    if (have + n < 400) {
+        memcpy(buf + have, p, n);
+        buf[have + n] = 0;
+    }
+    if (s->count > 20)                    /* past "model", before "output_config" */
+        strcpy(f5Live->effort, "medium");
+    return 0;
+}
+
+static void testApiReqSnapshot(void)
+{
+    static char body[400];
+    Provider *live = (Provider *)malloc(sizeof(Provider));
+    ApiReq *rq = (ApiReq *)malloc(sizeof(ApiReq));
+    ApiPrefix x;
+    ApiFixed fx;
+    Sink s;
+    unsigned long length, fp;
+
+    writeFile("C:\\PTEST.TXT", "Hi.");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    memset(live, 0, sizeof *live);
+    strcpy(live->id, "anthropic"); strcpy(live->host, "h"); strcpy(live->path, "/v1/messages");
+    strcpy(live->model, "m"); strcpy(live->effort, "low"); live->maxTokens = 100; live->threads = 1;
+    api_fixed_from(&fx, live);
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = ""; x.skills = "";
+    x.cache = 0; x.ttl1h = 0;
+    api_req_settings(rq, live);
+    rq->fixed = &fx; rq->prefixPath = "C:\\PTEST.PRE"; rq->prefixLen = api_prefix_file("C:\\PTEST.PRE", &x);
+    rq->noTools = 0; rq->thread = API_TH_CREATE; rq->prevId = ""; rq->histFrom = 0;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts(U1);
+    hist_message_done();
+    length = api_length(rq);
+    fp = api_fingerprint(&rq->p, 0);
+    f5Live = live;
+    body[0] = 0;
+    s.put = f5Put; s.ctx = body; s.count = 0;
+    CHECK("F5 mid-body: written", api_body(&s, rq) == 0 && !strcmp(live->effort, "medium"));
+    CHECK("F5 mid-body: the length sent still holds", s.count == length && strlen(body) == length);
+    CHECK("F5 mid-body: the effort counted is the one sent", strstr(body, "\"effort\":\"low\"") != NULL
+          && strstr(body, "medium") == NULL);
+    CHECK("F5 mid-body: the fingerprint is the request's", api_fingerprint(&rq->p, 0) == fp
+          && api_fingerprint(live, 0) != fp);
+    api_req_settings(rq, live);
+    CHECK("F5: the next message takes it", api_length(rq) == length + 3 && api_fingerprint(&rq->p, 0) != fp);
+    hist_close();
+    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
+    free(rq);
+    free(live);
+}
+
 /* The thinking object, the cache markers and the beta header for each of the
    fixed settings, with their lengths counted right. */
 static void testApiFixed(void)
@@ -1215,10 +1279,10 @@ static void testApiFixed(void)
         "anthropic-beta: thinking-display-updates-2026-08-18,thinking-binding-controls-2026-08-01\r\n"
     };
     static const char hour[] = "{\"type\":\"ephemeral\",\"ttl\":\"1h\"}";
-    Provider *p = (Provider *)malloc(sizeof(Provider));
+    Provider *p;
     ApiPrefix x;
     ApiFixed fx;
-    ApiReq r;
+    ApiReq *rq = (ApiReq *)malloc(sizeof(ApiReq));    /* p is its settings: the copy a request reads */
     Sink buf;
     long len;
     int i;
@@ -1226,6 +1290,7 @@ static void testApiFixed(void)
 
     writeFile("C:\\PTEST.TXT", "Hi.");
     writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    p = &rq->p;
     memset(p, 0, sizeof *p);
     strcpy(p->host, "h"); strcpy(p->path, "/v1/messages"); strcpy(p->model, "m"); p->maxTokens = 100;
     p->cache = 1;
@@ -1242,15 +1307,15 @@ static void testApiFixed(void)
         x.skills = "";
         x.cache = fx.cache; x.ttl1h = fx.ttl1h;
         len = api_prefix_file("C:\\PTEST.PRE", &x);
-        r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
-        r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
+        rq->fixed = &fx; rq->prefixPath = "C:\\PTEST.PRE"; rq->prefixLen = len; rq->noTools = 0;
+        rq->thread = API_TH_NONE; rq->prevId = ""; rq->histFrom = 0;
         sink_buffer(&buf, body, sizeof body);
-        api_body(&buf, &r);
+        api_body(&buf, rq);
         sprintf(name, "fixed %d: body", i);
         CHECK(name, i ? strstr(body, "\"stream\":true,\"thinking\"") != NULL && strstr(body, thinking[i]) != NULL
                       : strstr(body, "thinking") == NULL);
         sprintf(name, "fixed %d: length", i);
-        CHECK(name, lengthMatches(&r));
+        CHECK(name, lengthMatches(rq));
         sink_buffer(&buf, head, sizeof head);
         api_head(&buf, p, &fx, 1);
         sprintf(name, "fixed %d: header", i);
@@ -1279,18 +1344,18 @@ static void testApiFixed(void)
     api_fixed_from(&fx, p);
     x.cache = fx.cache; x.ttl1h = fx.ttl1h;
     len = api_prefix_file("C:\\PTEST.PRE", &x);
-    r.prefixLen = len;
+    rq->prefixLen = len;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
+    api_body(&buf, rq);
     sprintf(name, "\"cache_control\":%s,\"tool_choice\"", hour);
     CHECK("fixed ttl 1h: top-level marker", strstr(body, name) != NULL);
     sprintf(name, "\"text\":\"Hi.\",\"cache_control\":%s}]", hour);
     CHECK("fixed ttl 1h: system marker", strstr(body, name) != NULL);
-    CHECK("fixed ttl 1h: length", lengthMatches(&r));
+    CHECK("fixed ttl 1h: length", lengthMatches(rq));
     p->cacheTtl1h = 0;
     p->cache = 0;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
+    api_body(&buf, rq);
     CHECK("fixed: a provider change leaves the conversation's markers", strstr(body, name) != NULL
           && strstr(body, ",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"},\"tool_choice\"") != NULL);
     api_fixed_from(&fx, p);
@@ -1299,17 +1364,17 @@ static void testApiFixed(void)
     api_fixed_from(&fx, p);
     x.cache = fx.cache; x.ttl1h = fx.ttl1h;
     len = api_prefix_file("C:\\PTEST.PRE", &x);
-    r.prefixLen = len;
+    rq->prefixLen = len;
     sink_buffer(&buf, body, sizeof body);
-    api_body(&buf, &r);
+    api_body(&buf, rq);
     CHECK("fixed ttl 5m: both markers plain",
           strstr(body, "\"cache_control\":{\"type\":\"ephemeral\"},\"tool_choice\"") != NULL
           && strstr(body, "\"text\":\"Hi.\",\"cache_control\":{\"type\":\"ephemeral\"}}]") != NULL
-          && strstr(body, "ttl") == NULL && lengthMatches(&r));
+          && strstr(body, "ttl") == NULL && lengthMatches(rq));
 
     hist_close();
     remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
-    free(p);
+    free(rq);
 }
 
 /* --- api stream --------------------------------------------------------------- */
@@ -2515,6 +2580,7 @@ int main(void)
     testPromptSkills();
     testSkillList();
     testApiFixed();
+    testApiReqSnapshot();
     testApiThreads();
     testThreadDecision();
     testPromptAcrossReads();
