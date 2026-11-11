@@ -1,0 +1,62 @@
+TIMING: clocks, cycle costs, refresh, CGA wait states, measuring
+Status: figures from the 8088 MPH / Area 5150 write-ups; frame and line
+counts match what RASTER.ASM sees on this machine.
+
+ONE CRYSTAL (14.318 MHz) DRIVES EVERYTHING
+  CPU  = /3  = 4.77 MHz        1 cycle  = 3 "hdots" (640-mode pixels)
+  PIT  = /12 = 1.193 MHz       1 tick   = 4 CPU cycles
+  CGA  = hdot clock            1 scanline = 912 hdots = 304 cycles
+  Frame = 262 scanlines = 79648 cycles = 19912 PIT ticks (59.92 Hz)
+  So a cycle count IS a beam position, and the timer can be a raster
+  counter. Of each 304-cycle line, 640 hdots (213 cycles) are the visible
+  area in 320/640 modes; the rest is border and horizontal blank.
+  Visible: 200 lines; the other 62 are border, vertical blank and sync.
+
+CPU COSTS (8088, 8-bit bus)
+- Every byte of code or data costs 4 cycles on the bus. Published cycle
+  counts are best cases with a full prefetch queue; on the 8088 the real
+  cost is usually "4 x bytes touched", so count bytes, not just cycles.
+- Short instructions win: one-byte LODSB/STOSB/MOVSB/XLAT/INC r16/
+  PUSH/POP, register moves. Avoid MUL/DIV in loops (MUL 69-154 cycles);
+  use tables. A segment prefix is another byte.
+- The 4-byte prefetch queue fills while slow instructions (MUL, shifts by
+  CL) run, so the next few bytes come free; after a jump it is empty.
+- Taken jumps cost about 16 cycles plus the refill: unroll inner loops.
+
+DRAM REFRESH (steals cycles at random points)
+- PIT channel 1 triggers DMA refresh every 18 ticks (72 cycles); each
+  steals about 4 cycles (~5%). It is the main source of jitter.
+- Reset its phase at a known point:
+      mov al,0x54   ; counter 1, LSB only, mode 2
+      out 0x43,al
+      mov al,18
+      out 0x41,al
+- Make your loop a multiple of 72 cycles (the MOD player used 288), or
+  set PIT 1 to 19 (76 cycles: exactly 4 refreshes per 304-cycle scanline,
+  always in the same places), as the Kefrens bars did. Restore 18 at exit.
+- Never stop refresh unless your code reads 512 consecutive bytes at
+  least every 8 ms (RAM forgets).
+
+CGA MEMORY
+- Each CPU access to CGA RAM (B800h) waits 3-8 cycles, 5.8 on average,
+  in every mode, even in retrace. Writes run at about 170 KB/s: clearing
+  the full 16 KB takes about 0.1 s. Design for small changes per frame.
+- Free work: an instruction between two VRAM writes costs almost nothing
+  (STOSW NOP NOP costs the same as STOSW NOP). Interleave computing and
+  writing; avoid long REP STOSW/MOVSW runs into VRAM (near-worst waits).
+- B800:0000-3FFF repeats at BC00: wrap-around without checks.
+
+BUDGET PER 60 HZ FRAME: 79648 cycles minus refresh (~5%) = ~75000.
+  At ~8 cycles per CGA write that is under 10000 bytes per frame even
+  doing nothing else. A full 320x200 screen is 16000 bytes: 30 Hz at best.
+
+MEASURING (do it; don't guess)
+- Read PIT 0 (BIOS runs it at count 0 = 65536, mode 3, which counts down
+  by 2 each tick): latch with  mov al,0 / out 0x43,al  then  in al,0x40
+  twice (low, high). Easier: reprogram PIT 2 (speaker gate off) as a free
+  counter:  mov al,0xB4 / out 0x43,al / xor al,al / out 0x42,al /
+  out 0x42,al ; then port 61h bit 0 = 1 starts it (keep bit 1 = 0: quiet).
+  Latch: mov al,0x80 / out 0x43,al / in al,0x42 / mov ah,al / in al,0x42 /
+  xchg al,ah. It counts DOWN, 1 tick = 4 cycles.
+- Count frames with 3DAh bit 3 and print ticks per frame at exit; a frame
+  that took over 19912 ticks dropped a frame.

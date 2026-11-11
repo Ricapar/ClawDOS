@@ -1,0 +1,55 @@
+CRTC: scrolling, page flips, many short frames, per-line effects
+Status: from the 8088 MPH / Area 5150 write-ups; not yet tested on this
+machine. The 6845 is unforgiving: test every register change.
+
+START ADDRESS (R12 high, R13 low; units are WORDS)
+  mov dx,0x3d4
+  mov al,12 / mov ah,high / out dx,ax
+  mov al,13 / mov ah,low  / out dx,ax
+- Latched once per CRTC frame: write it any time, it takes effect at the
+  next frame. Page flip or scroll needs no vsync wait, but don't draw
+  into the page that is still showing until the flip has happened.
+- Text: hardware scrolling by one character (2 bytes) or one row
+  (80 words). In 200-line graphics the CRTC works in 100 rows of 2
+  lines, so vertical steps are 2 scanlines (80 words = 2 lines).
+- Horizontal scrolling: 1 word = 1 char (text) or 8 pixels (320x200).
+- A smaller window (R1/R6) frees VRAM for a back buffer: 112x140 fits two
+  pages in 16 KB (the 8088 MPH vectorballs).
+
+SEVERAL CRTC FRAMES PER SCREEN (the key RGB trick)
+  The 6845 has at most 128 rows; the monitor wants 262 lines. Instead of
+  one big frame, run many small ones in a row, each re-reading the start
+  address, so each strip of the screen can show ANY part of VRAM:
+  - Set R4 (vertical total) small, e.g. 0 = 1 row (with R9 = 1: 2
+    scanlines), and R7 (vsync row) above R4 so these mini-frames never
+    sync. At the end of the screen restore a frame that does reach R7.
+  - Write the next start address during each mini-frame: it is used for
+    the next. 2-line steps per strip; 1-line frames misbehave.
+  - Result: per-strip scrolling, stretching, wobble, repeating lines,
+    mirrors, drips, twisters, parallax: all with ZERO VRAM writes, so no
+    snow even in 80-column text and almost no bandwidth.
+  - Timing: each change must land in the right 2-line window: drive it
+    from polling (RASTER.TXT 1) or a cycle-counted loop.
+  - Area 5150 got a new start address on every single scanline by
+    putting two logical rows side by side on one scanline (the dummy one
+    hidden in the blank), reprogramming the CRTC 8 times per line,
+    cycle-counted: expert level, start with 2-line strips.
+
+HAZARDS
+- The 6845 compares counters with ==: set R0, R4 or R7 below a counter
+  that has already passed and it runs on to wrap: rolling or tearing
+  picture. Change totals only at a known beam position.
+- Rewriting R7 mid-frame can give a "phantom vsync": a 16-line black bar
+  for one frame. Change R7 while the row counter is far from both values.
+- Some IBM CGAs have a Hitachi HD6845 instead of a Motorola MC6845; it
+  behaves differently at the edges (hsync width 0, phantom vsync).
+- Keep each monitor frame at 262 lines in total, or the 5153 rolls.
+- Never set R0 (horizontal total) far from 0x38/0x71 for long: the 5153's
+  horizontal sync can be stressed by wildly wrong rates. Test briefly.
+
+PER-STRIP RECIPE (sine wobble of a 320x200 picture, 2-line strips)
+  Picture wider than the screen (R1 smaller than the stored line, set
+  R13 offsets accordingly). Per strip: wait for the strip's start (poll
+  3DAh bit0 edges, counting lines), write R12/R13 = base + sine[strip +
+  phase] for the NEXT strip. Mini-frames: R4 = 0, R9 = 1, R6 = 1,
+  R7 = 0x7F; last strip: restore R4/R5/R7 so the frame totals 262.

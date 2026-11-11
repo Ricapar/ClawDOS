@@ -1,0 +1,64 @@
+CODE: fast 8088 code for effects
+Status: techniques from the 8088 MPH write-ups (reenigne, Scali); the
+TINYASM syntax notes are tested.
+
+UNROLL, ONE COPY PER OBJECT
+  A loop costs a taken jump (~16 cycles + queue refill) per pass. Unroll
+  inner loops completely: the 8088 MPH starfield is 948 copies of the
+  per-star code, the moire 940, the Kefrens 200 copies of a 304-cycle
+  line. Generate the unrolled code at start-up (copy a template N times,
+  patch each copy), not in the source: TINYASM has no macros worth using
+  and assembles slowly.
+
+SELF-MODIFYING IMMEDIATES
+  Put changing values in the instruction stream: mov di,0x9999 with the
+  0x9999 patched (mov [label+1],ax) is faster than mov di,[var].
+  Positions, frequencies, loop counts, segment values. The 8088 already
+  has the next ~4 bytes in its queue: patching the instruction right
+  after the patching one does NOT take effect this time through.
+
+THE STACK AS A DATA POINTER
+  POP r16 is the fastest sequential 2-byte read (1 byte, ~12 cycles).
+  Point SS:SP at a table (CLI first; save and restore SS:SP), then
+  pop ax / pop di / ... Can also apply patches: pop bx / pop word [cs:bx]
+  (address and value from the stack). Interrupts MUST be off: an IRQ
+  would push onto your data.
+
+TABLES, NOT MATHS
+- No MUL/DIV in loops. Sine, multiplication, colour ramps, screen-row
+  addresses (y*80 + bank): tables built once at start-up.
+- XLAT (AL = [BX+AL], 1 byte) for byte maps: colour fades, palette shifts.
+- Lay tables "sideways": the index you change least in the HIGH byte, so
+  mov bh,n picks the table and BL indexes within it, no shifts.
+- 256-byte aligned tables wrap for free with 8-bit registers.
+
+STRING INSTRUCTIONS
+  LODSB/STOSB/MOVSB/MOVSW are 1 byte each: the cheapest memory ops. Into
+  CGA RAM avoid long REP runs (near-worst wait states); interleave work.
+  ES = 0xB800 for STOS/MOVS destinations; DS = your data.
+
+COMPILED SPRITES (Scali)
+  Turn each sprite into code: per byte, fully opaque -> mov/stos of the
+  value (or movsw from a data stream), fully transparent -> just add to
+  DI, mixed -> and/or with mask. Do all even lines, then all odd lines
+  (320x200 banks), so the bank jumps are small adds. One version per
+  pixel shift (4 per byte in 320x200). Compile the erase too (stosw black,
+  or movsw from a saved background). Draw back to front.
+
+EQUAL-LENGTH PATHS
+  Cycle-counted code must take the same time down every branch: pad the
+  short path with NOPs (count bytes: NOP = 1 byte, 4 cycles fetch). Check
+  with the PIT (TIMING.TXT), not by reasoning alone.
+
+DELTA RENDERING (Scali's polygons)
+  Keep last frame's spans (x0, x1, colour per line); draw only what
+  changed. Cost depends on change, not size; no back buffer needed.
+
+TINYASM NOTES
+- org 0x100; db/dw; labels without dots are safest; [bp+label] and
+  [bx+si+n] addressing; hex as 0x..; strings in double quotes.
+- Conditional jumps are short only (+-127): invert and jmp if far.
+- 8086 only: shifts by 1 or by CL; no push imm, pusha, imul imm, enter.
+- Reserve big buffers past the end of the program (label at the end,
+  then use the memory up to SP); a .COM gets one 64 KB segment: for more,
+  allocate with INT 21h AH=48h (resize first with AH=4Ah).

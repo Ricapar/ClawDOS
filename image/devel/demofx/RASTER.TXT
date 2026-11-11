@@ -1,0 +1,75 @@
+RASTER: finding the beam, raster bars, per-line changes
+Status: polled bars TESTED on this 8088 (C:\TESTS\DEMO\RASTER.ASM: stable,
+identical frames). Timer-as-vsync and latch tricks: from the write-ups.
+
+1. POLLING 3DAh (simple, robust, tested)
+  Find the top of the frame:
+      mov dx,0x3da
+  v1: in al,dx      ; wait for vertical retrace...
+      test al,8
+      jz v1
+  v2: in al,dx      ; ...then for its end (top border now)
+      test al,8
+      jnz v2
+  Per visible line, change a colour in the horizontal blank:
+  de: in al,dx      ; wait while not displaying (border/blank)
+      test al,1
+      jnz de
+  hb: in al,dx      ; wait for this line's horizontal blank
+      test al,1
+      jz hb
+      mov al,ah     ; colour fetched before the wait (LODSB into AH)
+      mov dl,0xd9   ; DX = 3D9h: colour select
+      out dx,al
+      mov dl,0xda
+  Do the work (LODSB etc.) BEFORE waiting, so the OUT lands right after
+  the edge. The polling loop is ~25-30 cycles, so the change jitters by
+  that much (it lands inside the ~90-cycle blank, invisible).
+  CLI for the 200 lines, STI after (a timer tick mid-frame tears a line).
+  Cost: polling burns the whole frame. For CPU-hungry effects use 2.
+
+2. COLOUR REGISTER EFFECTS (3D9h, no VRAM writes, no snow)
+  - 320x200: the low nibble is background + border: full-width bars
+    through every pixel of value 0. Draw a picture in colours 1-3 and run
+    bars behind it ("copper" sky).
+  - Text: border only. 640x200: the foreground colour of every set pixel:
+    a monochrome picture shaded per line.
+  - Bit 5 (palette) and bit 4 (bright) per line: change the 3 foreground
+    colours of a 320x200 picture line by line (6 palettes available).
+  - 3D8h per line can switch modes, but only between 40-col text and the
+    graphics modes reliably (Area 5150), never mid-line.
+
+3. TIMER INTERRUPT AS VSYNC (frees the CPU between frames)
+  PIT 0 and the CGA share a crystal, so count 19912 fires at the same
+  beam position every frame, forever:
+      sync with polling (1), then at the wanted line:
+      mov al,0x34     ; counter 0, lo/hi, mode 2
+      out 0x43,al
+      mov ax,19912
+      out 0x40,al
+      mov al,ah
+      out 0x40,al
+  Hook INT 8 (save the old vector), end the handler with mov al,0x20 /
+  out 0x20,al / iret. The BIOS clock stops ticking right: chain to the
+  old handler about every 3.3 frames (65536/19912), or reload the DOS
+  time at exit. Restore count 0 (65536) and the vector at exit.
+  - Reading PIT 0 then tells where the beam is: (19912 - count) / 76 =
+    lines since the interrupt. Use it to "race the beam": start redrawing
+    an object as soon as the beam has passed it, single-buffered.
+  - Several splits per frame without drift: in mode 2, writing a new
+    count to 40h WITHOUT a new command byte only takes effect at the next
+    reload. Chain intervals that sum to 19912.
+  - HLT just before the interrupt is due, so it isn't delayed by a long
+    instruction: entry is then exact to a few cycles.
+
+4. CYCLE-COUNTED LINES (no polling: the most CPU, the most care)
+  After one sync, run unrolled code that takes exactly 304 cycles per
+  line (count with TIMING.TXT; set PIT 1 to 19 so refresh hits the same
+  spots every line). Any interrupt or stray DMA breaks it: CLI, and the
+  network driver must be idle. Verify with a polled marker: OUT a colour
+  at the start of each line body and see that the edge stays put.
+
+RECIPE: copper bars over a picture (320x200)
+  Picture in colours 1-3 (background value 0). Table of 200+N colours
+  built from ramps (CGA.TXT). Each frame: sync, CLI, per line LODSB/OUT
+  as in 1, STI, move the table pointer, check the key, count frames.

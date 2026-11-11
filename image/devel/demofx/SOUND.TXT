@@ -1,0 +1,38 @@
+SOUND: the PC speaker during effects
+Status: from the 8088 MPH write-ups (Trixter's player, reenigne's MOD
+player); not yet tested on this machine. There is also a play tool.
+
+THE HARDWARE
+  PIT channel 2 (ports 42h data, 43h command) drives the speaker; port 61h
+  bit 0 = gate (counter runs), bit 1 = speaker data enable. Keep the other
+  bits of 61h as you found them (in, or, out).
+  Tone: mov al,0xB6 / out 0x43,al ; counter 2, lo/hi, square wave
+        mov ax,1193182/freq (as a constant) / out 0x42,al / mov al,ah /
+        out 0x42,al / in al,0x61 / or al,3 / out 0x61,al
+  Silence: in al,0x61 / and al,0xFC / out 0x61,al
+
+BACKGROUND MUSIC DURING AN EFFECT (cheap: the 8088 MPH way)
+  One square-wave voice, changed once per frame (60 Hz) from the frame
+  interrupt or the vertical blank: a table of 16-bit divisors (0 = rest).
+  Arpeggios (cycling 3 notes per frame) fake chords. Costs about 2
+  scanlines per frame. Two updates per frame (120 Hz) need two evenly
+  spaced points inside cycle-counted code.
+
+SAMPLES BY PWM (expensive: whole CPU)
+  Put PIT 2 in a one-shot mode, LSB-only writes (the exact mode byte is
+  in reenigne's 8088/demo/credits/mod.asm; test it); each out 0x42,al
+  with a count of 1..N starts a pulse whose width is the sample.
+  Output it at a fixed rate from cycle-counted code: reenigne's player
+  wrote one sample every 288 cycles (= 4 refreshes of 72: no jitter) =
+  16572 Hz, above hearing. NEVER write 0 (= 65536: a
+  55 ms click). Interrupts off throughout.
+  - 4-channel mixing: per channel an 8.8 phase accumulator register,
+    add reg,step (patched immediate); mov bx,reg; mov bl,wave (patched);
+    mov al,[bx] / add al,[bx] for the next channels; out 0x42,al. Tables
+    of 256-byte one-cycle waveforms, volume baked into copies. Counts per
+    channel 1-18, sum up to 72 (= the 288-cycle period in PIT ticks).
+  - One sample per scanline (304 cycles, 15.7 kHz) combines with per-line
+    raster or CRTC work (Area 5150's lake did this).
+
+RESTORE AT EXIT: speaker off (61h bits 0-1 = 0), PIT 2 back to mode 3
+  (0xB6) if you changed it.

@@ -1,0 +1,62 @@
+CGA: ports, registers, memory, snow, tweaked modes
+Status: register values are the standard IBM BIOS ones; 160x100 and 80x50
+come from the write-ups and are not yet tested on this machine.
+
+PORTS
+  3D4h  CRTC index      3D5h  CRTC data  (out dx,ax at 3D4h: AL=index,
+                                           AH=value, writes both)
+  3D8h  mode control    3D9h  colour select    3DAh  status (read)
+  3DBh  clear light pen latch    3DCh  set light pen latch
+MODE CONTROL 3D8h (write only; the BIOS copy is at 0040:0065)
+  bit0 80-col text  bit1 graphics  bit2 B/W (no effect on RGB)
+  bit3 video on     bit4 640 hi-res  bit5 blink (0 = 16 background colours)
+  80x25 text 0x29 (0x09: no blink)   40x25 text 0x28 (0x08)
+  320x200 0x0A (0x2A)                640x200 0x1E
+  Turning bit3 off blanks the screen: safe for bulk VRAM writes.
+COLOUR SELECT 3D9h (takes effect immediately: the raster-bar register)
+  text: bits0-3 border colour.
+  320x200: bits0-3 background AND border (pixel value 0), bit4 bright
+  foreground set, bit5 palette 0 (green/red/brown) or 1 (cyan/magenta/
+  white).   640x200: bits0-3 the foreground colour.
+STATUS 3DAh: bit0 = 1 when not displaying (border/blanking), bit3 = 1 in
+  vertical retrace.
+RGBI COLOURS: 0 black 1 blue 2 green 3 cyan 4 red 5 magenta 6 brown 7 grey
+  8 dark grey 9-15 bright versions (+8). Good ramps: 0 1 9 11 15,
+  0 4 12 14 15, 0 8 7 15, 0 2 10 11 15, 0 5 13 15.
+
+MEMORY (B800:0000, 16 KB)
+  Text: char, attribute pairs; 80x25 = 4000 bytes (4 pages), 40x25 = 2000
+  (8 pages). Attribute: low nibble foreground, high nibble background
+  (bit7 = blink unless blink is off in 3D8h).
+  320x200x4: 2 bits/pixel, 80 bytes/line, even lines at 0000h, odd lines
+  at 2000h. Line y: (y>>1)*80 + (y&1)*2000h. Left pixel = top 2 bits.
+  640x200x2: same layout, 1 bit/pixel.
+
+CRTC REGISTERS (index: 80x25 text / 40x25 text / 320 and 640 graphics)
+  R0 horiz total     0x71 / 0x38 / 0x38   R1 horiz displayed 80 / 40 / 40
+  R2 hsync position  0x5A / 0x2D / 0x2D   R3 sync widths   0x0A
+  R4 vert total-1 (rows)   0x1F / 0x1F / 0x7F
+  R5 vert adjust (lines)   6 / 6 / 6
+  R6 vert displayed (rows) 25 / 25 / 100
+  R7 vsync position (row)  28 / 28 / 0x70
+  R8 interlace 2    R9 scanlines per row - 1   7 / 7 / 1
+  R10/R11 cursor start/end (R10 = 0x20 hides it)
+  R12/R13 start address (high/low) in WORDS (2 bytes per unit)
+  R14/R15 cursor address.  Total lines = (R4+1)*(R9+1) + R5 = 262.
+
+SNOW: in 80-column text ONLY, every CPU access to CGA RAM during active
+  display puts snow on screen. 40-col text and graphics modes never snow.
+  Fixes: use 40-col text, or write only while 3DAh bit0 = 1 (in practice:
+  during the 62 lines of vertical blank), or blank with 3D8h bit3.
+
+TWEAKED MODES (RGB-friendly)
+- 160x100x16 (no snow-free writes: it is 80-col text): 80x25 text values
+  but R4=0x7F, R6=100, R7=0x70, R9=1 (2 scanlines per row), blink off
+  (3D8h = 0x09). Fill every char with 0xDE (right half block): each byte
+  pair is two pixels, attribute high nibble = left, low nibble = right.
+- 80x50x16 snow-free: 40x25 text values but R9=3 (4 lines/row), R4=0x3F,
+  R6=50, R7=0x38, blink off (0x08), 0xDE chars, attribute = two pixels.
+- Smaller windows: lower R1/R6 to shrink the picture; the freed VRAM
+  makes a hidden page for double buffering (flip with R12/R13).
+- Text-mode tricks change only CRTC values: always set R9, R4, R6, R7
+  together, and keep the total near 262 lines or the monitor rolls.

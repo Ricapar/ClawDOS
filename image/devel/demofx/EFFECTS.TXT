@@ -1,0 +1,62 @@
+EFFECTS: recipes that work on an RGBI monitor
+Status: from the 8088 MPH / Area 5150 write-ups unless marked TESTED.
+
+RASTER / COPPER BARS (TESTED: C:\TESTS\DEMO\RASTER.ASM)
+  See RASTER.TXT. Full-width bars in 320x200 via 3D9h per line.
+
+STARFIELD / PARTICLES (any mode; reenigne: 948 particles at 60 Hz)
+  Per particle, unrolled: mov di,0x9999 (current position, patched) /
+  stosb (AL = 0 erases) / shl di,1 / mov di,[di] (next position from a
+  table of 8192 words indexed by VRAM offset: a "vector field") /
+  es: mov [di],ah (plot; vary the colour register per copy: AH BL BH CL
+  CH DL DH) / mov [patch+1],di. Process particles in random order: no
+  tearing, no frame sync. Zoom-out, spiral, wave = different tables.
+  In 320x200 a byte holds 4 pixels: plot whole bytes (blocky) or mask.
+
+MOIRE / XOR CIRCLES (80x50x16 in 40-col text: snow-free)
+  Two concentric-ring bitmaps of attribute bytes, bigger than the screen;
+  each frame offset them (sine paths) and write a XOR b to every cell:
+  pop ax / xor ax,[bp+0x99] / stosb / inc di / mov al,ah / stosb / inc di
+  (only attributes; the 0xDE chars stay). SP = bitmap 1, BP = bitmap 2,
+  unrolled per row with row-end adds. Any two images work.
+
+SPRITES OVER A SCROLLING BACKGROUND (320x200)
+  Compiled sprites (CODE.TXT). Scroll with the start address (2-line
+  steps vertically); keep the sprite position in screen terms by adding
+  the scroll offset. Single buffer: put PIT 0 at 19912 and start erase +
+  redraw as soon as the beam has passed the sprite's last line.
+
+VECTORBALLS (30 balls at 30 Hz in 8088 MPH)
+  Small window (112x140) so two pages fit in 16 KB; z-sort; compiled
+  erase (stosw black over last frame's balls) then compiled draw; flip
+  with R12/R13 in vertical blank. Rotation by tables, not MUL.
+
+KEFRENS BARS (320x200, 304-cycle unrolled lines)
+  A "line buffer": the same VRAM line shown on every 2-line row (CRTC
+  frames, CRTC.TXT), so a bar drawn on one line stays below it; each
+  line draws one bar segment at a sine position. Clear the line in the
+  vertical blank. Needs exact cycle counting and PIT 1 = 19.
+
+POLYGONS (flat-shaded 3D)
+  Delta span rendering (CODE.TXT): per line keep spans, write only
+  changes. Or XOR fill: draw only the edges into a RAM buffer, XOR each
+  line with the line above, copy the filled line to VRAM (no slow VRAM
+  reads). Use RGBI ramps for shading; dither by swapping two colours on
+  odd lines.
+
+FADES ON RGB (no palette registers!)
+  Colour select (3D9h) changes the 3 foreground colours of 320x200
+  (palette 0/1, bright bit) for coarse fades. Real fades: remap every
+  byte through a table (XLAT) colour -> next darker in a ramp (15 7 8 0,
+  14 6 4 0, 11 3 1 0), a band of lines per frame (a whole-screen
+  read-modify-write doesn't fit a frame).
+
+PLASMA ON RGB
+  80x50x16 snow-free (40-col text, CGA.TXT): attribute = two pixels.
+  Sum of sine tables (sin[x+t1] + sin[y+t2] + sin[x+y+t3]), indexed into
+  a 16-colour RGBI ramp, precalculated per row and column so each cell
+  is two adds and an XLAT. 80x50 = 2000 cells: ~15-30 fps.
+
+TEXT MODE ART: 160x100x16 (CGA.TXT) for full-colour pictures and
+  chunky effects; writes snow, so update in vertical blank or blank the
+  screen for loads. ANSI-art fonts as "pixels" give fake 640x200x16.
