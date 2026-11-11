@@ -264,6 +264,49 @@ are now most of a round; small requests upload at 10-16 KB/s, below the
 final round and the relaunch are as before. The stack peak rose by about 50
 bytes (1,615 of 4,055).
 
+### Memory for in-harness runs (`6f17e97`, 2026-11-11)
+
+| round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | - | 14239 | 880 | 15.8 | 990 | 2310 |
+| 1 | 2 | 4537 | 330 | 13.4 | 990 | 1815 |
+| 2 | 2 | 4537 | 275 | 16.1 | 990 | 1760 |
+| 3 | 3 | 4537 | 275 | 16.1 | 990 | 1815 |
+| 4 | 2 | 4537 | 275 | 16.1 | 1045 | 1815 |
+| 5 | 3 | 4538 | 275 | 16.1 | 1045 | 1815 |
+| 6 | 2 | 4539 | 330 | 13.4 | 990 | 1815 |
+| 7 | 3 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 8 | 2 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 9 | 3 | 4539 | 330 | 13.4 | 990 | 1870 |
+| 10 | 2 | 4539 | 330 | 13.4 | 990 | 1815 |
+| 11 | 2 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 12 | 3 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 13 | 2 | 4539 | 330 | 13.4 | 990 | 1815 |
+| 14 | 3 | 4539 | 330 | 13.4 | 1045 | 1870 |
+| 15 | 2 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 16 | 3 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 17 | 3 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 18 | 2 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 19 | 3 | 4539 | 385 | 11.5 | 990 | 1925 |
+| 20 | 2 | 4539 | 385 | 11.5 | 1045 | 1925 |
+| 21 | 27 | 572 | 55 | 10.2 | 1045 | 18975 |
+| all | | 105582 | 7645 | 13.5 | | 58520 |
+
+The turn took 137 s from the first request to the last reply.
+
+Final round: 3948 characters streamed in 17875 ms after the first, 221 characters/s (stop=end_turn).
+Relaunch round trip: program 2.1 s, CLAWDOS away 25.4 s.
+Stack: used 1497 of 4027 bytes; used 1629 of 4055 bytes (one line per HARNESS.EXE).
+
+Nothing slowed down: 137 s against 136 s, the same per-round gaps, uploads
+and waits; the relaunch's 25.4 s is inside the 23.5-25.7 s the earlier tables
+show. The bench's one run is a `full_memory` relaunch, so the lending around
+an in-harness run (two DOS calls and a heap trim, [M6.2](#memory-for-in-harness-runs-2026-11-11))
+is not in it; the harness's startup trim of its near heap and the buffers'
+new home are. Round 0 is 2.3 KB longer than in `21e4a9c` because TOOLS.JSN
+grew (the screenshot arguments, and this task's memory notes). The stack peak
+is 1,629 bytes (1,615 before).
+
 ## M6.2: full-memory run
 
 **Problem.** HARNESS.EXE stays resident while the `run` tool's program runs:
