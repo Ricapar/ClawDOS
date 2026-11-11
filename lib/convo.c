@@ -4,6 +4,8 @@
 #include "history.h"
 #include "json.h"
 
+#define RESULT_LOST "Error: the result could not be written to the conversation file."
+
 static int histPut(Sink *s, const char *p, unsigned n)
 {
     (void)s;
@@ -49,14 +51,16 @@ int convo_user_text(Convo *c, const char *text)
 
 int convo_assistant_done(Convo *c)
 {
-    if (hist_message_done())
-        return -1;                             /* not written: the caller rolls the message back */
+    if (hist_message_done()) {
+        hist_rollback_message();               /* not all written: the reply goes */
+        return -1;
+    }
     c->assistantInTurn++;
     c->mergeNext = 0;
     return 0;
 }
 
-int convo_tool_result(Convo *c, const char *id, const char *text, int isError, const char *note)
+static int writeResult(const char *id, const char *text, int isError, const char *note)
 {
     Sink s;
     int rc = 0;
@@ -73,8 +77,25 @@ int convo_tool_result(Convo *c, const char *id, const char *text, int isError, c
     }
     rc |= hist_puts("]}");
     rc |= hist_message_done();
-    c->mergeNext = 1;                          /* a results message is last until the next request answers it */
     return rc ? -1 : 0;
+}
+
+int convo_tool_result(Convo *c, const char *id, const char *text, int isError, const char *note)
+{
+    if (writeResult(id, text, isError, note) == 0) {
+        c->mergeNext = 1;                      /* a results message is last until the next request answers it */
+        return 0;
+    }
+    /* The call must still be answered for the file to stay valid: a short
+       error result, or failing that the whole turn goes. */
+    hist_rollback_message();
+    if (writeResult(id, RESULT_LOST, 1, NULL) == 0) {
+        c->mergeNext = 1;
+        return -1;
+    }
+    hist_rollback_message();
+    convo_rollback_turn(c);
+    return -1;
 }
 
 int convo_settle(Convo *c)

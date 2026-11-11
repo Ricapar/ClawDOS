@@ -113,7 +113,8 @@ is in [API.md](API.md).
 CLAWDOS.EXE do 20 `read`s of a 4 KB file, one `run` of `VER` with
 `full_memory` (a real relaunch) and a 3.9 KB reply. Per round: `gap` the
 seconds since the previous round ended (the tool call, its result written to
-the history, the request's length counted), `len` the request body, `up` the
+the history; at the baseline also the request's length counted, a pass now
+gone), `len` the request body, `up` the
 time to send it, `ttft-up` the wait for the (mock) API, `total` the round.
 The baseline was taken 2026-11-10 at `f521559`, 86Box IBM PC 5160 (8088 4.77
 MHz, NE1000 on SLiRP). Later changes rerun it and compare; the scenario and the

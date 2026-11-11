@@ -216,16 +216,22 @@ int8_t Chat::preparePrefix(void)
     ToolCtx t;
     char line[60];
 
+    int status;
+
     if ((preLen = fs_size(prePath)) > 0)
         return 0;
     tout_reset(&t);
+    /* Esc while the memories are listed (it polls the keyboard) stops the
+       turn: a short list would be frozen into the conversation. */
+    if ((status = tool_memory_list(&t)) == TS_STOPPED)
+        return 1;
     x.promptPath = PROMPT_PATH;
     x.toolsPath = TOOLS_PATH;
     x.name = prov->name[0] ? prov->name : cfg->name;
-    x.memories = tool_memory_list(&t) == TS_OK ? t.out : "";
+    x.memories = status == TS_OK ? t.out : "";
     x.cache = prov->cache;
     if ((preLen = api_prefix_file(prePath, &x)) < 0)
-        return -1;
+        return (int8_t)preLen;
     sprintf(line, "prefix %.30s: %ld bytes", prePath, preLen);
     ui->log(line);
     return 0;
@@ -446,8 +452,17 @@ int8_t Chat::request(int noTools)
     int attempt = 0;
     int fresh, wait;
 
-    if (preparePrefix()) {
-        warn("Cannot read " PROMPT_PATH " or " TOOLS_PATH ".");
+    switch (preparePrefix()) {
+    case 0:
+        break;
+    case 1:
+        return 1;                         /* Esc */
+    case -1:
+        warn("Cannot read " PROMPT_PATH " or " TOOLS_PATH " (or no memory for them).");
+        return -1;
+    default:
+        sprintf(msg, "Cannot write %.40s (disk full?).", prePath);
+        warn(msg);
         return -1;
     }
     r.p = prov;
@@ -474,7 +489,7 @@ int8_t Chat::request(int noTools)
         rc = http.sendHead(prov, length);
         if (rc == 0 && (body = api_body(http.sink(), &r)) != 0)
             rc = -1;
-        if (body == -1) {                 /* a file short of its size: no use retrying */
+        if (body == -1) {                 /* the prefix or history unreadable: no use retrying */
             http.close();
             warn("Cannot read the conversation's files in " CHATS_DIR ".");
             return -1;
@@ -553,11 +568,16 @@ int8_t Chat::turn(const char *text)
     return rounds(0);
 }
 
-/* The tool_result for a finished call: 1 stopped, 0 the turn is over, -2 next round. */
+/* The tool_result for a finished call: 1 stopped, 0 the turn is over, -2 next
+   round, -1 the result could not be written (convo_tool_result has left the
+   file valid). */
 int8_t Chat::finishTool(int round, const char *toolId, int status, ToolCtx *t)
 {
-    convo_tool_result(&convo, toolId, tools_result_text(status, t), status != TS_OK,
-                      round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL);
+    if (convo_tool_result(&convo, toolId, tools_result_text(status, t), status != TS_OK,
+                          round + 1 == MAX_ROUNDS ? ROUND_CAP_NOTE : NULL)) {
+        warn("Cannot write the conversation file.");
+        return -1;
+    }
     if (status == TS_STOPPED)
         return 1;
     if (round >= MAX_ROUNDS)          /* the model kept calling tools after the cap */
@@ -581,8 +601,7 @@ int8_t Chat::rounds(int round)
         int status;
         int8_t rc = request(round >= MAX_ROUNDS);
         if (rc == 0 && convo_assistant_done(&convo)) {
-            warn("Cannot write the conversation file.");
-            hist_rollback_message();
+            warn("Cannot write the conversation file.");    /* the reply is rolled back */
             rc = -1;
         }
         if (rc != 0) {
@@ -606,8 +625,11 @@ int8_t Chat::rounds(int round)
         if (!strcmp(as.stopReason, "max_tokens"))
             warn("[reply cut off: too long]");
         if (strcmp(as.stopReason, "tool_use")) {
-            if (as.hasTool)               /* a call cut off before it was complete */
-                convo_tool_result(&convo, as.toolId, "Error: reply cut off before the call was complete", 1, NULL);
+            if (as.hasTool                /* a call cut off before it was complete */
+                && convo_tool_result(&convo, as.toolId, "Error: reply cut off before the call was complete", 1, NULL)) {
+                warn("Cannot write the conversation file.");
+                return -1;
+            }
             return 0;
         }
         if (!as.hasTool)

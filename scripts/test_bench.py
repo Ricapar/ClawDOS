@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402  pylint: disable=wrong-import-position
 
 
-
 def api(when, fields):
     """An `api` line of CLAWDOS.LOG as chat.cpp's logRound writes it."""
     return f'2026-11-10 {when} api anthropic claude-opus-5-5 {fields} in=1 out=1 cr=0 cw=0 ev=900\n'

@@ -9,7 +9,7 @@ file, one run with full_memory (a real relaunch through CLAWDOS.EXE) and a 4 KB
 reply, so the request body grows from ~13 KB to over 100 KB. Then it reads the
 `api ...`, `relaunch:` and `stack:` lines of CLAWDOS.LOG and prints a Markdown
 table: per round the seconds since the previous round ended (gap: the tool
-call, the history written, the request's length counted; from the log's
+call, the history written, the prefix file checked; from the log's
 timestamps), the request body (len), the upload time (up), upload KB/s, the
 wait for the API (ttft - up) and the round's total; for the final round
 the streamed characters per second; then the relaunch round trip and the
@@ -133,7 +133,7 @@ def main():
                                                 f'{TIMEOUT["dosbox"]} in DOSBox-X)')
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     a = ap.parse_args()
-    timeout = a.timeout or TIMEOUT['dosbox' if a.dosbox else '86box']
+    timeout = a.timeout if a.timeout is not None else TIMEOUT['dosbox' if a.dosbox else '86box']
     print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about six minutes)"}...',
           file=sys.stderr, flush=True)
     if a.dosbox:

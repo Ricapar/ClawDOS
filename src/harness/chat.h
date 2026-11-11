@@ -111,7 +111,7 @@ class Chat {
     void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
     void   logRound(int round);
     void   setPrefixPath(void);
-    int8_t preparePrefix(void);            /* 0: prePath holds preLen bytes */
+    int8_t preparePrefix(void);            /* 0: prePath holds preLen bytes, 1 Esc, -1 unreadable, -2 unwritable */
     void   pause(int secs);
     void   warn(const char *text);
 

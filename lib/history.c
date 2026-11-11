@@ -26,10 +26,32 @@ static long savedTailAt;
 static char *wbuf;
 static unsigned pending;
 static int seekNeeded;
+/* A write failed since the last cut or boundary: the message has a hole in
+   it, so nothing more is taken and hist_message_done fails until a rollback
+   cuts the file back. */
+static int writeFailed;
 
 #ifdef DOSUNIT
 int hist_test_scan_reads = -1;
 int hist_test_writes;
+int hist_test_write_ok = -1;
+int hist_test_write_bad;
+
+/* dosunit.c's full disk: after hist_test_write_ok good writes, the next
+   hist_test_write_bad writes fail (0: all of them, until the test sets
+   hist_test_write_ok back to -1). */
+static int dosWrite(const char *p, unsigned n)
+{
+    hist_test_writes++;
+    if (hist_test_write_ok == 0) {
+        if (hist_test_write_bad > 0 && --hist_test_write_bad == 0)
+            hist_test_write_ok = -1;
+        return n > 1 ? write(fd, p, n / 2) : -1;   /* a short write, as DOS gives on a full disk */
+    }
+    if (hist_test_write_ok > 0)
+        hist_test_write_ok--;
+    return write(fd, p, n);
+}
 
 /* dosunit.c's way to a scan that cannot finish: after hist_test_scan_reads
    good reads, one fails as a bad sector would. */
@@ -43,10 +65,9 @@ static int scanRead(char *buf)
         hist_test_scan_reads--;
     return read(fd, buf, COPY_BUF);
 }
-#define COUNT_WRITE() (hist_test_writes++)
 #else
 #define scanRead(buf) read(fd, buf, COPY_BUF)
-#define COUNT_WRITE() ((void)0)
+#define dosWrite(p, n) write(fd, p, n)
 #endif
 
 /* Write out what wbuf holds. On a failure those bytes are gone from `end`
@@ -61,14 +82,15 @@ static int flushBuf(void)
     if (seekNeeded) {
         if (lseek(fd, end - (long)n, SEEK_SET) < 0) {
             end -= n;
+            writeFailed = 1;
             return -1;
         }
         seekNeeded = 0;
     }
-    COUNT_WRITE();
-    if (write(fd, wbuf, n) != (int)n) {
+    if (dosWrite(wbuf, n) != (int)n) {
         end -= n;
         seekNeeded = 1;             /* a short write left the pointer who knows where */
+        writeFailed = 1;
         return -1;
     }
     return 0;
@@ -144,6 +166,7 @@ void hist_close(void)
     turnMessages = 0;
     needSep = 0;
     pending = 0;
+    writeFailed = 0;
 }
 
 long hist_size(void)
@@ -154,6 +177,8 @@ long hist_size(void)
 /* Into wbuf, writing it out each time it fills. */
 static int put(const char *p, unsigned n)
 {
+    if (writeFailed)
+        return -1;
     while (n) {
         unsigned take;
         if (pending == WBUF_MAX && flushBuf())
@@ -199,8 +224,8 @@ static void commit(void)
 
 int hist_message_done(void)
 {
-    if (fd >= 0 && flushBuf())
-        return -1;                    /* not on disk: no boundary, a rollback takes it away */
+    if (fd >= 0 && (flushBuf() || writeFailed))
+        return -1;                    /* not all on disk: no boundary, a rollback takes it away */
     boundary = end;
     needSep = end > 0;
     turnMessages++;
@@ -229,6 +254,7 @@ static int truncateTo(long pos)
     seekNeeded = 1;
     if (chsize(fd, pos))
         return -1;
+    writeFailed = 0;                  /* whatever a failed write left is cut off */
     end = boundary = pos;
     needSep = end > 0;
     return 0;
@@ -247,8 +273,7 @@ int hist_rollback_turn(void)
         if (truncateTo(savedTailAt))
             return -1;
         lseek(fd, savedTailAt, SEEK_SET);
-        COUNT_WRITE();
-        if (write(fd, savedTail, savedTailLen) != (int)savedTailLen)
+        if (dosWrite(savedTail, savedTailLen) != (int)savedTailLen)
             return -1;
         end = boundary = turnStart;
         needSep = 1;
@@ -303,7 +328,7 @@ int hist_copy(Sink *s)
             break;
         }
         if (sink_put(s, buf, (unsigned)n)) {
-            rc = -1;
+            rc = -2;
             break;
         }
         left -= n;

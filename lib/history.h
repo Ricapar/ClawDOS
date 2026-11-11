@@ -6,9 +6,12 @@
  * A turn may be cut short (Esc, lost link, API error): the file is then
  * truncated back to the last complete message or to where the turn started.
  *
- * Writes are buffered (2 KB) and reach the disk when the buffer fills and at
- * every point that reads, cuts or completes the file: hist_message_done (which
- * also commits), the rollbacks, hist_reopen_last, hist_copy and hist_close.
+ * Writes are buffered (2 KB) and reach the disk when the buffer fills, when a
+ * message is complete (hist_message_done, which also commits) and before the
+ * file is read or closed (hist_reopen_last, hist_copy, hist_close). A rollback
+ * cuts the file at a boundary, which is always on disk, so the bytes it holds
+ * are dropped unwritten. After a failed write nothing more is taken and
+ * hist_message_done fails until a rollback.
  */
 #ifndef CLAWDOS_HISTORY_H
 #define CLAWDOS_HISTORY_H
@@ -26,6 +29,8 @@ int  hist_open(const char *path);
 #ifdef DOSUNIT
 extern int hist_test_scan_reads;      /* >= 0: the scan's read after that many fails */
 extern int hist_test_writes;          /* DOS writes made so far */
+extern int hist_test_write_ok;        /* >= 0: writes after that many fail (a full disk), */
+extern int hist_test_write_bad;       /* this many of them (0: all) */
 #endif
 void hist_close(void);
 long hist_size(void);                 /* bytes hist_copy would produce */
@@ -44,7 +49,9 @@ int  hist_turn_messages(void);        /* complete messages since turn_begin */
    more can be appended to it; finish with hist_message_done. A later
    hist_rollback_turn restores the message if turn_begin preceded the reopen. */
 int  hist_reopen_last(unsigned n);
-int  hist_copy(Sink *s);              /* file contents (no brackets) into the sink */
+/* File contents (no brackets) into the sink: 0, -1 the file could not be
+   read (or written out first), -2 the sink failed. */
+int  hist_copy(Sink *s);
 
 #ifdef __cplusplus
 }

@@ -20,7 +20,12 @@ typedef struct Convo {
 void convo_init(Convo *c);
 void convo_turn_begin(Convo *c);                     /* hist_turn_begin + remember mergeNext */
 int  convo_user_text(Convo *c, const char *cp437);   /* a user message, or a text block joining the results */
-int  convo_assistant_done(Convo *c);                 /* the streamed assistant message is complete; -1 not written */
+/* The streamed assistant message is complete. -1: it could not all be
+   written, and it has been rolled back (convo_settle then ends the turn). */
+int  convo_assistant_done(Convo *c);
+/* The result of the call `id`. -1: it could not be written, and the turn must
+   end: the file then ends with a short error result for the call, or (when
+   even that could not be written) the turn has been rolled back. */
 int  convo_tool_result(Convo *c, const char *id, const char *cp437Text, int isError, const char *note);
 /* The turn ended early. No assistant message yet: the whole turn is rolled
    back. Otherwise the file ends with a tool results message, which the next

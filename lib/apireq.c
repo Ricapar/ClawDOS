@@ -140,7 +140,7 @@ long api_prefix_file(const char *path, const ApiPrefix *x)
     strcpy(tmp, path);
     tmp[n - 1] = '$';                     /* CHATS\MMDDnnn.PR$ */
     if ((f = fopen(tmp, "wb")) == NULL)
-        return -1;
+        return -2;
     s.put = filePut;
     s.ctx = f;
     s.count = 0;
@@ -154,7 +154,7 @@ long api_prefix_file(const char *path, const ApiPrefix *x)
     }
     if (rc) {
         remove(tmp);
-        return -1;
+        return rc;
     }
     return (long)s.count;
 }
@@ -205,8 +205,8 @@ int api_body(Sink *s, const ApiReq *r)
         return rc;
     PUT(",");
     PUT(MESSAGES);
-    if (hist_copy(s))
-        return -2;
+    if ((rc = hist_copy(s)) != 0)
+        return rc;                        /* -1: the history could not be read */
     PUT("]}");
     return 0;
 }

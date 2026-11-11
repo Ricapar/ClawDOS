@@ -13,7 +13,7 @@ stream it reads and how the history stays valid.
 | `C:\CLAWDOS\PROMPT.TXT` | The whole system prompt. `{name}` becomes the name of the model behind ClawDOS (the assistant calls itself ClawDOS), `{memories}` the output of `memory_list` (or `(none)`). CP437 text; CRLF or LF. Read when a conversation's first request is made (into its `.PRE`), so an edit applies to the next conversation. |
 | `C:\CLAWDOS\TOOLS.JSN` | The request's `tools` array, verbatim. The single source of the tool schemas; `tunnel/mockapi.py` reads it too. The repo's copy is laid out for reading; the image build writes it minified, without the whitespace (about 1.7 KB less in every request). Every tool sets `eager_input_streaming` so a big argument (a file for `write`) streams in small `input_json_delta` fragments instead of arriving as one event, which the 16 KB event buffer could not hold. |
 | `C:\CLAWDOS\CHATS\MMDDnnn.JSN` | One file per conversation: the elements of `messages`, each a complete JSON object, separated by `,\r\n`. |
-| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the provider's `cache` setting and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Written as `.PR$` and renamed, so it is whole or absent. |
+| `C:\CLAWDOS\CHATS\MMDDnnn.PRE` | The conversation's frozen prefix: `"system":[...],"tools":[...]` exactly as every request of it sends them, rendered from PROMPT.TXT (with `{name}` and `{memories}` as they were then), the provider's `cache` setting and TOOLS.JSN by the conversation's first request. A resumed HARNESS (after a relaunch) uses it as it is; if it is missing it is rendered again. Esc while the memories are listed for it stops the turn and writes none. Written as `.PR$` and renamed, so it is whole or absent. |
 | `C:\CLAWDOS\CLAWDOS.LOG` | A line per API round (`api <provider> <model> round= ttft= total= up= len= stop= in= out= cr= cw= ev=`): times in ms from the start of the request (`ttft` to the first text, `total` to the end, `up` to the last body byte handed to the socket, so `ttft - up` is the wait for the API), `len` the body's Content-Length, both for the attempt that got the reply, `ev` the longest SSE event. A line per notable event (retries, `connection #n`, errors, `relaunch:`), and at each HARNESS.EXE exit `stack: used N of M bytes`, the stack's high-water mark. Each line has a timestamp. |
 | `C:\MEMORY\*.TXT` | ClawDOS's memories (the memory tools). |
 
@@ -37,7 +37,8 @@ model claude-opus-5-5
 effort low                  # omitted: no output_config is sent; F5 cycles it
 maxtokens 64000             # max_tokens; 64000 when omitted (thinking counts toward it)
 betas ...                   # omitted: no anthropic-beta header
-cache 1                     # default; 0 sends no cache_control
+cache 1                     # default; 0 sends no cache_control (the system block keeps
+                            # the marker its conversation's .PRE was made with)
 ```
 
 A section without a key still works against the mock API; against the real one
@@ -109,7 +110,10 @@ Writes collect in a 2 KB buffer (lib/history.c) and go to DOS when it fills
 and whenever the file is read, cut or completed: each finished message is
 written out and committed (INT 21h function 68h) before anything else happens,
 a rollback writes nothing it would cut, and the request copies the file only
-after everything is on disk.
+after everything is on disk. A write that fails (a full disk) ends the turn
+with "Cannot write the conversation file.": the message is rolled back, and a
+call left unanswered gets a short error result, or if even that cannot be
+written the turn is rolled back.
 
 ## The response
 

@@ -1,6 +1,6 @@
-/* A byte sink: where a writer puts its output. The same writer runs once into
- * a counting sink (for Content-Length) and once into the socket, so request
- * bodies never have to fit in memory.
+/* A byte sink: where a writer puts its output (the socket, the history, a
+ * file, a buffer in the tests), so request bodies never have to fit in memory.
+ * A counting sink only adds up the bytes.
  */
 #ifndef CLAWDOS_SINK_H
 #define CLAWDOS_SINK_H

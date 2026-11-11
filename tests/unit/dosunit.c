@@ -695,6 +695,41 @@ static int lengthMatches(const ApiReq *r)
     return api_body(&count, r) == 0 && count.count == api_length(r);
 }
 
+/* A prompt over the 2 KB read: {memories} across the first cut, a '{' as the
+   second read's last byte, a CR as the third's with its LF after the cut. */
+static void testPromptAcrossReads(void)
+{
+    static const char head[] = "\"system\":[{\"type\":\"text\",\"text\":\"";
+    static const char tail[] = "\"}],\"tools\":[{\"name\":\"t\"}]";
+    char *prompt = (char *)malloc(6200), *want = (char *)malloc(6400), *out = (char *)malloc(6600);
+    ApiPrefix x;
+    Sink buf;
+    char *p, *w;
+
+    if (!prompt || !want || !out) {
+        CHECK("prompt across reads: memory", 0);
+        return;
+    }
+    p = prompt; w = want;
+    strcpy(w, head); w += strlen(head);
+    memset(p, 'a', 2043); p += 2043; memset(w, 'a', 2043); w += 2043;
+    strcpy(p, "{memories}"); p += 10; strcpy(w, "M1\\nM2"); w += 6;          /* '{' at 2043, '}' at 2052 */
+    memset(p, 'b', 2042); p += 2042; memset(w, 'b', 2042); w += 2042;
+    strcpy(p, "{name}"); p += 6; strcpy(w, "Claude"); w += 6;                 /* '{' at 4095 */
+    memset(p, 'c', 2042); p += 2042; memset(w, 'c', 2042); w += 2042;
+    strcpy(p, "\r\nend"); p += 5; strcpy(w, "\\nend"); w += 5;               /* '\r' at 6143 */
+    strcpy(w, tail);
+    CHECK("prompt across reads: the cuts land", prompt[2043] == '{' && prompt[4095] == '{' && prompt[6143] == '\r');
+    writeFile("C:\\PTEST.TXT", prompt);
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "Claude"; x.memories = "M1\nM2";
+    x.cache = 0;
+    sink_buffer(&buf, out, 6600);
+    CHECK("prompt across reads: rendered", api_prefix(&buf, &x) == 0 && !strcmp(out, want));
+    remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN");
+    free(prompt); free(want); free(out);
+}
+
 static void testApiReq(void)
 {
     static char body[900], head[600];
@@ -1445,6 +1480,71 @@ static void testHistoryBuffer(void)
     remove("C:\\HISTTEST.JSN");
 }
 
+/* A full disk: a write fails in the middle of a message, and every caller
+   leaves the file valid. */
+static void testHistoryWriteFails(void)
+{
+    static char text[4097];
+    Convo c;
+    long before, start;
+    int done;
+
+    memset(text, 'y', 4096); text[4096] = 0;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    convo_init(&c);
+    convo_turn_begin(&c);
+    convo_user_text(&c, "first");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read\",\"input\":{}}]}");
+    convo_assistant_done(&c);
+    before = hist_size();
+
+    /* the buffer-full flush fails; the rest would fit once the disk has room */
+    done = hist_turn_messages();
+    hist_test_write_ok = 0; hist_test_write_bad = 1;
+    hist_puts("{\"role\":\"user\",\"content\":\"");
+    CHECK("write fails: the full buffer's flush", hist_puts(text) == -1 && hist_test_write_ok == -1);
+    CHECK("write fails: later writes refused", hist_puts("\"}") == -1);
+    CHECK("write fails: no boundary on a message with a hole", hist_message_done() == -1
+          && hist_turn_messages() == done);
+    CHECK("write fails: rollback cuts the hole", hist_rollback_message() == 0 && hist_size() == before
+          && histFileSize() == before);
+    hist_puts("{\"role\":\"user\",\"content\":\"ok\"}");
+    CHECK("write fails: writes again after the rollback", hist_message_done() == 0 && histFileSize() == hist_size());
+    hist_rollback_turn();
+    convo_user_text(&c, "first");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read\",\"input\":{}}]}");
+    convo_assistant_done(&c);
+    before = hist_size();
+
+    /* a reply whose last flush fails goes, and is not counted */
+    hist_puts("{\"role\":\"assistant\",\"content\":[]}");
+    hist_test_write_ok = 0; hist_test_write_bad = 1;
+    done = c.assistantInTurn;
+    CHECK("write fails: assistant_done", convo_assistant_done(&c) == -1 && c.assistantInTurn == done
+          && hist_size() == before && histFileSize() == before);
+
+    /* a result that cannot be written: a short error result answers the call */
+    hist_test_write_ok = 0; hist_test_write_bad = 1;
+    CHECK("write fails: tool result", convo_tool_result(&c, "t1", text, 0, NULL) == -1 && c.mergeNext == 1
+          && endsWith(histTail(), "ion file.\",\"is_error\":true}]}") && histFileSize() == hist_size());
+
+    /* not even that: the whole turn goes, the merged text with it */
+    before = hist_size();
+    convo_turn_begin(&c);
+    convo_user_text(&c, "again");
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"read\",\"input\":{}}]}");
+    convo_assistant_done(&c);
+    start = hist_size();
+    hist_test_write_ok = 0; hist_test_write_bad = 2;
+    CHECK("write fails: tool result, short result too", convo_tool_result(&c, "t2", text, 0, NULL) == -1
+          && hist_size() == before && start > before && c.mergeNext == 1 && c.assistantInTurn == 0
+          && endsWith(histTail(), "ion file.\",\"is_error\":true}]}") && histFileSize() == before);
+    hist_test_write_ok = -1; hist_test_write_bad = 0;
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
 /* --- events too long for the SSE buffer (a long thinking signature) -------------- */
 
 static ApiStream bigAs;
@@ -1550,6 +1650,7 @@ int main(void)
     testCfg();
     testHistory();
     testApiReq();
+    testPromptAcrossReads();
     testApiStream();
     testLongEvents();
     testToolArgs();
@@ -1564,6 +1665,7 @@ int main(void)
     testConvo();
     testHistoryCommit();
     testHistoryBuffer();
+    testHistoryWriteFails();
     testHistoryScanFails();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
