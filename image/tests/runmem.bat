@@ -15,7 +15,7 @@ REM figures must be those of !mr a, whose command line is as long (startup's
 REM copy of the arguments decides where the harness's own block ends). With the environment nearly full (/E:1024) an
 REM in-harness spawn still has the near heap it needs (harness.cpp NEAR_KEEP).
 ECHO CLAWDOS-RUNMEM-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!memgone"
 ECHO HARNESS.EXE memgone exit code %ERRORLEVEL% > COM1
 C:\TESTS\EATMEM.EXE /F > COM1

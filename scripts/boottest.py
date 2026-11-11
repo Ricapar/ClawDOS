@@ -12,7 +12,9 @@ may not have flushed them to the image yet. Exit status is 0 only if the marker 
 every --expect TEXT is in the serial or mock log and no --reject TEXT is, and (with
 --mock) the mock API started and was still running at the end. --mock2 runs a second,
 separate mock on the next port (10.0.2.2:18024, log build/mock2.log): another provider
-section, as a test that switches providers with /model needs.
+section, as a test that switches providers with /model needs. A test fails if it set the
+clock by NTP (C:\\NET\\SNTP.LOG on its image: pool.ntp.org or NIST reached through SLiRP)
+unless --online says it may: the others call NETUP NOCLOCK and reach nothing but the mocks.
 """
 
 import argparse
@@ -30,6 +32,7 @@ except ImportError:         # Windows
     import msvcrt
 
 import build
+import fatimg
 
 DONE = b'CLAWDOS-TEST-DONE'
 
@@ -80,6 +83,8 @@ def parse_args():
                     help='TEXT must not appear in the serial or mock API log (repeatable)')
     ap.add_argument('--mock', action='store_true',
                     help=f'run the mock Messages API (tunnel/mockapi.py) on port {TEST_API_PORT} during the test')
+    ap.add_argument('--online', action='store_true',
+                    help='the test may reach the internet (NETUP setting the clock by NTP)')
     ap.add_argument('--mock2', action='store_true',
                     help=f'also run a second mock on port {TEST_API_PORT2} (log build/mock2.log)')
     return ap.parse_args()
@@ -205,6 +210,16 @@ def mock_api(log_path, port=TEST_API_PORT):
                 mock.wait()
 
 
+def set_clock_by_ntp(img_path):
+    """Whether the image holds C:\\NET\\SNTP.LOG, which NETUP writes when it asks an NTP server."""
+    try:
+        with open(img_path, 'rb') as f:
+            fs = fatimg.open_fs(bytearray(f.read()))
+        return any(path.lstrip('/').upper() == 'NET/SNTP.LOG' for path, _ in fs.walk())
+    except (OSError, fatimg.FatError):
+        return False
+
+
 def run_dosbox(cmd, serial, timeout):
     """Run DOSBox-X until the test's marker appears in the serial log, DOSBox-X exits or timeout seconds pass."""
     with subprocess.Popen(cmd, cwd=build.BUILD, stdin=subprocess.DEVNULL,
@@ -260,6 +275,10 @@ def run_test(a):
         sys.exit(1)
     if DONE not in log:
         print(f'boottest: FAILED (no {DONE.decode()} within {a.timeout}s)')
+        sys.exit(1)
+    if not a.online and set_clock_by_ntp(test_img):
+        print('boottest: FAILED (the test asked an NTP server on the internet: C:\\NET\\SNTP.LOG; '
+              'CALL NETUP.BAT NOCLOCK, or --online)')
         sys.exit(1)
     missing = [t for t in a.expect if t.encode('cp437', 'replace') not in log]
     if missing:

@@ -8,7 +8,7 @@ REM carries the turn's start over (RESUME.TXT), so the whole turn goes: the user
 REM text and the call with it, not only the result: the chat file, typed to COM1,
 REM holds neither.
 ECHO CLAWDOS-RUNREFUSE-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!runrefuse"
 ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1
 FOR %%F IN (C:\CLAWDOS\CHATS\*.JSN) DO TYPE %%F > COM1

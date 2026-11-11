@@ -6,7 +6,7 @@ REM mock's !think streams the text in pieces ahead of the signature, and the con
 REM file written to the serial port must hold that text. Then !ping: ping events between
 REM the text deltas, which CLAWDOS must ignore: the whole reply must reach the history file.
 ECHO CLAWDOS-THINK-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!think"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!ping"

@@ -1,5 +1,7 @@
 @ECHO OFF
 REM Load a packet driver at INT 60h, get an address via DHCP, then set the clock by NTP.
+REM NETUP NOCLOCK (upper case) stops after DHCP: the boot tests use it, so they
+REM reach no server but the mock on the host (image/tests/clock.bat sets the clock).
 REM Real PC: PM2000 (PicoMEM's NE2000-over-WiFi, auto-detected).
 REM Emulators: Crynwr NE2000 (DOSBox-X) or NE1000 (86Box) at I/O 340h, IRQ 3.
 REM Both cards use the same 8390 chip, so each Crynwr driver also "loads" on the
@@ -19,6 +21,7 @@ IF ERRORLEVEL 1 GOTO FAIL
 C:\NET\DHCP.EXE
 IF ERRORLEVEL 1 GOTO END
 :CLOCK
+IF "%1"=="NOCLOCK" GOTO END
 REM SNTP needs TZ (AUTOEXEC.BAT). NTPSERVER overrides the server; the fixed
 REM address (time-a-g.nist.gov) is for when DNS fails, as it does in DOSBox-X on
 REM a host whose first nameserver is IPv6. With ASTCLOCK /R resident, the time

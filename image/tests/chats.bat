@@ -9,7 +9,7 @@ REM first, whose rows go to CLAWDOS.LOG as video memory shows them): Down, Enter
 REM opens the second chat, and !tailscreen checks its transcript. Last, Down,
 REM Del and y delete FIRST and its prefix file; Esc and F10 leave.
 ECHO CLAWDOS-CHATS-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool sysinfo"
 ECHO HARNESS.EXE first exit code %ERRORLEVEL% > COM1
 REN C:\CLAWDOS\CHATS\*.JSN FIRST.JSN

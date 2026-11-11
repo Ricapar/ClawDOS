@@ -260,6 +260,66 @@ def old_skill_memories(target, fresh):
     return sorted(out)
 
 
+def fs_problems(fs):
+    """What is wrong with a FAT file system that would make an update unsafe, as text lines: FAT copies that
+    differ, a cluster in two chains (cross-linked files), a chain that ends on a free or reserved cluster, or
+    one too short for its file's size. Lost clusters (allocated, in no chain) are harmless and not listed."""
+    out = []
+    size = fs.spf * fatimg.SECTOR
+    first = fs.img[fs.fat_off:fs.fat_off + size]
+    for n in range(1, fs.nfats):
+        if fs.img[fs.fat_off + n * size:fs.fat_off + (n + 1) * size] != first:
+            out.append(f'FAT copy {n + 1} differs from the first')
+    owners = {}
+    stack = [(0, '')]
+    while stack:
+        cluster, prefix = stack.pop()
+        for e in fs.listdir(cluster):
+            if e.name in ('.', '..'):
+                continue
+            path = f'{prefix}/{e.name}'
+            c, chain = e.cluster, []
+            while 2 <= c < fs.nclusters + 2 and len(chain) <= fs.nclusters:
+                chain.append(c)
+                c = fs.fat_get(c)
+            if chain and c < fs.eoc:
+                out.append(f'{path}: its cluster chain ends on {c:#x}, not an end mark')
+            if not e.is_dir and len(chain) * fs.csize < e.size:
+                out.append(f'{path}: {len(chain)} clusters for {e.size} bytes')
+            for x in chain:
+                if x in owners:
+                    out.append(f'{path} and {owners[x]} share cluster {x} (cross-linked)')
+                    break
+                owners[x] = path
+            if e.is_dir and e.cluster:
+                stack.append((e.cluster, path))
+    return out
+
+
+def all_files(fs):
+    """{PATH: (path, bytes)} of every file on an image."""
+    return {norm(p): (p.lstrip('/'), fs.read_file(p.lstrip('/'))) for p, e in fs.walk() if not e.is_dir}
+
+
+def verify(new_img, old_files, written):
+    """Problems with the updated image, read back from its bytes, as text lines: its file system (fs_problems),
+    a file the update wrote that does not read back as written, or a file of the old image it did not write
+    that is gone or changed. Empty when the image is right."""
+    try:
+        fs = fatimg.open_fs(new_img)
+        out = fs_problems(fs)
+        now = all_files(fs)
+    except (fatimg.FatError, struct.error) as e:
+        return [f'the updated image cannot be read back ({e})']
+    for key, data in written.items():
+        if key not in now or now[key][1] != data:
+            out.append(f'{key} does not read back as written')
+    for key, (path, data) in old_files.items():
+        if key not in written and (key not in now or now[key][1] != data):
+            out.append(f'{path} is {"gone" if key not in now else "changed"}, though the update did not write it')
+    return out
+
+
 def remove_quietly(path):
     """Delete a file of ours if it is there."""
     if path and os.path.exists(path):
@@ -294,7 +354,8 @@ def update_image(path, fresh_path, memories=False, cfg=False, backup=True, dry_r
     """Update the image file `path` from the freshly built image `fresh_path`; returns a Report.
     Nothing is written when the update would add and change nothing. Otherwise the old image is first
     copied to a backup name that does not exist yet (path.bak, .bak.2, ...; unless backup is False) and
-    the new one replaces it only when every file was written: a failure leaves the image as it was."""
+    the new one replaces it only when every file was written and the new image, read back from the disk,
+    passes verify(): a failure leaves the image as it was. A damaged image (fs_problems) is refused."""
     if not os.path.isfile(path):
         raise UpdateError(f'{path}: no such image')
     if os.path.exists(fresh_path) and os.path.samefile(path, fresh_path):
@@ -305,7 +366,16 @@ def update_image(path, fresh_path, memories=False, cfg=False, backup=True, dry_r
     with open(fresh_path, 'rb') as f:
         fresh_img = bytearray(f.read())
     try:
-        rep = update_fs(target, fatimg.open_fs(fresh_img), memories, cfg, dry_run)
+        damage = fs_problems(target)
+        old_files = all_files(target)
+    except fatimg.FatError as e:
+        damage = [str(e)]
+    if damage:
+        raise UpdateError(f'{path} is unchanged: its file system is damaged ({"; ".join(damage[:3])}). '
+                          'Run CHKDSK /F on the PC (or check it on another machine) first.')
+    try:
+        fresh = fatimg.open_fs(fresh_img)
+        rep = update_fs(target, fresh, memories, cfg, dry_run)
     except fatimg.FatError as e:
         raise UpdateError(f'{path} is unchanged: {e}') from e
     rep.boot_differs = boot_code(img) != boot_code(fresh_img)
@@ -330,6 +400,19 @@ def update_image(path, fresh_path, memories=False, cfg=False, backup=True, dry_r
         remove_quietly(tmp)                    # the image and the backup are intact
         raise UpdateError(f'{path} is unchanged (writing {tmp} failed: {e.strerror or e})'
                           + (f'; the backup {made} is complete and can be deleted' if made else '')) from e
+    # Read the new image back from the disk and check it before it replaces the old one: every file written
+    # reads back as shipped, every other file of the old image is there unchanged, the FATs agree.
+    written = {norm(p): fresh.read_file(p) for p in rep.added + rep.changed}
+    try:
+        with open(tmp, 'rb') as f:
+            problems = verify(bytearray(f.read()), old_files, written)
+    except OSError as e:
+        problems = [f'{tmp} cannot be read back ({e.strerror or e})']
+    if problems:
+        remove_quietly(tmp)
+        raise UpdateError(f'{path} is unchanged: the updated image failed its check ({"; ".join(problems[:3])})'
+                          + (f'; the backup {made} is complete and can be deleted' if made else '')
+                          + '. Please report this.')
     try:
         os.replace(tmp, path)
     except OSError as e:

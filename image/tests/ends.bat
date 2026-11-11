@@ -6,7 +6,7 @@ REM the mock's !refuse is a refusal, which CLAWDOS drops from the history, and !
 REM reply that hits max_tokens, which it keeps; the conversation files go to the serial
 REM port to show it. (!error is in streamerr.bat.)
 ECHO CLAWDOS-ENDS-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!refuse"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!cutoff"

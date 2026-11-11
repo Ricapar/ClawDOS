@@ -8,7 +8,7 @@ REM !headercol: reply text, a tool call, and peeks of CGA memory until the mock
 REM finds the tool header's row: its bullet must be in column 0, not in the
 REM reply's margin (--expect "tool header column: 0 (PASS)").
 ECHO CLAWDOS-NOTES-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!note"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!headercol"

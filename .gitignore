@@ -8,6 +8,11 @@
 *.exe
 *.com
 *.img
+# build.py --update's backup and the new image on its way: copies of an image, with its key
+*.img.bak*
+*.IMG.bak*
+*.img.new
+*.IMG.new
 *.pyc
 # The user's own (commercial) disk images, used by the image build
 /external/

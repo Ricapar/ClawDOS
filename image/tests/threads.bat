@@ -15,7 +15,7 @@ REM minutes would), and the resumed harness replays. !threadretry: the continue
 REM meets a 529, or an overloaded_error event, once and is sent again as the
 REM same continue; a plain 404 or 400 (no thread code) ends the turn.
 ECHO CLAWDOS-THREADS-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadlost"
 ECHO HARNESS.EXE threadlost exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threaddrop"

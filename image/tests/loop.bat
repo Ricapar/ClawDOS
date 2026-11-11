@@ -5,7 +5,7 @@ REM --reject "VALIDATION:"): the mock's !loop calls sysinfo every round until a 
 REM says tool_choice none. HARNESS allows 25 rounds, sends none on the 26th and the turn
 REM ends with the mock's final answer.
 ECHO CLAWDOS-LOOP-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -unsafe -m "!loop"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1

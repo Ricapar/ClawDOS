@@ -5,7 +5,7 @@ REM API's !tooltour calls every tool on this machine and logs the verdict. The
 REM shipped settings ask for progress notes, so each response opens with one
 REM naming the next step; CLAWDOS.LOG shows each that was drawn on the screen.
 ECHO CLAWDOS-TOOLS-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tooltour"
 ECHO HARNESS.EXE exit code %ERRORLEVEL% > COM1
 REM The tour's stdin probe runs STDINEOF.COM directly; here a batch file runs it,

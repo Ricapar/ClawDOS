@@ -156,7 +156,7 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --reject '"content":"!runrefuse"' --reject toolu_mock --reject "VALIDATION:"
 
 boottests-online: build ## the DOSBox-X boot tests that need the internet (NTP)
-	$(BOOTTEST) image/tests/clock.bat --expect "System time set" --expect "PING after the clock: 0"
+	$(BOOTTEST) image/tests/clock.bat --online --expect "System time set" --expect "PING after the clock: 0"
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)

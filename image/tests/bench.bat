@@ -6,7 +6,7 @@ REM with full_memory (through CLAWDOS.EXE: a real relaunch) and a 4 KB reply.
 REM CLAWDOS.LOG, with a line per round, goes to C:\BENCH.LOG for bench.py.
 SET L=C:\BENCH.LOG
 ECHO ClawDOS benchmark > %L%
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m !bench
 ECHO CLAWDOS.EXE exit code %ERRORLEVEL% >> %L%
 TYPE C:\CLAWDOS\CLAWDOS.LOG >> %L%

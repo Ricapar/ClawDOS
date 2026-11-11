@@ -8,7 +8,7 @@ REM (CLAWDOS.LOG's run: lines time the in-harness runs, the third without a
 REM screenshot). The mock logs "image ok" for each PNG.
 SET L=C:\DEVTEST.LOG
 ECHO Screenshot test on the 8088 > %L%
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADS.COM screenshot=true"
 ECHO exit exit code %ERRORLEVEL% >> %L%
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1.5"

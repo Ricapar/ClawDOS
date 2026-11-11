@@ -16,7 +16,7 @@ REM shot_color redraws it in palette 1, QUAD6.COM is a real mode 6 screen, bad
 REM shot_mode and shot_at values are refused, and !shotmem checks that a
 REM launcher screenshot leaves the harness no smaller (MEM before and after).
 ECHO CLAWDOS-SHOT-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADS.COM screenshot=true"
 ECHO exit exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1.5"

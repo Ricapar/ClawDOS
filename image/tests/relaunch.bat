@@ -9,7 +9,7 @@ REM The tour writes a memory before that relaunch, so the resumed harness sees
 REM a memory list unlike the one the conversation began with: the mock rejects
 REM (VALIDATION:) any request whose system or tools differ from the first.
 ECHO CLAWDOS-RELAUNCH-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!bigrun MEM /C"
 ECHO CLAWDOS.EXE exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\RUN.OUT > COM1

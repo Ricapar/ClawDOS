@@ -13,7 +13,7 @@ REM Each is opened with -c and continued with the mock's !reopened, which logs
 REM the messages that came: roles must still alternate, the next text joining
 REM the message it follows, and the call answered with an error result.
 ECHO CLAWDOS-CHATENDS-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 MD C:\CLAWDOS\CHATS
 COPY C:\TESTS\CHATS\*.JSN C:\CLAWDOS\CHATS > NUL
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -c UNANS -q -m "!reopened unans"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Tests of scripts/imgupdate.py (python3 scripts/test_imgupdate.py, part of make test).
 
-Every image here is made in a temporary directory; no real image is involved.
+Every image here is made in a temporary directory; no real image is involved, except a copy of
+build/test.img when a boot test has left one (an image DOS itself wrote to; it holds no key).
 The "PC" image holds data the build must never touch, the "fresh" one is what a build ships.
 """
 
@@ -310,6 +311,143 @@ class UpdateImageTest(unittest.TestCase):
             imgupdate.update_image(self.pc, self.fresh)
         self.assertEqual(self.read(self.pc), before)
         self.assertFalse(os.path.exists(self.pc + '.bak'))
+
+
+class UpdateVerifyTest(unittest.TestCase):
+    """The read-back check before the new image replaces the old one, on images with holes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.pc = os.path.join(self.tmp.name, 'PC.IMG')
+        self.fresh = os.path.join(self.tmp.name, 'FRESH.IMG')
+
+    def write(self, path, img):
+        with open(path, 'wb') as f:
+            f.write(img)
+
+    def read(self, path):
+        with open(path, 'rb') as f:
+            return f.read()
+
+    @staticmethod
+    def fragmented():
+        """The PC image after months of use: files written, every other one deleted, the rest grown, so
+        free space is in holes between files and the grown ones are in pieces."""
+        img = make_image(PC)
+        fs = fatimg.open_fs(img)
+        fs.makedirs('CLAWDOS/CHATS')
+        for i in range(24):
+            fs.write_file(f'CLAWDOS/CHATS/C{i:02}.JSN', bytes([65 + i]) * (fs.csize * (1 + i % 3) - 7))
+        for i in range(0, 24, 2):
+            fs.remove(f'CLAWDOS/CHATS/C{i:02}.JSN')
+        for i in range(1, 24, 4):
+            name = f'CLAWDOS/CHATS/C{i:02}.JSN'
+            fs.write_file(name, fs.read_file(name) + b'grown' * fs.csize)
+        return img
+
+    def test_an_update_into_the_holes_of_a_fragmented_image(self):
+        img = self.fragmented()
+        self.assertEqual(imgupdate.fs_problems(fatimg.open_fs(img)), [])
+        before = contents(img)
+        csize = fatimg.open_fs(img).csize
+        fresh = dict(FRESH, **{'CLAWDOS/HARNESS.EXE': b'H' * (csize * 9 + 3), 'KERNEL.SYS': b'K' * (csize * 4)})
+        self.write(self.pc, img)
+        self.write(self.fresh, make_image(fresh))
+        rep = imgupdate.update_image(self.pc, self.fresh, backup=False)
+        after = contents(self.read(self.pc))
+        self.assertIn('CLAWDOS/HARNESS.EXE', rep.changed)
+        self.assertEqual(after['CLAWDOS/HARNESS.EXE'], fresh['CLAWDOS/HARNESS.EXE'])
+        self.assertEqual(after['KERNEL.SYS'], fresh['KERNEL.SYS'])
+        for path, data in before.items():
+            if path not in (p.upper() for p in rep.added + rep.changed):
+                self.assertEqual(after[path], data, path)
+        self.assertEqual(imgupdate.fs_problems(fatimg.open_fs(bytearray(self.read(self.pc)))), [])
+        harness = fatimg.open_fs(bytearray(self.read(self.pc))).lookup('CLAWDOS/HARNESS.EXE')[0]
+        chain = fatimg.open_fs(bytearray(self.read(self.pc))).chain(harness.cluster)
+        self.assertNotEqual(chain, list(range(chain[0], chain[0] + len(chain))), 'the test should fragment it')
+
+    def failing_update(self, fragment):
+        """update_image must refuse (UpdateError containing fragment) and leave the image as it was."""
+        before = self.read(self.pc)
+        with self.assertRaisesRegex(imgupdate.UpdateError, fragment):
+            imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.read(self.pc), before)
+        self.assertFalse(os.path.exists(self.pc + '.new'))
+
+    def test_a_write_that_does_not_read_back_is_caught(self):
+        self.write(self.pc, self.fragmented())
+        self.write(self.fresh, make_image(FRESH))
+        real = fatimg.FatFS.write_file
+
+        def garbled(fs, path, data, *a, **kw):
+            real(fs, path, data[::-1] if path.upper().endswith('HARNESS.EXE') else data, *a, **kw)
+
+        with mock.patch.object(fatimg.FatFS, 'write_file', garbled):
+            self.failing_update('CLAWDOS/HARNESS.EXE does not read back as written')
+
+    def test_fat_copies_that_disagree_after_the_update_are_caught(self):
+        self.write(self.pc, self.fragmented())
+        self.write(self.fresh, make_image(FRESH))
+        real = fatimg.FatFS.fat_set
+
+        def first_copy_only(fs, c, val):
+            nfats, fs.nfats = fs.nfats, 1
+            try:
+                real(fs, c, val)
+            finally:
+                fs.nfats = nfats
+
+        with mock.patch.object(fatimg.FatFS, 'fat_set', first_copy_only):
+            self.failing_update('FAT copy 2 differs from the first')
+
+    def test_a_file_the_update_should_not_touch_is_checked_too(self):
+        self.write(self.pc, self.fragmented())
+        self.write(self.fresh, make_image(FRESH))
+        real = imgupdate.update_fs
+
+        def and_a_stray_write(target, fresh, *a, **kw):
+            rep = real(target, fresh, *a, **kw)
+            target.write_file('GAMES/PONG.EXE', b'overwritten')
+            return rep
+
+        with mock.patch.object(imgupdate, 'update_fs', and_a_stray_write):
+            self.failing_update('GAMES/PONG.EXE is changed, though the update did not write it')
+
+    def test_a_damaged_image_is_refused_before_anything_is_written(self):
+        img = make_image(PC)
+        fs = fatimg.open_fs(img)
+        a = fs.lookup('GAMES/PONG.EXE')[0]
+        b = fs.lookup('CLAWDOS/CLAWDOS.LOG')[0]
+        img[b.loc + 26:b.loc + 28] = a.cluster.to_bytes(2, 'little')     # two files on one cluster
+        self.write(self.pc, img)
+        self.write(self.fresh, make_image(FRESH))
+        self.failing_update('cross-linked.*CHKDSK')
+        self.assertFalse(os.path.exists(self.pc + '.bak'))
+
+    DOS_WRITTEN = os.path.join(build.BUILD, 'test.img')
+
+    @unittest.skipUnless(os.path.exists(DOS_WRITTEN), 'no build/test.img (a boot test leaves one)')
+    def test_an_image_dosbox_x_wrote_to(self):
+        # the image a boot test left: DOS made its directories, chats and log, with DOS's own allocation
+        with open(self.DOS_WRITTEN, 'rb') as f:
+            img = bytearray(f.read())
+        self.assertEqual(imgupdate.fs_problems(fatimg.open_fs(img)), [])
+        before = contents(img)
+        self.write(self.pc, img)
+        fresh = {'CLAWDOS/HARNESS.EXE': b'new harness' * 9000, 'CLAWDOS/NEWFILE.TXT': b'new',
+                 'CLAWDOS/CLAWDOS.CFG': b'provider x\r\n'}
+        self.write(self.fresh, make_image(fresh))
+        rep = imgupdate.update_image(self.pc, self.fresh, backup=False)
+        after = contents(self.read(self.pc))
+        self.assertEqual(after['CLAWDOS/HARNESS.EXE'], fresh['CLAWDOS/HARNESS.EXE'])
+        self.assertEqual(after['CLAWDOS/NEWFILE.TXT'], b'new')
+        self.assertEqual(after['CLAWDOS/CLAWDOS.CFG'], before['CLAWDOS/CLAWDOS.CFG'])     # the PC's
+        new = ('CLAWDOS/HARNESS.EXE', 'CLAWDOS/NEWFILE.TXT')
+        self.assertEqual(sorted(set(after) - set(new)), sorted(set(before) - set(new)))
+        for path in set(before) - set(new):
+            self.assertTrue(after[path] == before[path], path)
+        self.assertEqual(sorted(rep.changed + rep.added), ['CLAWDOS/HARNESS.EXE', 'CLAWDOS/NEWFILE.TXT'])
 
 
 class UpdateWarningsTest(unittest.TestCase):

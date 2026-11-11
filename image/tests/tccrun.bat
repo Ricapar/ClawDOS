@@ -5,7 +5,7 @@ REM out of memory this way on the real PC when run went through a second
 REM COMMAND.COM; started directly, TCC (and the TLINK it starts) must fit.
 SET L=C:\DEVTEST.LOG
 ECHO Turbo C through CLAWDOS > %L%
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 C:
 CD \TESTS\DEV
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!run TCC TPRIMES.C"

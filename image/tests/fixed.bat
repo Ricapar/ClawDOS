@@ -10,7 +10,7 @@ REM with (RESUME.TXT carries it): the mock rejects (VALIDATION:) a thinking
 REM object or a top-level cache marker that changed within a conversation, and
 REM markers whose ttl disagree. A new conversation then takes the new settings.
 ECHO CLAWDOS-FIXED-TEST > COM1
-CALL C:\NET\NETUP.BAT
+CALL C:\NET\NETUP.BAT NOCLOCK
 ECHO progress 0 > C:\EXTRA.TXT
 ECHO dropthinking 0 >> C:\EXTRA.TXT
 ECHO cachettl 1h >> C:\EXTRA.TXT
