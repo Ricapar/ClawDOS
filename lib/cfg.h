@@ -17,7 +17,7 @@ typedef struct Provider {
     char tunnel[48];      /* host:port of the TLS tunnel */
     char host[64];        /* Host header */
     char path[48];        /* default "/v1/messages" */
-    char auth[12];        /* "x-api-key" (default) or "bearer" */
+    char auth[12];        /* "x-api-key" (default), "bearer", or "tunnel": send no key, the tunnel adds it */
     char key[128];
     char keyfile[64];     /* read into key by cfg_load when key is empty */
     char model[48];

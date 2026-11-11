@@ -386,7 +386,7 @@ int api_head(Sink *s, const Provider *p, const ApiFixed *f, unsigned long length
     PUT(" HTTP/1.1\r\nHost: ");
     PUT(p->host);
     PUT("\r\n");
-    if (p->key[0]) {                       /* no key: no header (the API says 401) */
+    if (p->key[0] && stricmp(p->auth, "tunnel")) {   /* no key: no header (the API says 401); auth tunnel: the tunnel adds it */
         if (!stricmp(p->auth, "bearer")) {
             PUT("Authorization: Bearer ");
             PUT(p->key);

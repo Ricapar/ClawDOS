@@ -176,7 +176,7 @@ const char *cfg_missing(const Provider *p)
 {
     if (!p->tunnel[0]) return "tunnel";
     if (!p->host[0]) return "host";
-    if (!p->key[0]) return "key";
+    if (!p->key[0] && stricmp(p->auth, "tunnel")) return "key";   /* auth tunnel: the tunnel has the key */
     if (!p->model[0]) return "model";
     return NULL;
 }

@@ -84,7 +84,7 @@ int8_t Chat::init(Cfg *c, const char *providerId, const char *hostOverride, Chat
         return -1;
     if (connect())
         return -1;
-    if (!prov->key[0]) {
+    if (cfg_missing(prov) != NULL) {     /* only "key" can be missing here, and not with auth tunnel */
         sprintf(errBuf, "No API key for [%s]: add a key line to " CFG_PATH ".", prov->id);
         warn(errBuf);
     }

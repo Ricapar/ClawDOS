@@ -649,6 +649,10 @@ static void testCfg(void)
     CHECK("cfg empty cachettl is bad", cfg_parse(c, "[a]\ncachettl\n") == 2);
     cfg_defaults(c);
     CHECK("cfg defaults", !strcmp(c->name, "Claude") && c->nproviders == 0);
+    CHECK("cfg auth tunnel needs no key", cfg_parse(c, "[t]\ntunnel h:1\nhost h\nmodel m\nauth tunnel\n[u]\ntunnel h:1\nhost h\nmodel m\n") == 0
+          && !strcmp(c->providers[0].auth, "tunnel") && cfg_missing(&c->providers[0]) == NULL
+          && !strcmp(cfg_missing(&c->providers[1]), "key"));
+    cfg_defaults(c);
     CHECK("cfg old keys ignored", cfg_parse(c, "clock 0\ntimezone -5\ntheme x\n") == 0);
     free(c);
 }
@@ -879,6 +883,12 @@ static void testApiReq(void)
     api_head(&buf, p, &fx, 1);
     CHECK("head bearer and betas", strstr(head, "Authorization: Bearer sk-or-x\r\n") && !strstr(head, "x-api-key")
           && strstr(head, "anthropic-beta: b-2026\r\n"));
+    strcpy(p->auth, "tunnel"); strcpy(p->key, "sk-ant-abc"); p->betas[0] = 0;
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 5);
+    CHECK("head auth tunnel sends no key", !strstr(head, "x-api-key") && !strstr(head, "Authorization")
+          && !strstr(head, "sk-ant-abc") && strstr(head, "Host: api.anthropic.com\r\n")
+          && strstr(head, "Content-Length: 5\r\n"));
     hist_close();
     remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
     free(big);
