@@ -8,7 +8,7 @@
 #include "json.h"
 
 #define RESULT_LOST "Error: the result could not be written to the conversation file."
-#define IMAGE_LOST  "(The screenshot could not be attached: its file could not be read or written.)"
+#define IMAGE_LOST  "(The screenshot could not be attached: its file could not be read or written.)"   /* JSON-safe */
 #define B64_IN      192             /* file bytes a piece (a multiple of 3) */
 #define B64_OUT     (B64_IN / 3 * 4)
 
@@ -119,7 +119,10 @@ static int putBase64(const char *path)
     return rc || total == 0 ? -1 : 0;
 }
 
-static int writeResult(const char *id, const char *text, int isError, const char *note, const char *image)
+/* One tool_result message. With image, the content is a list: the text, then
+   the PNG as an image block. lost: the text says the picture is missing. */
+static int writeResult(const char *id, const char *text, int isError, const char *note, const char *image,
+                       int lost)
 {
     Sink s;
     int rc = 0;
@@ -128,6 +131,8 @@ static int writeResult(const char *id, const char *text, int isError, const char
     rc |= hist_puts(id);
     rc |= hist_puts(image ? "\",\"content\":[{\"type\":\"text\",\"text\":\"" : "\",\"content\":\"");
     rc |= json_escape_cp437(&s, text, strlen(text));
+    if (lost)
+        rc |= hist_puts("\\n" IMAGE_LOST);
     if (image) {
         rc |= hist_puts("\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"");
         rc |= rc ? -1 : putBase64(image);
@@ -142,33 +147,36 @@ static int writeResult(const char *id, const char *text, int isError, const char
         rc |= hist_puts("\"}");
     }
     rc |= hist_puts("]}");
-    rc |= hist_message_done();
-    return rc ? -1 : 0;
+    /* Not done unless all of it is there: a picture that could not be read
+       fails no write, and must not become the boundary a rollback stops at. */
+    if (rc)
+        return -1;
+    return hist_message_done() ? -1 : 0;
 }
 
 int convo_tool_result(Convo *c, const char *id, const char *text, int isError, const char *note)
 {
-    return convo_tool_result_image(c, id, text, isError, note, NULL);
+    return convo_tool_result_image(c, id, text, isError, note, NULL) < 0 ? -1 : 0;
 }
 
 int convo_tool_result_image(Convo *c, const char *id, const char *text, int isError, const char *note,
                             const char *image)
 {
-    if (writeResult(id, text, isError, note, image) == 0) {
+    if (writeResult(id, text, isError, note, image, 0) == 0) {
         c->mergeNext = CONVO_JOIN_RESULTS;     /* a results message is last until the next request answers it */
         return 0;
     }
     hist_rollback_message();
-    if (image) {                               /* the result without its picture */
-        if (writeResult(id, text, isError, note ? note : IMAGE_LOST, NULL) == 0) {
+    if (image) {                               /* the result without its picture, saying so */
+        if (writeResult(id, text, isError, note, NULL, 1) == 0) {
             c->mergeNext = CONVO_JOIN_RESULTS;
-            return 0;
+            return 1;
         }
         hist_rollback_message();
     }
     /* The call must still be answered for the file to stay valid: a short
        error result, or failing that the whole turn goes. */
-    if (writeResult(id, RESULT_LOST, 1, NULL, NULL) == 0) {
+    if (writeResult(id, RESULT_LOST, 1, NULL, NULL, 0) == 0) {
         c->mergeNext = CONVO_JOIN_RESULTS;
         return -1;
     }

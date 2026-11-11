@@ -31,6 +31,8 @@ static volatile unsigned long total;          /* bytes captured, including dropp
 
 static void (__interrupt __far *oldInt10)();
 
+void (*shell_before_run)(void);
+
 /* Runs on the program's stack. Keep it free of calls to our own functions:
    a helper called from here never ran in testing, and the cause wasn't found
    (code compiled for SS == DGROUP running on a foreign stack is a suspect). */
@@ -298,6 +300,8 @@ static int runOne(const char *cmd, char *why)
         savedIn = dup(0);
         dup2(nul, 0);
     }
+    if (shell_before_run)
+        shell_before_run();
     oldInt10 = _dos_getvect(0x10);
     _dos_setvect(0x10, int10Hook);
     if (args == NULL)

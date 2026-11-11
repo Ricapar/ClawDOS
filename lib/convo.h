@@ -35,9 +35,9 @@ int  convo_assistant_done(Convo *c);
    even that could not be written) the turn has been rolled back. */
 int  convo_tool_result(Convo *c, const char *id, const char *cp437Text, int isError, const char *note);
 /* The same with the PNG file `image` (NULL: none) after the text, as an image
-   block streamed from the file in base64. If the result cannot be written
+   block streamed from the file in base64: 0. If the result cannot be written
    with it (the file cannot be read, or a write failed), it is written without
-   it, with a note saying so; failing that as convo_tool_result. */
+   it, its text saying so: 1. Failing that as convo_tool_result (-1). */
 int  convo_tool_result_image(Convo *c, const char *id, const char *cp437Text, int isError, const char *note,
                              const char *image);
 /* The turn ended early. No assistant message yet: the whole turn is rolled

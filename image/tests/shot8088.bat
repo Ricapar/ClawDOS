@@ -9,9 +9,9 @@ ECHO Screenshot test on the 8088 > %L%
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADS.COM screenshot=true"
 ECHO exit exit code %ERRORLEVEL% >> %L%
-C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1"
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1.5"
 ECHO timed exit code %ERRORLEVEL% >> %L%
-C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1 full_memory=true"
+C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!tool run command=C:\TESTS\QUADT.COM shot_at=1.5 full_memory=true"
 ECHO launcher timed exit code %ERRORLEVEL% >> %L%
 C:\TESTS\DOSUNIT.EXE > C:\UNITS.TXT
 FIND "PNG written in" C:\UNITS.TXT >> %L%

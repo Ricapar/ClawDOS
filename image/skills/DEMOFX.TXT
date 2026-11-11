@@ -34,8 +34,10 @@ RULES
    for a picture of the screen the program leaves, or shot_at N for one
    N seconds into the run (a program that sets text mode on exit). It
    is a PNG of video memory with the colours the BIOS set (modes 4, 5,
-   6); if you wrote 3D8h/3D9h yourself, give shot_mode and shot_color.
-   Per-line register changes (raster bars, splits) don't show in it.
+   6); if you wrote 3D8h/3D9h yourself, give shot_mode and shot_color
+   (+64 for the burst off). It reads memory from offset 0: a moved
+   CRTC start address or a page flip is not in it, nor per-line
+   register changes (raster bars, splits).
    Each picture adds ~22 KB to the chat: look when it matters. Also have
    the program measure itself (PIT ticks per frame, frames dropped) and
    print the numbers when it ends.

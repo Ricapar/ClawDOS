@@ -29,6 +29,7 @@ so the boot tests can reject it. Stdlib only.
 import argparse
 import base64
 import binascii
+import glob
 import hashlib
 import json
 import os
@@ -1228,6 +1229,8 @@ def main():
     ap.add_argument('--thread-ttl', type=float, default=THREAD_TTL,
                     help='seconds a message thread stays continuable after its last request')
     a = ap.parse_args()
+    for old in glob.glob(os.path.join(SHOT_DIR, 'mockshot-*.png')):    # a run's pictures are its own
+        os.remove(old)
     try:
         server = make_server(a.port, a.speed, a.tools, host=a.listen, thread_ttl=a.thread_ttl)
     except (OSError, ValueError) as e:

@@ -109,9 +109,21 @@ void testShotPng(void)
     CHECK("shot: palette 1 dim on white", shot_palette(&info, SHOT_320, rgb) == 4
           && samePalette(rgb, 4, "FFFFFF 00AAAA AA00AA AAAAAA"));
     info.mode = 5;
+    info.modeReg = 0x2E;                         /* the BIOS's mode 5: colour burst off */
     info.colorReg = 0x30;
     CHECK("shot: mode 5 is cyan, red, white", shot_palette(&info, SHOT_320, rgb) == 4
           && samePalette(rgb, 4, "000000 55FFFF FF5555 FFFFFF"));
+
+    info.mode = 4;
+    info.modeReg = 0x2A;                         /* the shadow says burst on; the program turned it off */
+    info.color = 0x30 | SHOT_BURST_OFF;
+    CHECK("shot: shot_color's burst bit", shot_palette(&info, SHOT_320, rgb) == 4
+          && samePalette(rgb, 4, "000000 55FFFF FF5555 FFFFFF"));
+    info.color = SHOT_NO_COLOR;
+    info.modeReg = 0x1E;                         /* mode 6's shadow (burst bit, 640): not mode 5's palette */
+    info.colorReg = 0x30;
+    CHECK("shot: 640 shadow is no burst-off palette", shot_palette(&info, SHOT_320, rgb) == 4
+          && samePalette(rgb, 4, "000000 55FFFF FF55FF FFFFFF"));
 
     /* the launcher's file: a ShotInfo, then the frame */
     info.how = SHOT_TIMED;
@@ -129,6 +141,70 @@ void testShotPng(void)
     CHECK("shot: no SHOT.RAW", shot_load_raw(&back, frame) == -1);
     remove("C:\\SHOTTEST.PNG");
     free(frame);
+}
+
+/* shot_at's seconds as tenths. */
+void testShotSeconds(void)
+{
+    static const char *const good[] = { "1", "0.5", "0.1", "1.5", "1.25", "2.0", "2.", "300", "300.0", "300.04" };
+    static const unsigned want[] = { 10, 5, 1, 15, 12, 20, 20, 3000, 3000, 3000 };
+    static const char *const bad[] = { "0", "0.0", "0.05", "300.1", "301", "-1", "1e1", "x", "", ".5", "1.5s", "99999999" };
+    static char name[48];
+    unsigned i, tenths;
+
+    for (i = 0; i < sizeof good / sizeof good[0]; i++) {
+        sprintf(name, "shot_at %s", good[i]);
+        CHECK(name, shot_seconds(good[i], &tenths) == 0 && tenths == want[i]);
+    }
+    for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        sprintf(name, "shot_at \"%s\" refused", bad[i]);
+        CHECK(name, shot_seconds(bad[i], &tenths) == -1);
+    }
+}
+
+/* How often needle is in hay. */
+static int countOf(const char *hay, const char *needle)
+{
+    int n = 0;
+    while ((hay = strstr(hay, needle)) != NULL) {
+        n++;
+        hay += strlen(needle);
+    }
+    return n;
+}
+
+/* The history file's size on disk is what history.c counts. */
+static int sizeAgrees(void)
+{
+    FILE *f = fopen("C:\\HISTTEST.JSN", "rb");
+    long n = -1;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        n = ftell(f);
+        fclose(f);
+    }
+    return n == hist_size();
+}
+
+/* After a picture that could not go in: exactly one result for the call,
+   its text saying so, no image block, and the file as history.c counts it. */
+static int withoutPicture(const char *id)
+{
+    const char *h = histText();
+    static char want[40];
+    sprintf(want, "\"tool_use_id\":\"%s\"", id);
+    return countOf(h, "tool_result") == 1 && countOf(h, want) == 1 && !strstr(h, "image/png")
+           && !strstr(h, "\"image\"") && strstr(h, "could not be attached") && sizeAgrees();
+}
+
+static void writeFile(const char *path, unsigned n)
+{
+    FILE *f = fopen(path, "wb");
+    unsigned i;
+    for (i = 0; f && i < n; i++)
+        fputc(i * 7, f);
+    if (f)
+        fclose(f);
 }
 
 /* A fresh history ending with a run call `id` from the assistant. */
@@ -175,19 +251,30 @@ void testConvoImage(void)
     convo_tool_result_image(&c, "t2", "ok", 0, NULL, "C:\\SHOTTEST.PNG");
     CHECK("convo image: padding", endsWith(histText(), "\"data\":\"QQ==\"}}],\"is_error\":false}]}"));
     imageCall(&c, "t4");
-    hist_test_write_ok = 0;                      /* the result's write fails once: written again without it */
+    hist_test_write_ok = 0;                      /* the result's only write (the last flush) fails */
     hist_test_write_bad = 1;
-    CHECK("convo image: a failed write leaves the text and a note",
-          convo_tool_result_image(&c, "t4", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 0 && !strstr(histText(), "image/png")
-          && endsWith(histText(), "file could not be read or written.)\"}]}"));
+    CHECK("convo image: a failed write leaves one result without it",
+          convo_tool_result_image(&c, "t4", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 1 && withoutPicture("t4"));
     hist_test_write_ok = -1;
     hist_test_write_bad = 0;
+    writeFile("C:\\SHOTTEST.PNG", 6000);       /* 8 KB of base64: four flushes of the 2 KB buffer */
+    imageCall(&c, "t5");
+    hist_test_write_ok = 2;                      /* two pieces reach the disk, then a write fails */
+    hist_test_write_bad = 1;
+    CHECK("convo image: a write failing mid-picture leaves one result without it",
+          convo_tool_result_image(&c, "t5", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 1 && withoutPicture("t5"));
+    hist_test_write_ok = -1;
+    hist_test_write_bad = 0;
+    writeFile("C:\\SHOTTEST.PNG", 0);
+    imageCall(&c, "t6");
+    CHECK("convo image: an empty file leaves one result without it",
+          convo_tool_result_image(&c, "t6", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 1 && withoutPicture("t6"));
     imageCall(&c, "t3");
     remove("C:\\SHOTTEST.PNG");
-    CHECK("convo image: a missing file leaves the text and a note",
-          convo_tool_result_image(&c, "t3", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 0
-          && endsWith(histText(), "\"content\":\"ok\",\"is_error\":false},{\"type\":\"text\",\"text\":"
-                      "\"(The screenshot could not be attached: its file could not be read or written.)\"}]}"));
+    CHECK("convo image: a missing file leaves one result without it",
+          convo_tool_result_image(&c, "t3", "ok", 0, NULL, "C:\\SHOTTEST.PNG") == 1 && withoutPicture("t3")
+          && endsWith(histText(), "\"content\":\"ok\\n(The screenshot could not be attached: its file could not "
+                      "be read or written.)\",\"is_error\":false}]}"));
     hist_close();
     remove("C:\\HISTTEST.JSN");
 }

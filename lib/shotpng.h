@@ -28,6 +28,10 @@ unsigned shot_palette(const ShotInfo *info, int kind, unsigned char *rgb);
    the file is then removed). */
 int  png_write_cga(const char *path, const unsigned char __far *frame, int bpp,
                    const unsigned char *rgb, unsigned colors);
+#define SHOT_AT_MAX 3000              /* shot_at, tenths of a second: 5 minutes */
+/* shot_at's text ("2", "0.5", "1.25") as tenths of a second, 1 to
+   SHOT_AT_MAX, in *tenths: 0, or -1 when it is not such a number. */
+int  shot_seconds(const char *s, unsigned *tenths);
 /* SHOT_RAW (the launcher's capture) into info and the 16 KB at frame: 0, -1. */
 int  shot_load_raw(ShotInfo *info, unsigned char __far *frame);
 

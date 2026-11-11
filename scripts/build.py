@@ -139,10 +139,12 @@ def build_boot():
     # the tool tour's standard-input probe (C:\TESTS\STDINEOF.COM)
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'stdineof.com'),
          os.path.join(ROOT, 'tests', 'unit', 'stdineof.asm')])
-    # the screenshot tests' mode-4 picture (C:\TESTS\QUADS.COM, and QUADT.COM that restores text mode)
+    # the screenshot tests' pictures (C:\TESTS\QUADS.COM; QUADT.COM restores text mode; QUAD6.COM, TEXT40.COM)
     quads = os.path.join(ROOT, 'tests', 'unit', 'quads.asm')
     run([nasm(), '-f', 'bin', '-o', os.path.join(BUILD, 'quads.com'), quads])
     run([nasm(), '-f', 'bin', '-dRESTORE', '-o', os.path.join(BUILD, 'quadt.com'), quads])
+    run([nasm(), '-f', 'bin', '-dHIRES', '-o', os.path.join(BUILD, 'quad6.com'), quads])
+    run([nasm(), '-f', 'bin', '-dTEXT40', '-o', os.path.join(BUILD, 'text40.com'), quads])
     # the PNGs DOSUNIT's encoder must reproduce byte for byte (C:\TESTS\REF320.PNG, REF640.PNG)
     run([sys.executable, os.path.join(ROOT, 'tests', 'unit', 'pngref.py'), BUILD])
 

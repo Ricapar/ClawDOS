@@ -27,6 +27,7 @@ import pngref  # noqa: E402
 # The pixel digest of QUADS.COM's picture (tests/unit/quads.asm) in the mock's `image ok` line: the
 # Makefile's shot.bat expectations name it, and ScreenshotTest checks it against pngref's drawing.
 QUADS_PIXELS = 'B5BCA4D2'
+QUAD6_PIXELS = 'A99B2194'     # QUAD6.COM's mode 6 picture
 
 
 def sse_events(body):
@@ -1192,6 +1193,12 @@ class ScreenshotTest(unittest.TestCase):
         # top left blue (0) with the diagonal in 3; bottom right yellow (3) with it in 0
         self.assertEqual((rows[0][0] >> 6, rows[0][0] >> 4 & 3, rows[0][79]), (3, 0, 0x55))
         self.assertEqual((rows[199][49] & 3, rows[199][48], rows[199][0]), (0, 0xFF, 0xAA))
+
+    def test_quad6_digest_is_the_one_the_boot_test_expects(self):
+        png = pngref.png_cga(pngref.quads_frame(hires=True), 1, [0x000000, 0xFFFFFF])
+        self.assertEqual(f'{mockapi.png_info(png)[3]:08X}', QUAD6_PIXELS)
+        rows = pngref.rows_of(pngref.quads_frame(hires=True))
+        self.assertEqual((rows[0][0], rows[9][1], rows[199][24], rows[199][0]), (0x80, 0x40, 0xAA ^ 0x01, 0xAA))
 
     def test_bad_pngs_are_refused_with_what_is_wrong(self):
         png = self.QUADS

@@ -93,15 +93,21 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "NOTCHAT.JSN is not a chat file" --expect "notchat exit code 1" --expect "and its second line stays" \
 	    --expect "path exit code 1" --expect "AUTOEXEC.BAT still whole" --expect "HALF.JSN: 46 bytes (66 cut)" \
 	    --expect "NOSUCH.JSN (or it is empty)" --expect "nosuch exit code 1" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/shot.bat --mock --timeout 240 \
+	$(BOOTTEST) image/tests/shot.bat --mock --timeout 400 \
 	    --expect "image ok 320x200 (run C:\TESTS\QUADS.COM, screenshot=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
-	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1.5): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
 	    --expect "image ok 640x200 (run C:\TESTS\QUADS.COM, shot_mode=640x200): palette 000000 0000AA, pixels B5BCA4D2" \
+	    --expect "image ok 640x200 (run C:\TESTS\QUAD6.COM, screenshot=True): palette 000000 FFFFFF, pixels A99B2194" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADS.COM, shot_color=48): palette 000000 55FFFF FF55FF FFFFFF, pixels B5BCA4D2" \
 	    --expect "image ok 320x200 (run C:\TESTS\QUADS.COM, screenshot=True, full_memory=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
-	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1, full_memory=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
+	    --expect "image ok 320x200 (run C:\TESTS\QUADT.COM, shot_at=1.5, full_memory=True): palette 0000AA 55FF55 FF5555 FFFF55, pixels B5BCA4D2" \
 	    --expect "graphics screen, video mode 4: no text" --expect "tool run (screenshot: text 80x25)" \
+	    --expect "tool run (screenshot: text 40x25)" --expect "TEXT40: forty colu" \
+	    --expect "tool run -> error: 'shot_mode must be 320x200, 640x200 or text'" \
+	    --expect "tool run -> error: 'shot_at must be seconds after the first command starts, 0.1 to 300'" \
 	    --expect "tool run (shot_at was not reached" --expect "thread replay after thread_not_found: PASS" \
 	    --expect "launcher timed exit code 0" --expect "SHOT.RAW consumed" --expect "SHOT.PNG consumed" \
+	    --expect "shotmem: largest program" --reject "shotmem: largest program None" --reject "after: FAIL" \
 	    --reject "replay after thread_not_found: FAIL" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"

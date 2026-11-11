@@ -1,9 +1,11 @@
 /* ClawDOS screenshots, the capture: see shot.h. */
 
+#include <stdlib.h>
 #include <dos.h>
 #include <i86.h>
 #include "shot.h"
 #include "ems.h"
+#include "shell.h"
 
 #define BIOS_SEG   0x40
 #define VRAM_SEG   0xB800
@@ -16,6 +18,9 @@ static volatile unsigned char bios[3];      /* mode, mode and colour shadows at 
 static unsigned copySeg;                    /* where the copy goes (offset 0) */
 static unsigned dosSeg;                     /* the DOS block, when there was no EMS */
 static int armed;                           /* 0, 1 armed, -1 asked but no buffer */
+static unsigned pending;                    /* ticks for the hook shell_run's program start sets */
+static int inChain;                         /* the hook is in INT 1Ch's chain (maybe under another) */
+static int atexitSet;
 static void (__interrupt __far *oldInt1C)();
 
 /* Runs on whatever stack the timer interrupted, while the model's program
@@ -61,6 +66,26 @@ static unsigned emsSeg(void)
     return p ? FP_SEG(p) + (FP_OFF(p) >> 4) : 0;
 }
 
+/* shell_run's program is about to start: the count begins. The hook goes in
+   only now, so it is not there while nothing of ours could take it out (and
+   DOS ending us in the shell's own code would leave it pointing nowhere). */
+static void start(void)
+{
+    if (pending == 0)
+        return;
+    left = pending;
+    pending = 0;
+    if (!inChain) {                          /* still there from a run whose unhook failed: not twice */
+        oldInt1C = _dos_getvect(0x1C);
+        _dos_setvect(0x1C, shotIsr);
+        inChain = 1;
+    }
+    if (!atexitSet) {                        /* as lib/screen.c's ticker: never left in the chain at exit */
+        atexit(shot_disarm);
+        atexitSet = 1;
+    }
+}
+
 int shot_arm(unsigned ticks)
 {
     taken = 0;
@@ -74,9 +99,8 @@ int shot_arm(unsigned ticks)
         }
         copySeg = dosSeg;
     }
-    oldInt1C = _dos_getvect(0x1C);
-    left = ticks ? ticks : 1;
-    _dos_setvect(0x1C, shotIsr);
+    pending = ticks ? ticks : 1;
+    shell_before_run = start;
     armed = 1;
     return 0;
 }
@@ -84,10 +108,14 @@ int shot_arm(unsigned ticks)
 void shot_disarm(void)
 {
     left = 0;                                /* inert from now, hooked or not */
+    pending = 0;
     /* Put the old vector back only while the vector is still ours: a program
-       that hooked it after us and stayed would otherwise be cut out. */
-    if (armed == 1 && _dos_getvect(0x1C) == shotIsr)
+       that hooked it after us and stayed would otherwise be cut out. Then we
+       stay in the chain, inert, and the next arm does not hook again. */
+    if (inChain && _dos_getvect(0x1C) == shotIsr) {
         _dos_setvect(0x1C, oldInt1C);
+        inChain = 0;
+    }
 }
 
 const unsigned char __far *shot_frame(ShotInfo *info)

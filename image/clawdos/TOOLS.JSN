@@ -235,7 +235,7 @@
     },
     "screenshot": {
      "type": "boolean",
-     "description": "true: the result also carries a picture of the screen as the last program left it (a 320x200 or 640x200 graphics screen as a PNG image; a text screen as its text). It adds about 22 KB to the conversation, which every later request carries again: ask for it when you need to see graphics, not on every run."
+     "description": "true: the result also carries a picture of the screen as the last program left it (a 320x200 or 640x200 graphics screen as a PNG image; a text screen as its text). The picture is the CGA's 16 KB of video memory read from offset 0, so a changed CRTC start address (scrolling, a page flip) is not shown as the monitor shows it. It adds about 22 KB to the conversation, which every later request carries again: ask for it when you need to see graphics, not on every run."
     },
     "shot_at": {
      "type": "number",
@@ -252,7 +252,7 @@
     },
     "shot_color": {
      "type": "integer",
-     "description": "The colour register (3D9h) value to draw the picture with, 0-63, when the program wrote it itself: in 320x200 bits 0-3 are the background, bit 4 the bright foreground and bit 5 the palette (0 green/red/brown, 1 cyan/magenta/white); in 640x200 bits 0-3 are the foreground colour."
+     "description": "The colour register (3D9h) value to draw the picture with, 0-127, when the program wrote the registers itself: in 320x200 bits 0-3 are the background, bit 4 the bright foreground and bit 5 the palette (0 green/red/brown, 1 cyan/magenta/white); add 64 if it also turned the colour burst off in the mode register (3D8h bit 2, mode 5's cyan/red/white). In 640x200 bits 0-3 are the foreground colour."
     }
    },
    "required": [

@@ -49,6 +49,8 @@ TESTS/                  build:dosunit.exe
 TESTS/                  build:stdineof.com
 TESTS/                  build:quads.com
 TESTS/                  build:quadt.com
+TESTS/                  build:quad6.com
+TESTS/                  build:text40.com
 TESTS/                  build:ref320.png
 TESTS/                  build:ref640.png
 TESTS/                  repo:image/tests/probe/STDINEOF.BAT

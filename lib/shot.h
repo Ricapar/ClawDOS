@@ -24,6 +24,7 @@ enum { SHOT_AUTO, SHOT_320, SHOT_640, SHOT_TEXT };
 /* When the picture was taken. */
 enum { SHOT_AT_EXIT, SHOT_TIMED, SHOT_LATE, SHOT_NOBUF };
 #define SHOT_NO_COLOR 0xFF
+#define SHOT_BURST_OFF 0x40         /* shot_color's bit 6: the mode register's colour burst is off */
 
 typedef struct ShotInfo {
     unsigned char mode;       /* the BIOS's video mode (0040:0049) when it was taken */
@@ -32,13 +33,14 @@ typedef struct ShotInfo {
     unsigned char how;        /* SHOT_AT_EXIT; SHOT_TIMED; SHOT_LATE: shot_at was never reached;
                                  SHOT_NOBUF: no memory for the timed copy (both then taken at exit) */
     unsigned char force;      /* SHOT_AUTO, or the mode shot_mode named */
-    unsigned char color;      /* shot_color, or SHOT_NO_COLOR */
+    unsigned char color;      /* shot_color (the colour register, SHOT_BURST_OFF too), or SHOT_NO_COLOR */
 } ShotInfo;
 
-/* Before the run: take the picture `ticks` timer ticks from now (INT 1Ch).
+/* Before the run: take the picture `ticks` timer ticks after the first
+   program starts (shell_run calls the hook in, through shell_before_run).
    -1 when there is no memory for the copy (the picture is then taken at exit). */
 int  shot_arm(unsigned ticks);
-/* After the run: the timer hook comes out. */
+/* After the run: the timer hook comes out (also at exit, by atexit). */
 void shot_disarm(void);
 /* The picture to use, with *info filled in (force and color left alone): the
    timed copy if it was taken, else video memory as the program left it. */

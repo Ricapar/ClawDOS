@@ -20,6 +20,8 @@ extern "C" {
    command that ran, for the transcript. It returns as soon as the last
    command ends. The caller saves and restores the screen around this. */
 int shell_run(ToolCtx *t, const char *cmds);
+/* Called just before each program starts, when set (lib/shot.c's timer). */
+extern void (*shell_before_run)(void);
 
 /* The text screen at vram (cols x 25 character and attribute words; 40 or
    80 columns), right-trimmed and without trailing blank rows: as many of the

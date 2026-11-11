@@ -133,6 +133,7 @@ SCENARIOS = {
     '!play': 'play a tune on the PC speaker',
     '!bench': 'the benchmark (scripts/bench.py): 20 reads of 4 KB, a full_memory run, a 4 KB reply',
     '!note': 'text, a sysinfo call, then a progress note with blank lines and a break around it, then text',
+    '!shotmem': 'MEM in the harness, a screenshot through the launcher, MEM again: the screenshot must not keep memory',
     '!threadlost': 'a sysinfo call (!threadlost run: a full_memory run) after which the mock forgets the thread',
     '!threaddrop': 'a sysinfo call, then the link drops in the continue\'s reply (!threaddrop burn: and a resend '
                    'meets thread_already_continued)',
@@ -662,6 +663,21 @@ class MockChat:
         yield ToolCall('sysinfo', {})
         self.progress_note = NOTE_TEXT          # the next response opens with it
         yield 'Text after the note.'
+
+    def _cmd_shotmem(self, _text):
+        """The largest program MEM sees in the harness before and after a full_memory screenshot: the resumed
+        harness makes the PNG, and must give back the memory it used for that."""
+        sizes = []
+        for args in ({'command': 'MEM'}, {'command': 'C:\\TESTS\\QUADS.COM', 'screenshot': True, 'full_memory': True},
+                     {'command': 'MEM'}):
+            call = ToolCall('run', args)
+            yield call
+            found = re.search(r'Largest executable program size\s+\S+\s+\(\s*([\d,]+) bytes\)', call.result.text)
+            if args['command'] == 'MEM':
+                sizes.append(int(found.group(1).replace(',', '')) if found else None)
+        ok = None not in sizes and sizes[1] >= sizes[0]
+        print(f'shotmem: largest program {sizes[0]} before, {sizes[1]} after: {"PASS" if ok else "FAIL"}', flush=True)
+        yield f'Largest program before {sizes[0]}, after {sizes[1]}.'
 
     def _cmd_threadlost(self, text):
         tool, args = ('run', {'command': 'VER', 'full_memory': True}) if 'run' in text.split()[1:] else ('sysinfo', {})

@@ -799,7 +799,10 @@ void Chat::dropTurn(void)
 int8_t Chat::toolResult(const char *toolId, const char *text, int isError, const char *note, const char *image)
 {
     int replied = convo.assistantInTurn > 0;
-    if (convo_tool_result_image(&convo, toolId, text, isError, note, image) == 0)
+    int rc = convo_tool_result_image(&convo, toolId, text, isError, note, image);
+    if (rc == 1)
+        warn("The screenshot could not be attached; the result went without it.");
+    if (rc >= 0)
         return 0;
     if (replied && convo.assistantInTurn == 0)
         turnsDone--;                  /* the turn went */

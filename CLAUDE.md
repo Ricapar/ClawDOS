@@ -56,11 +56,12 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (`trying again`); `chats.bat --timeout 240` the chat list and reopening (`tail screen: PASS`: `!tailscreen` peeks
   CGA memory for the reopened transcript; `-k` types keys into the BIOS buffer to drive the list, whose rows go to
   CLAWDOS.LOG as `chat list:` lines); `chatends.bat` chats the PC left mid-turn, reopened with `-c` and continued
-  (`reopened unans: ...` from the mock's `!reopened`); `shot.bat --timeout 240` the run tool's screenshots of
+  (`reopened unans: ...` from the mock's `!reopened`); `shot.bat --timeout 400` the run tool's screenshots of
   C:\TESTS\QUADS.COM (tests/unit/quads.asm: mode 4 quadrants and a diagonal; QUADT.COM sets text mode again, so only
-  `shot_at` sees it) in the harness and through the launcher (the mock checks each PNG, saves it as
+  `shot_at` sees it; QUAD6.COM is mode 6, TEXT40.COM a 40-column text screen) in the harness and through the launcher (the mock checks each PNG, saves it as
   build/mockshot-N.png and logs `image ok 320x200 (the call): palette ..., pixels CRC`; open the files to look), a
-  text screen, `shot_mode`, and the first image ending its thread; `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
+  text screen, `shot_mode`, `shot_color`, bad arguments refused, the first image ending its thread, and `!shotmem`
+  (MEM in the harness before and after a launcher screenshot); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `loop.bat` the 25-round cap (`!loop` calls a tool until a request says
@@ -76,7 +77,9 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;
-  `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023).
+  `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023). The screenshot timer hook
+  on the real CPU: `python3 scripts/test8088.py image/tests/shot8088.bat --mock --timeout 1500 --expect "pixels B5BCA4D2"`
+  (at exit, `shot_at` in the harness and through the launcher; DOSUNIT prints how long the PNG took).
 - Benchmark: `python scripts/bench.py` (`make bench`, about six minutes) runs image/tests/bench.bat in 86Box: the mock's
   `!bench` (20 reads of 4 KB, a `full_memory` run, a 4 KB reply) through CLAWDOS.EXE, then a table from CLAWDOS.LOG's
   `api` lines (`up=` upload ms, `len=` body bytes), the relaunch and the `stack:` high-water mark. docs/ROADMAP.md's

@@ -58,6 +58,13 @@ static void findExe(const char *argv0)
     strcat(exe, "HARNESS.EXE");
 }
 
+/* Ctrl-C while a screenshot's timer hook is in: ignored, as the harness's
+   network stack ignores it, so DOS cannot end us with the hook still in INT
+   1Ch's chain (exit's atexit takes it out; a DOS abort would not). */
+static void __interrupt __far noBreak(void)
+{
+}
+
 /* The picture as the program left it (HARNESS sets its own mode later) or as
    shot_at took it, after its ShotInfo, into SHOT_RAW for the resumed harness. */
 static int saveShot(ShotInfo *info)
@@ -123,7 +130,15 @@ int main(int argc, char *argv[])
                     if (ticks)
                         shot_arm(ticks);
                 }
-                status = shell_run(&t, run);
+                if (ticks) {
+                    void (__interrupt __far *oldBreak)() = _dos_getvect(0x23);
+                    _dos_setvect(0x23, noBreak);
+                    status = shell_run(&t, run);
+                    shot_disarm();
+                    _dos_setvect(0x23, oldBreak);
+                } else {
+                    status = shell_run(&t, run);
+                }
             }
             if (wantShot) {
                 shot_disarm();

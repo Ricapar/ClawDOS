@@ -6,6 +6,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+#include <dos.h>
+#include <i86.h>
 #include "shotpng.h"
 
 #define ROWS      200
@@ -15,8 +17,9 @@
 #define RAW_LEN   (ROWS * (ROW_BYTES + 1))   /* the image data: a filter byte, then the row */
 #define ADLER_MOD 65521UL
 
-/* One encoding's state. The CRC table (1 KB) and the buffers are on the heap
-   for that encoding only: nothing stays resident while programs run. A byte
+/* One encoding's state. The CRC table (1 KB) and the buffers are a DOS
+   block for that encoding only, given back with _dos_freemem: the C heap
+   would keep it, and a program run later would have that much less. A byte
    table costs one lookup a byte where a 16-entry table costs two, which is
    most of the time spent on the ~16 KB a picture checksums. */
 static unsigned long *crcTab;
@@ -75,11 +78,11 @@ int png_write_cga(const char *path, const unsigned char __far *frame, int bpp,
     static const unsigned char sig[8] = { 137, 'P', 'N', 'G', 13, 10, 26, 10 };
     unsigned char ihdr[13], z[7];
     unsigned long s1 = 1, s2 = 0, c;
-    unsigned i, y, k;
+    unsigned i, y, k, seg;
 
-    crcTab = (unsigned long *)malloc(256 * sizeof(unsigned long) + OUT_BUF + ROW_BYTES + 1);
-    if (crcTab == NULL)
+    if (_dos_allocmem((256 * sizeof(unsigned long) + OUT_BUF + ROW_BYTES + 1 + 15) / 16, &seg))
         return -1;
+    crcTab = (unsigned long *)MK_FP(seg, 0);
     out = (unsigned char *)(crcTab + 256);
     row = out + OUT_BUF;
     for (i = 0; i < 256; i++) {
@@ -90,7 +93,7 @@ int png_write_cga(const char *path, const unsigned char __far *frame, int bpp,
     }
     outFd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, S_IREAD | S_IWRITE);
     if (outFd < 0) {
-        free(crcTab);
+        _dos_freemem(seg);
         return -1;
     }
     outLen = 0;
@@ -141,7 +144,7 @@ int png_write_cga(const char *path, const unsigned char __far *frame, int bpp,
     flushOut();
     if (close(outFd))
         outBad = 1;
-    free(crcTab);
+    _dos_freemem(seg);
     crcTab = NULL;
     if (outBad) {
         remove(path);
@@ -162,10 +165,14 @@ unsigned shot_palette(const ShotInfo *info, int kind, unsigned char *rgb)
 {
     unsigned reg = info->color != SHOT_NO_COLOR ? info->color : info->colorReg;
     /* 320x200: palette 0 is green, red, brown; 1 cyan, magenta, light grey;
-       mode 5 (colour burst off) cyan, red, light grey on an RGBI monitor.
-       Bit 4 makes the three bright. */
+       with the colour burst off (mode 5) cyan, red, light grey on an RGBI
+       monitor. Bit 4 makes the three bright. The burst bit is the mode
+       register's (bit 2, in a 320x200 graphics mode: bits 1, 2 and not 4),
+       or shot_color's bit 6 when the program wrote the registers itself. */
     static const unsigned char fg[3][3] = { { 2, 4, 6 }, { 3, 5, 7 }, { 3, 4, 7 } };
-    unsigned i, set = info->mode == 5 ? 2 : (reg & 0x20 ? 1 : 0), hi = reg & 0x10 ? 8 : 0;
+    int burstOff = info->color != SHOT_NO_COLOR ? (info->color & SHOT_BURST_OFF) != 0
+                                                : (info->modeReg & 0x16) == 0x06;
+    unsigned i, set = burstOff ? 2 : (reg & 0x20 ? 1 : 0), hi = reg & 0x10 ? 8 : 0;
 
     if (kind == SHOT_640) {           /* black, and the colour register's colour */
         rgbi(rgb, 0);
@@ -188,4 +195,25 @@ int shot_load_raw(ShotInfo *info, unsigned char __far *frame)
         rc = 0;
     close(fd);
     return rc;
+}
+
+int shot_seconds(const char *s, unsigned *tenths)
+{
+    unsigned long t = 0;
+    const char *p = s;
+
+    while (*p >= '0' && *p <= '9' && t <= SHOT_AT_MAX)
+        t = t * 10 + (*p++ - '0');
+    t *= 10;
+    if (*p == '.') {
+        p++;
+        if (*p >= '0' && *p <= '9')
+            t += *p++ - '0';
+        while (*p >= '0' && *p <= '9')   /* hundredths and less: dropped */
+            p++;
+    }
+    if (*p || p == s || *s == '.' || t == 0 || t > SHOT_AT_MAX)
+        return -1;
+    *tenths = (unsigned)t;
+    return 0;
 }

@@ -205,8 +205,6 @@ void tools_result_image_done(void)
     shotAttached = 0;
 }
 
-#define SHOT_AT_MAX 3000              /* tenths of a second: 5 minutes */
-
 /* The screenshot a run asks for: 1 (info's force and color set, *ticks to
    wait, 0 for at exit), 0 none, -1 after failing the call over a bad
    argument. Any of the shot arguments asks for one. */
@@ -235,25 +233,16 @@ static int shotArgs(ToolCtx *t, ShotInfo *info, unsigned *ticks)
     if (targ("shot_color") && *targ("shot_color")) {
         if (targ_long(t, "shot_color", 0, &color))
             return -1;
-        if (color < 0 || color > 63)
-            return tool_fail(t, "shot_color must be 0-63 (the colour register's value)"), -1;
+        if (color < 0 || color > 127)
+            return tool_fail(t, "shot_color must be 0-127 (the colour register's value, +64 for the burst off)"), -1;
         info->color = (unsigned char)color;
         want = 1;
     }
     if (at && *at) {                  /* seconds, to a tenth: "2", "0.5" */
-        unsigned long tenths = 0;
-        const char *p = at;
-        while (*p >= '0' && *p <= '9' && tenths <= SHOT_AT_MAX)
-            tenths = tenths * 10 + (*p++ - '0');
-        tenths *= 10;
-        if (*p == '.' && p[1] >= '0' && p[1] <= '9')
-            tenths += *++p - '0';
-        if (*p == '.')
-            while (*++p >= '0' && *p <= '9')
-                ;
-        if (*p || p == at || tenths == 0 || tenths > SHOT_AT_MAX)
+        unsigned tenths;
+        if (shot_seconds(at, &tenths))
             return tool_fail(t, "shot_at must be seconds after the first command starts, 0.1 to 300"), -1;
-        *ticks = (unsigned)((tenths * 182 + 50) / 100);
+        *ticks = (unsigned)((tenths * 182UL + 50) / 100);
         if (*ticks == 0)
             *ticks = 1;
         want = 1;
@@ -296,7 +285,7 @@ static int shotResult(ToolCtx *t, const ShotInfo *info, const unsigned char __fa
         strcpy(shotLine, "no screenshot: cannot write the file");
         return 0;
     }
-    tout_printf(t, "\n(screenshot: %s, colour register %02Xh; the image follows)\n", names[kind],
+    tout_printf(t, "\n(screenshot: %s, colour register %02Xh)\n", names[kind],
                 info->color != SHOT_NO_COLOR ? info->color : info->colorReg);
     sprintf(shotLine, "screenshot %s, 16 KB", names[kind]);   /* 16,280 bytes and the palette's */
     return 1;
@@ -352,18 +341,24 @@ static int toolRun(ToolCtx *t)
 void tools_resume_shot(int status, ToolCtx *t)
 {
     ShotInfo shot;
-    unsigned char __far *frame;
+    unsigned char __far *frame = NULL;
+    unsigned seg = 0;
 
     shotLine[0] = 0;
     shotAttached = 0;
     if (access(SHOT_RAW, 0))
         return;                       /* no screenshot asked for */
-    frame = status == TS_OK ? (unsigned char __far *)malloc(SHOT_BYTES) : NULL;
+    /* The frame for the moment: the EMS page, else a DOS block given back
+       after (the C heap would keep 16 KB from every later program). */
+    if (status == TS_OK && (frame = (unsigned char __far *)ems_map(EMS_SHOT_PAGE)) == NULL
+        && _dos_allocmem(SHOT_BYTES / 16, &seg) == 0)
+        frame = (unsigned char __far *)MK_FP(seg, 0);
     if (frame != NULL && shot_load_raw(&shot, frame) == 0)
         shotAttached = shotResult(t, &shot, frame);
     else if (status == TS_OK)
         tout_puts(t, "\n(no screenshot: the launcher's copy of the screen could not be read)\n");
-    free(frame);
+    if (seg)
+        _dos_freemem(seg);
     remove(SHOT_RAW);
 }
 

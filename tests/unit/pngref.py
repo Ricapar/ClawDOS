@@ -37,15 +37,19 @@ def unit_frame():
     return bytes((o * 13 + (o >> 7)) & 0xFF for o in range(16384))
 
 
-def quads_frame():
-    """The video memory QUADS.COM (tests/unit/quads.asm) leaves: quadrants 0 1 / 2 3, a diagonal XOR 3."""
+def quads_frame(hires=False):
+    """The video memory QUADS.COM (tests/unit/quads.asm) leaves: quadrants 0 1 / 2 3, a diagonal XOR 3;
+    QUAD6.COM's (hires) has the same quadrant bytes and the diagonal's single bits inverted."""
     mem = bytearray(16384)
     for y in range(ROWS):
         at = (BANK2 if y & 1 else 0) + (y >> 1) * ROW_BYTES
         left, right = (0x00, 0x55) if y < 100 else (0xAA, 0xFF)
         mem[at:at + 40] = bytes([left]) * 40
         mem[at + 40:at + 80] = bytes([right]) * 40
-        mem[at + (y >> 2)] ^= 3 << ((3 - (y & 3)) * 2)
+        if hires:
+            mem[at + (y >> 3)] ^= 0x80 >> (y & 7)
+        else:
+            mem[at + (y >> 2)] ^= 3 << ((3 - (y & 3)) * 2)
     return bytes(mem)
 
 
