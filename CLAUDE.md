@@ -75,7 +75,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   under CLAWDOS.EXE, `!memrun 176 105`: MEM directly and through C:\TESTS\MEMSHELL.BAT against floors in KB; `!memgone`
   and `!memshort` use C:\TESTS\EATMEM.EXE, tests/unit/eatmem.c, which stays resident with memory taken (`KB /K`; `/F`
   frees it): the turn ends when the lent buffers cannot come back, a COMMAND.COM run is refused, DOSUNIT fails to
-  start); `runrefuse.bat --timeout 120` a refusal on the round after a
+  start; `!mr b` after F4 and F6 must match `!mr a`, `memrun again b: SAME`; then an environment of about 900 bytes); `runrefuse.bat --timeout 120` a refusal on the round after a
   relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser; tests/unit/shotunit.c the screenshot PNGs against tests/unit/pngref.py's, which the build puts in C:\TESTS, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
   which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
@@ -94,7 +94,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).
   `scripts/sendkeys.ps1` (Windows only) can't type unless 86Box can take focus; prefer `--autotest` batch files and app flags like
   `CLAWDOS -m msg` (send), `-i text` (pre-fill the input box), `-c NAME` (reopen a chat) and `-k KEYS` (typed ahead:
-  `~e` Enter, `~x` Esc, `~d` Del, `~u`/`~n` Up/Down, `~q` F10; 15 at most). DOS command lines max out at 127 chars.
+  `~e` Enter, `~x` Esc, `~d` Del, `~u`/`~n` Up/Down, `~q` F10, `~4`/`~6` F4/F6; 15 at most). DOS command lines max out at 127 chars.
 - CLAWDOS.EXE (src/clawdos) is the small launcher the user types: it runs HARNESS.EXE with `-launched`, and when a
   `run` tool call with `full_memory` makes the harness exit with code 200 it runs the commands itself (lib/shell.c) with the harness's
   memory free, then starts `HARNESS -resume -launched`, which reopens the conversation and carries the turn on. The

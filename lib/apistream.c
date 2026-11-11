@@ -8,7 +8,7 @@
 
 enum { B_NONE, B_TEXT, B_THINKING, B_REDACTED, B_TOOL };
 
-#define SCRATCH 1024
+#define SCRATCH (APISTREAM_SCRATCH / 2)   /* a delta unescaped, and as CP437 */
 static char *raw8;             /* unescaped UTF-8 of a delta */
 static char *cp;               /* its CP437 form */
 

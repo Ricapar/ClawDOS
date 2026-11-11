@@ -276,7 +276,10 @@ static const char *direct(const char *cmd, char *prog)
    a command, with a margin. It loads with about 72 KB, but below 100,096
    bytes it cannot load its strings and asks on the keyboard for another
    COMMAND.COM to take them from: with standard input on NUL nobody answers,
-   and the PC hangs (tests/unit/eatmem.c measured it, in steps of 256 bytes). */
+   and the PC hangs (tests/unit/eatmem.c measured it, in steps of 256 bytes).
+   CLAWDOS.EXE links this file too, where "set full_memory" would be the wrong
+   advice; there it cannot happen, with the harness out of memory (about
+   450 KB free, and the launcher is the whole of what full_memory gives). */
 #define SHELL_NEEDS 102400UL
 
 static unsigned long largestFree(void)

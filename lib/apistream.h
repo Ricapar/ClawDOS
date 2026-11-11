@@ -41,8 +41,10 @@ typedef struct ApiStream {
 } ApiStream;
 
 void apistream_init(ApiStream *a, char *toolInputBuf, unsigned max);
-/* When set, apistream_init takes its scratch (2 KB) from this instead of the
-   heap, asking again each time (the harness lends it to run programs). */
+/* When set, apistream_init takes its scratch (APISTREAM_SCRATCH bytes) from
+   this instead of the heap, asking again each time (the harness lends it to
+   run programs). */
+#define APISTREAM_SCRATCH 2048u
 extern char *(*apistream_scratch)(void);
 /* One SSE event. 0 continue, 1 message_stop seen, -1 error (a->error says why). */
 int apistream_event(ApiStream *a, const char *event, const char *data, unsigned n);

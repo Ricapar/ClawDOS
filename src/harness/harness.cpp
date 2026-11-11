@@ -820,9 +820,9 @@ static void chats(void)
 }
 
 /* -k: keys into the BIOS keyboard buffer, as if typed (the boot tests drive
-   the chat list so). ~e Enter, ~x Esc, ~d Del, ~u Up, ~n Down, ~q F10, ~~ a
-   tilde; the buffer holds 15. It assumes the buffer is where the PC/XT BIOS
-   keeps it, 40:1E-40:3D, and does not read the AT's start and end pointers
+   the chat list so). ~e Enter, ~x Esc, ~d Del, ~u Up, ~n Down, ~q F10, ~4 F4,
+   ~6 F6, ~~ a tilde; the buffer holds 15. It assumes the buffer is where the
+   PC/XT BIOS keeps it, 40:1E-40:3D, and does not read the AT's start and end pointers
    at 40:80 and 40:82 (DOSBox-X and the 5160 both use the default place). */
 static void typeAhead(const char *keys)
 {
@@ -839,6 +839,8 @@ static void typeAhead(const char *keys)
             case 'u': key = 0x4800; break;
             case 'n': key = 0x5000; break;
             case 'q': key = 0x4400; break;
+            case '4': key = 0x3E00; break;    /* F4, the memories */
+            case '6': key = 0x4000; break;    /* F6, the chats */
             default:  key = (unsigned char)*keys; break;
             }
         }
@@ -1184,6 +1186,11 @@ void ui_tool_done(void)
     placeCursor();
 }
 
+void ui_log(const char *line)
+{
+    uiLog(line);
+}
+
 void ui_redraw(void)
 {
     scr_footer(footerRows(), A_TEXT);
@@ -1319,8 +1326,9 @@ static unsigned stackSegment(void);
 
 /* Open Watcom's startup keeps DGROUP at a full 64 KB for a near heap, but in
    the large model malloc takes far memory: the 28 KB past the stack would be
-   held, unused, from every program run. Only the C library's own spawn and
-   startup code use the near heap (the child's environment and command line),
+   held, unused, from every program run. The C library's spawn needs some of
+   it (the child's environment, up to /E:1024, and its command line: about
+   1.5 KB at most), and malloc falls back to it when DOS has no memory left,
    so NEAR_KEEP bytes stay, held open by a small block allocated after them,
    and the rest goes back to DOS. Before the first malloc: the far heap's
    blocks then come right after the program, with no hole below them. */

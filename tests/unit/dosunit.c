@@ -2491,6 +2491,7 @@ static void testEndList(void)
 void testShotPng(void);               /* shotunit.c: its own module, for room in the code segment */
 void testConvoImage(void);
 void testShotSeconds(void);
+void testRunmem(void);                /* memunit.c */
 
 int main(void)
 {
@@ -2541,6 +2542,7 @@ int main(void)
     testShotPng();
     testConvoImage();
     testShotSeconds();
+    testRunmem();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

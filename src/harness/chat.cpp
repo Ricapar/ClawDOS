@@ -24,6 +24,7 @@
 #define SSE_MAX        RM_SSE_BYTES
 #define TOOL_INPUT_MAX RM_TOOLIN_BYTES
 #define RX_MAX         RM_RX_BYTES
+#define ERR_BODY_MAX   1500u        /* of an error response's body read */
 #define READ_TIMEOUT   300          /* seconds without a byte: the link is dead */
 #define MAX_ROUNDS     25           /* tool rounds per user message */
 #define PROMPT_PATH    "C:\\CLAWDOS\\PROMPT.TXT"
@@ -52,6 +53,12 @@ static char *scratch(void)
 
 /* The HTTP buffers are runmem's, held again after a run: handed over before
    each use, since the block may come back elsewhere. */
+RM_FITS(HTTP_RX_MAX, RM_HTTP_RX_BYTES);
+RM_FITS(HTTP_HEAD_MAX, RM_HTTP_HEAD_BYTES);
+RM_FITS(HTTP_TX_MAX, RM_HTTP_TX_BYTES);
+RM_FITS(APISTREAM_SCRATCH, RM_SCRATCH_BYTES);
+RM_FITS(ERR_BODY_MAX, RM_ERRBODY_BYTES);
+
 void Chat::useBuffers(void)
 {
     http.useBuffers(runmem_slot(RM_HTTP_RX), runmem_slot(RM_HTTP_HEAD), runmem_slot(RM_HTTP_TX));
@@ -522,7 +529,7 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max, char *code,
     code[0] = 0;
     if (!body)
         return;
-    while (len < 1500 && (n = waitRead(body + len, 1500 - len)) > 0)
+    while (len < ERR_BODY_MAX && (n = waitRead(body + len, ERR_BODY_MAX - len)) > 0)
         len += n;
     drain();
     if (len && json_find(body, len, "error.details.error_code", &v, &vlen) == JSON_STRING) {
@@ -530,7 +537,7 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max, char *code,
         code[vlen] = 0;
     }
     if (len && json_find(body, len, "error.message", &v, &vlen) == JSON_STRING) {
-        unsigned k = json_unescape(v, vlen, body, 1500);
+        unsigned k = json_unescape(v, vlen, body, ERR_BODY_MAX);
         char *cp = (char *)malloc(max);
         if (cp) {
             unsigned c = utf8_to_cp437(body, k, cp, max - 1);

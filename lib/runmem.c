@@ -22,12 +22,18 @@ static unsigned strategy(int set, unsigned value)
     return r.x.ax;
 }
 
+unsigned dos_block(unsigned paras)
+{
+    unsigned got;
+    return _dos_allocmem(paras, &got) ? 0 : got;
+}
+
 /* Last fit puts the block at the top of the highest free block, above where
    the C heap grows, so freeing it adds to the free memory below it. */
 int runmem_take(void)
 {
     unsigned total = 0, old, got;
-    int i, rc;
+    int i;
 
     if (seg)
         return 0;
@@ -35,9 +41,9 @@ int runmem_take(void)
         total += paras[i];
     old = strategy(0, 0);
     strategy(1, 2);
-    rc = _dos_allocmem(total, &got);
+    got = dos_block(total);
     strategy(1, old);
-    if (rc)
+    if (got == 0)
         return -1;
     seg = got;
     return 0;

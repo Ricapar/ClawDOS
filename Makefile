@@ -143,7 +143,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "(floors 180224, 107520): PASS" --reject ": FAIL" --expect "memshort: PASS" --expect "HARNESS.EXE memrun exit code 0" --expect "CLAWDOS.EXE memrun exit code 0" \
 	    --expect "Not enough memory came back after the run" \
 	    --expect "reopened gone: 3 messages: user[text] assistant[thinking,text,tool_use] user[tool_result,text]" \
-	    --expect "gone exit code 0" --expect "memshort exit code 0" --reject "VALIDATION:"
+	    --expect "gone exit code 0" --expect "memshort exit code 0" --expect "memrun again b: SAME" \
+	    --expect "(floors 234496, 162816): PASS" --expect "bigenv exit code 0" --expect "screens exit code 0" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/fixed.bat --mock --timeout 150 --expect "tool run -> ok" --expect "CLAWDOS.EXE exit code 0" \
 	    --expect "1 messages, last role user, thinking none, cache 1h" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \

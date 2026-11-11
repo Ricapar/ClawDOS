@@ -128,6 +128,7 @@ SCENARIOS = {
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
     '!rundump': '!run with the whole result in the mock\'s log: !rundump MEM /D',
     '!memrun': 'MEM in the harness, started directly and through COMMAND.COM, against floors in KB: !memrun 176 105',
+    '!mr': '!memrun again, compared with the last one: !mr LABEL (after F4 and F6: runmem.bat)',
     '!memshort': 'EATMEM leaves 90 KB and stays: a COMMAND.COM run is refused, MEM runs, DOSUNIT cannot start',
     '!memgone': 'EATMEM keeps all but 1 KB of what the harness lent: the turn ends after the result',
     '!bigrun': 'the same with full_memory (under CLAWDOS.EXE the harness steps out of memory): !bigrun MEM /C',
@@ -653,7 +654,26 @@ class MockChat:
         ok = None not in sizes and sizes[0] >= floors[0] and sizes[1] >= floors[1]
         print(f'memrun: direct {sizes[0]}, shell {sizes[1]} (floors {floors[0]}, {floors[1]}): '
               f'{"PASS" if ok else "FAIL"}', flush=True)
+        self.state['memrun'] = sizes
         yield f'Largest program: {sizes[0]} started directly, {sizes[1]} through COMMAND.COM.'
+
+    def _cmd_mr(self, text):
+        """!memrun again (short, for typing with -k), compared with the last !memrun or !mr: the same figures
+        unless something since (the memory manager, the chat list) left memory in use. !mr LABEL logs
+        `memrun again LABEL: SAME (...)`. The harness's command lines must be as long: startup puts its arguments
+        in the near heap, whose end the program's block follows."""
+        label = (text.split() + [''])[1]
+        last = self.state.get('memrun')
+        sizes = []
+        for command in ('MEM', MEM_BATCH):
+            call = ToolCall('run', {'command': command})
+            yield call
+            sizes.append(largest_program(call.result.text))
+        same = last is not None and None not in sizes and sizes == last
+        print(f'memrun again {label}: {"SAME" if same else "DIFFERENT"} (direct {sizes[0]}, shell {sizes[1]}; '
+              f'before {last})', flush=True)
+        self.state['memrun'] = sizes
+        yield f'Largest program: {sizes[0]} directly, {sizes[1]} through COMMAND.COM (before: {last}).'
 
     def _cmd_memshort(self, _text):
         """Memory made short inside the harness (EATMEM stays resident and leaves 90 KB): a command that needs

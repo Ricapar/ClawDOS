@@ -21,8 +21,8 @@ void tools_show_result(int status, const ToolCtx *t);
 const char *tools_result_image(void);
 void tools_result_image_done(void);
 
-/* Hand the screen over (scr_suspend into an EMS page or the heap; NULL when
-   neither has room) and take it back, footer redrawn (ui_redraw). */
+/* Hand the screen over (scr_suspend into an EMS page or a DOS block of its
+   own; NULL when neither has room) and take it back, footer redrawn (ui_redraw). */
 unsigned short __far *tools_save_screen(void);
 void tools_restore_screen(unsigned short __far *save);
 

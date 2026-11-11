@@ -603,6 +603,15 @@ class MemRunTest(unittest.TestCase):
         log = self.answer(chat._cmd_memrun('!memrun'), [('ok', self.MEM), ('error', 'not enough memory')])
         self.assertIn('shell None (floors 0, 0): FAIL', log)
 
+    def test_mr_compares_with_the_last_memrun(self):
+        chat = mockchat.MockChat(0, state={})
+        shell = self.MEM.replace('242K (247,936', '171K (175,504')
+        self.answer(chat._cmd_memrun('!memrun'), [('ok', self.MEM), ('ok', shell)])
+        log = self.answer(chat._cmd_mr('!mr b'), [('ok', self.MEM), ('ok', shell)])
+        self.assertIn('memrun again b: SAME (direct 247936, shell 175504; before [247936, 175504])', log)
+        log = self.answer(chat._cmd_mr('!mr c'), [('ok', self.MEM.replace('247,936', '247,920')), ('ok', shell)])
+        self.assertIn('memrun again c: DIFFERENT', log)
+
     def test_memshort_wants_a_refusal_and_dos_error(self):
         refused = 'not enough memory for COMMAND.COM (100K needed, 90K free): set full_memory\n'
         log = self.answer(mockchat.MockChat(0)._cmd_memshort('!memshort'),

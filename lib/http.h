@@ -16,15 +16,17 @@
 
 #define HTTP_HEAD_MAX 4096        /* the API sends ~1.5 KB of rate-limit and CDN headers */
 #define HTTP_RX_MAX   2048
+#define HTTP_TX_MAX   512         /* staged outgoing bytes: one send */
 
 class Http {
   public:
     Http();
 
     int8_t open(const char *hostport);                 /* "host[:port]", port default 8443; 0 ok */
-    /* The buffers to use (HTTP_RX_MAX, HTTP_HEAD_MAX and 512 bytes) instead of
-       the heap's: the harness lends them to run programs between requests,
-       when they hold nothing (lib/runmem.h), and hands them back before each. */
+    /* The buffers to use (HTTP_RX_MAX, HTTP_HEAD_MAX and HTTP_TX_MAX bytes)
+       instead of the heap's: the harness lends them to run programs between
+       requests, when they hold nothing (lib/runmem.h), and hands them back
+       before each. */
     void   useBuffers(char *rxBuf, char *head, char *tx) { rx = rxBuf; headBuf = head; txBuf = tx; }
     void   close(void);
     int    isOpen(void) { return conn.isConnected(); }

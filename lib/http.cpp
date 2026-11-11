@@ -6,8 +6,6 @@
 #include "apireq.h"
 #include "ticks.h"
 
-#define HTTP_TX_MAX 512
-
 Http::Http() : idle(NULL), rx(NULL), rxLen(0), rxPos(0), headBuf(NULL), headLen(0), txBuf(NULL), txLen(0),
                left(0), done(1), out(NULL), outLen(0), outMax(0), lastIdle(0)
 {

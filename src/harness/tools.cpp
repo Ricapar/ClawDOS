@@ -34,6 +34,7 @@
 #include "ui.h"
 #include "json.h"
 #include "runmem.h"
+#include "ticks.h"
 
 #define PEEK_MAX  256
 
@@ -179,7 +180,7 @@ unsigned short __far *tools_save_screen(void)
     unsigned short __far *save = (unsigned short __far *)ems_page();
     unsigned seg;
 
-    if (save == NULL && _dos_allocmem(SCR_SAVE_BYTES / 16, &seg) == 0)
+    if (save == NULL && (seg = dos_block(SCR_SAVE_BYTES / 16)) != 0)
         save = (unsigned short __far *)MK_FP(seg, 0);
     if (save != NULL)
         scr_suspend(save);
@@ -194,6 +195,10 @@ void tools_restore_screen(unsigned short __far *save)
         _dos_freemem(FP_SEG(save));
     ui_redraw();
 }
+
+RM_FITS(TOOL_ARGS_MAX, RM_ARGS_BYTES);
+RM_FITS(TOOL_ARGS_MAX, RM_DECODE_BYTES);
+RM_FITS(sizeof "Error: " + TOOL_OUT_MAX, RM_ERRTEXT_BYTES);
 
 /* The argument store is runmem's: lent to run programs like the rest. */
 static char *argsBuffer(void)
@@ -314,6 +319,8 @@ static int toolRun(ToolCtx *t)
     unsigned short __far *save;
     ShotInfo shot;
     unsigned ticks, n, copySeg = 0;
+    unsigned long start, ran, ranEnd;
+    char line[80];
     int status, big, want;
 
     if (targ_bool(t, "full_memory", &big))
@@ -333,23 +340,28 @@ static int toolRun(ToolCtx *t)
     }
     /* While the commands run, runmem's block is lent to DOS, so they get that
        memory too (runmem.h). The commands are in the argument store, which
-       goes with it: they run from a copy in a DOS block of their own. The C
-       heap's free space at its end goes back to DOS first, and the blocks for
-       this run are taken after the lending, so they all lie at one end of the
+       goes with it: they run from a copy in a small DOS block taken first
+       (first fit puts it low). The C heap's free space at its end goes back
+       to DOS before that, and the screen save and the shot_at copy are taken
+       after the lending, so the blocks of this run all lie at one end of the
        free memory. Whether runmem's block came back is for the next request
        to find out (chat.cpp): the result is written either way. */
+    start = TICKS_NOW;
     _fheapshrink();
     n = cmd ? strlen(cmd) + 1 : 0;
-    if (n && _dos_allocmem((n + 15) / 16, &copySeg) == 0) {
+    if (n && (copySeg = dos_block((n + 15) / 16)) != 0) {
         cmd = (const char *)memcpy(MK_FP(copySeg, 0), cmd, n);
         runmem_lend();
     }                                 /* no room even for that: they run without the lending */
     if ((save = tools_save_screen()) == NULL) {
         status = tool_fail(t, "not enough memory to save the screen");
+        ran = ranEnd = TICKS_NOW;
     } else {
         if (want && ticks)
             shot_arm(ticks);
+        ran = TICKS_NOW;
         status = shell_run(t, cmd);
+        ranEnd = TICKS_NOW;
         if (want) {
             shot_disarm();
             if (status == TS_OK)
@@ -363,6 +375,12 @@ static int toolRun(ToolCtx *t)
         runmem_take();
         targ_reset();                 /* the store's contents went with it */
     }
+    /* What the run costs beyond its commands, in ticks of 55 ms: before them
+       the heap trim, the copy, the lending and the screen save; after them
+       the screenshot if any, the chat screen back and the block taken back. */
+    sprintf(line, "run: %lu ms for the commands, %lu ms before them, %lu ms after", ticks_elapsed(ranEnd, ran) * 55,
+            ticks_elapsed(ran, start) * 55, ticks_elapsed(TICKS_NOW, ranEnd) * 55);
+    ui_log(line);
     if (big && !launched)
         tout_puts(t, "\n(full_memory had no effect: HARNESS.EXE was started without CLAWDOS.EXE,"
                      " so the program ran beside it)\n");
@@ -382,7 +400,7 @@ void tools_resume_shot(int status, ToolCtx *t)
     /* The frame for the moment: the EMS page, else a DOS block given back
        after (the C heap would keep 16 KB from every later program). */
     if (status == TS_OK && (frame = (unsigned char __far *)ems_map(EMS_SHOT_PAGE)) == NULL
-        && _dos_allocmem(SHOT_BYTES / 16, &seg) == 0)
+        && (seg = dos_block(SHOT_BYTES / 16)) != 0)
         frame = (unsigned char __far *)MK_FP(seg, 0);
     if (frame != NULL && shot_load_raw(&shot, frame) == 0)
         shotAttached = shotResult(t, &shot, frame);
@@ -693,8 +711,8 @@ const char *tools_result_text(int status, const ToolCtx *t)
     case TS_STOPPED:
         return "Interrupted by the user.";
     default:
-        if (errText == NULL)          /* not had back after a run: the turn ends after this result */
-            return "Error";
+        if (errText == NULL)          /* not had back after a run (the turn ends after this result): */
+            return t->out;            /* the output alone, is_error saying what it is */
         sprintf(errText, "Error: %s", t->out);
         return errText;
     }

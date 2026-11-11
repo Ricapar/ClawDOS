@@ -421,15 +421,16 @@ COMMAND.COM run short of memory hung the PC instead of failing. Now:
 - **Where the memory was** (MEM /D inside a run): the harness's block was its
   code plus a full 64K DGROUP, because Open Watcom's startup keeps the near
   heap that the large model's malloc never uses (28K; now given back at
-  startup but for 2K that the C library's spawn needs), and two 64K far-heap
+  startup but for 2K that the C library's spawn, and malloc when DOS has
+  nothing left, use), and two 64K far-heap
   segments holding everything else: the four 16K API buffers, the HTTP
   buffers, mTCP's, the screen save.
 - **Lent around a run** (lib/runmem.h): the buffers whose contents nothing
   needs while a program runs (event 16K, tool input 16K, argument store 16K and
   its decode buffer 16K, network read 2K, HTTP 6.5K, stream scratch 2K, error
-  text 4K and error body 1.6K: 79K) are one DOS block taken last-fit at the top
-  of memory and freed before the program starts, so it joins the free block
-  below it; it is taken again after. The commands run from a small copy, the
+  text 4K and error body 1.6K: 82,000 bytes) are one DOS block taken last-fit
+  at the top of memory and freed before the program starts, so it joins the
+  free block below it; it is taken again after. The commands run from a small copy, the
   screen save is a DOS block (not the C heap, which would keep it), and the C
   heap's free tail goes back first (`_fheapshrink`). If the block cannot come
   back (a program stayed resident), the turn ends after the result.
