@@ -718,8 +718,8 @@ static void quit(const char *why)
 static void finished(void)
 {
     setState(IDLE);
-    if (quitAfterReply && !queued)
-        quit("-q after the reply");
+    if (quitAfterReply && !queued)     /* a Ctrl-Break that ended the turn is why we leave */
+        quit(Net::breakPressed ? "Ctrl-Break" : "-q after the reply");
     if (queued) {
         queued = 0;
         submit();
