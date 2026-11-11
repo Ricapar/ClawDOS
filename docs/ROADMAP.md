@@ -90,7 +90,7 @@ is in [API.md](API.md).
         failed before on DNS and mTCP's DHCP lease check.
   - [ ] **M6.2 - Full-memory run**: programs Claude runs get nearly all of
         640 KB instead of ~285 KB (October's figure). `full_memory` gives them
-        446K and an in-harness run 250K; the goal of ~560K is not met, so this
+        446K and an in-harness run 247K; the goal of ~560K is not met, so this
         stays open. See [M6.2](#m62-full-memory-run) below.
   - [x] **M6.3 - Screenshots**: Claude sees what its programs draw. `run`
         takes `screenshot` (the screen as the last program left it, taken
@@ -455,6 +455,8 @@ MEM's largest executable program size from inside a run, DOSBox-X:
 | the same under CLAWDOS.EXE | 198K (202,832) | 127K (130,400) |
 | under CLAWDOS.EXE, late in the tool tour | | 127K (130,400) |
 | `full_memory` (the launcher alone) | 446K (456,240) | |
+| after the review fixes (`c38ae0b`), HARNESS.EXE alone | 247K (253,184) | 176K (180,768) |
+| the same under CLAWDOS.EXE | 196K (200,592) | 125K (128,176) |
 
 `image/tests/runmem.bat` checks these (floors 230K/160K alone, 176K/105K
 under the launcher), the refusal and the turn that ends when the memory does
