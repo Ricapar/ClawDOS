@@ -5,8 +5,10 @@ import http.client
 import io
 import json
 import os
+import socket
 import sys
 import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -259,9 +261,10 @@ class MockApiTest(unittest.TestCase):
         events = self.ask('!ping')
         kinds = [e for e, _ in events]
         self.assertGreaterEqual(kinds.count('ping'), 6)
-        first_delta = kinds.index('content_block_delta')
-        last_delta = len(kinds) - 1 - kinds[::-1].index('content_block_delta')
-        self.assertIn('ping', kinds[first_delta:last_delta])
+        texts = [i for i, (e, d) in enumerate(events)
+                 if e == 'content_block_delta' and d['delta']['type'] == 'text_delta']
+        between = kinds[texts[0]:texts[-1]]
+        self.assertEqual(between.count('ping'), len(texts) - 1)        # one before each delta after the first
         self.assertEqual(reply(events)[0], 'Ping events between the text deltas. ')
 
     def test_think_streams_thinking_text_then_a_signature_and_gets_it_back(self):
@@ -281,6 +284,60 @@ class MockApiTest(unittest.TestCase):
         status, _, data = self.post(messages)
         self.assertEqual(status, 400)
         self.assertIn('did not come back unchanged', json.loads(data)['error']['message'])
+
+    def test_thinktool_escapes_come_back_through_the_validator(self):
+        events = self.ask('!thinktool')
+        thinking = reply(events)[1][0]['thinking']
+        self.assertEqual(thinking, mockchat.THINKING_ESCAPES)
+        for char in '"\\\u00e9\u00fc':
+            self.assertIn(char, thinking)
+        replies, _ = self.turn('!thinktool')
+        self.assertEqual([r[2] for r in replies], ['tool_use', 'end_turn'])
+        self.assertIn('thinking round trip: PASS', self.log.getvalue())
+
+    def wire(self, header_length, body=None, timeout=0.5):
+        """POST `body` (a valid request) over a raw socket claiming Content-Length `header_length`;
+        returns (status line, response body) and leaves the mock's log in self.log."""
+        body = body or json.dumps({'model': 'mock', 'max_tokens': 99, 'stream': True,
+                                   'messages': [{'role': 'user', 'content': 'hello'}]}).encode()
+        header_length = len(body) if header_length is None else header_length
+        head = (f'POST /v1/messages HTTP/1.1\r\nHost: x\r\nanthropic-version: 2023-06-01\r\n'
+                f'Content-Type: application/json\r\nContent-Length: {header_length}\r\n\r\n').encode()
+        self.server.body_timeout = timeout
+        try:
+            with contextlib.redirect_stdout(self.log), socket.create_connection(('127.0.0.1', self.port), 10) as conn:
+                conn.sendall(head + body)
+                data = b''
+                while not data.endswith(b'\r\n0\r\n\r\n'):
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+        finally:
+            self.server.body_timeout = mockapi.BODY_TIMEOUT
+        return data.split(b'\r\n', 1)[0].decode(), data.split(b'\r\n\r\n', 1)[1].decode()
+
+    def test_a_content_length_that_matches_is_answered(self):
+        self.assertEqual(self.wire(None)[0], 'HTTP/1.1 200 OK')
+
+    def test_a_content_length_larger_than_the_body_is_a_400_after_the_timeout(self):
+        started = time.time()
+        status, body = self.wire(5000)
+        self.assertLess(time.time() - started, 5)
+        self.assertEqual(status, 'HTTP/1.1 400 Bad Request')
+        self.assertIn('Content-Length', json.loads(body)['error']['message'])
+        self.assertTrue([x for x in self.log.getvalue().splitlines() if x.startswith('VALIDATION: Content-Length')])
+
+    def test_a_content_length_smaller_than_the_body_is_a_400(self):
+        status, body = self.wire(40)
+        self.assertEqual(status, 'HTTP/1.1 400 Bad Request')
+        self.assertIn('Content-Length', json.loads(body)['error']['message'])
+        self.assertTrue([x for x in self.log.getvalue().splitlines() if x.startswith('VALIDATION: Content-Length')])
+
+    def test_a_content_length_that_is_not_a_number_is_a_400(self):
+        status, body = self.wire('+12')
+        self.assertEqual(status, 'HTTP/1.1 400 Bad Request')
+        self.assertIn('Content-Length', json.loads(body)['error']['message'])
 
     def test_redacted_thinking_then_a_tool_call_then_the_check(self):
         events = self.ask('!redacted')
@@ -408,7 +465,7 @@ class ValidatorTest(unittest.TestCase):
         self.v.check(dict(headers, **{'Content-Type': 'application/json; charset=utf-8'}), body)
         for name, value, fragment in (('Anthropic-Version', '2024-01-01', 'anthropic-version'),
                                       ('Content-Type', 'text/plain', 'content-type'),
-                                      ('Content-Length', str(len(body) + 1), 'content-length')):
+                                      ('Content-Length', str(len(body) + 1), 'Content-Length')):
             with self.assertRaises(mockapi.BadRequest) as cm:
                 self.v.check(dict(headers, **{name: value}), body)
             self.assertIn(fragment, str(cm.exception))
@@ -517,17 +574,23 @@ class ValidatorTest(unittest.TestCase):
         self.bad('did not come back', [USER, assistant(dict(THINKING, signature=SIG[:-1]),
                                                        {'type': 'text', 'text': 'a'}), USER])
         self.bad('did not come back', [USER, assistant({'type': 'text', 'text': 'a'}), USER])
-        self.bad('never sent', [USER, assistant(dict(THINKING, thinking='other'), {'type': 'text', 'text': 'b'}), USER])
+        other = {'type': 'text', 'text': 'b'}
+        self.bad('not a reply', [USER, assistant(dict(THINKING, thinking='other'), other), USER])
 
     def test_system_and_tools_changing_within_a_conversation_only_warns_for_now(self):
+        said = {'type': 'text', 'text': 'a'}
+
+        def later(**fields):       # a request deeper into the conversation begun below
+            return self.ok([USER, assistant(THINKING, said), USER], **fields)
+
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
-            self.ok([USER], system='one', tools=self.tools)
-            self.ok([USER], system='one', tools=self.tools)
+            self.v.record(self.ok([USER], system='one', tools=self.tools)[1], THINKING, 'a', None)
+            later(system='one', tools=self.tools)
             self.assertEqual(log.getvalue(), '')
-            self.ok([USER], system='two', tools=self.tools)
-            self.ok([USER], system='two', tools=self.tools)
-            self.ok([USER], system='two')
+            later(system='two', tools=self.tools)
+            later(system='two', tools=self.tools)
+            later(system='two')
         self.assertEqual(log.getvalue().count('VALIDATION-WARN: system changed'), 1)
         self.assertEqual(log.getvalue().count('VALIDATION-WARN: tools changed'), 1)
         self.assertNotIn('VALIDATION:', log.getvalue())
@@ -535,6 +598,38 @@ class ValidatorTest(unittest.TestCase):
         with contextlib.redirect_stdout(log):                  # another conversation: its own system
             self.ok([{'role': 'user', 'content': 'other'}], system='three')
         self.assertEqual(log.getvalue(), '')
+
+    def test_a_request_of_one_message_starts_the_conversation_anew(self):
+        said = {'type': 'text', 'text': 'a'}
+        self.v.record(self.ok([USER], system='one')[1], THINKING, 'a', None)
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            self.ok([USER], system='two')                    # a new conversation that starts the same way
+            self.assertEqual(log.getvalue(), '')
+        self.bad('not a reply', [USER, assistant(THINKING, said), USER])    # the old replies are forgotten
+
+    def test_a_conversation_the_mock_did_not_see_begin_is_not_held_to_the_thinking_rule(self):
+        # the mock was restarted mid-conversation: its first sight of it is a request deeper in
+        self.ok([USER, assistant(THINKING, {'type': 'text', 'text': 'old'}), USER])
+        self.ok([USER, assistant({'type': 'text', 'text': 'old'}), USER])
+
+    def test_an_assistant_message_must_be_a_reply_the_mock_sent_with_its_thinking_block(self):
+        conv = self.ok([USER])[1]
+        self.v.record(conv, THINKING, 'a', None)
+        said = {'type': 'text', 'text': 'a'}
+        self.ok([USER, assistant(THINKING, said), USER])
+        self.bad('did not come back', [USER, assistant(said), USER])                    # thinking dropped
+        self.bad('not a reply', [USER, assistant(THINKING, {'type': 'text', 'text': 'b'}), USER])
+        self.bad('not a reply', [USER, assistant({'type': 'text', 'text': 'b'}), USER])  # altered, no thinking
+        self.bad('did not come back', [USER, {'role': 'assistant', 'content': 'a'}, USER])   # a plain string
+
+    def test_unknown_top_level_fields_are_rejected(self):
+        self.ok(output_config={'effort': 'low'}, cache_control={'type': 'ephemeral'})
+        self.bad('Extra inputs are not permitted', thread={'type': 'create'})
+
+    def test_the_tools_file_must_be_readable(self):
+        with self.assertRaises(OSError):
+            mockapi.Validator('/nonesuch/TOOLS.JSN')
 
 
 if __name__ == '__main__':

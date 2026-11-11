@@ -96,6 +96,7 @@ SCENARIOS = {
     '!loop': 'calls sysinfo again and again until tool_choice is none (the 25-round cap), then answers',
     '!ping': 'ping events between the text deltas',
     '!think': 'a thinking block with thinking_delta text and a signature, then text',
+    '!thinktool': 'thinking text with a quote, a backslash and non-ASCII letters, then a tool call and a check',
     '!redacted': 'a redacted_thinking block, a tool call, then a check that the block came back',
     '!history': 'what the mock remembers of this conversation',
     '!run': 'run the rest of the message as a DOS command on the DOS PC: !run TCC PRIMES.C',
@@ -119,6 +120,8 @@ DEFAULT_TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 THINKING_TEXT = ('The user sent !think. I should answer with a thinking block that has some text in it, '
                  'streamed as thinking_delta pieces ahead of the signature, so the DOS PC keeps it in the '
                  'history and sends it back unchanged on the next request.')
+# !thinktool: JSON needs escaping here (a quote, a backslash) and UTF-8 needs more than a byte (\u00e9, \u00fc).
+THINKING_ESCAPES = 'He said "wait", the path is C:\\DOS\\, caf\u00e9 and Z\u00fcrich, then a tool call.'
 REDACTED_DATA = base64.b64encode(bytes(range(256)) * 3).decode()
 
 
@@ -444,6 +447,11 @@ class MockChat:
     def _cmd_think(self, _text):
         self.thinking_text = THINKING_TEXT
         yield from self.stream('The thinking block had text and a signature.')
+
+    def _cmd_thinktool(self, _text):
+        self.thinking_text = THINKING_ESCAPES
+        yield from self.call('sysinfo', {})
+        yield from self.stream(' The escaped thinking text came back.')
 
     def _cmd_redacted(self, _text):
         self.redacted_data = REDACTED_DATA

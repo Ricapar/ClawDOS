@@ -67,13 +67,17 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/loop.bat --mock --timeout 240 --expect "loop: 25 tool calls, then tool_choice none" \
 	    --expect "stop=end_turn" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/think.bat --mock --expect "I should answer with a thinking block" \
+	    --expect "sends it back unchanged on the next request" --expect "Ping events between the text deltas." \
 	    --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/thinktool.bat --mock --expect "thinking round trip: PASS" --expect "stop=end_turn" \
+	    --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/redacted.bat --mock --expect "redacted thinking round trip: PASS" \
 	    --expect "stop=end_turn" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/busy.bat --mock --expect "attempt 2 of 3); trying again" --expect "attempt 3 of 3)" \
 	    --reject "attempt 3 of 3); trying again" --reject "stop=end_turn" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/ends.bat --mock --expect "stop=refusal" --expect "The model declined" \
-	    --expect "stop=max_tokens" --expect "reply cut off" --reject "VALIDATION:"
+	    --expect "stop=max_tokens" --expect "reply cut off" --expect '"content":"!cutoff"' \
+	    --reject '"content":"!refuse"' --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" --reject "VALIDATION:"
 

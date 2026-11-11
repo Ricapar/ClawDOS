@@ -4,7 +4,7 @@ REM --mock --expect "I should answer with a thinking block" --expect "stop=end_t
 REM --reject "VALIDATION:"): the
 REM mock's !think streams the text in pieces ahead of the signature, and the conversation
 REM file written to the serial port must hold that text. Then !ping: ping events between
-REM the text deltas, which CLAWDOS must ignore.
+REM the text deltas, which CLAWDOS must ignore: the whole reply must reach the history file.
 ECHO CLAWDOS-THINK-TEST > COM1
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -q -m "!think"

@@ -23,14 +23,17 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   `image/tests/net.bat` checks networking. `--mock` runs the mock Messages API (tunnel/mockapi.py) alongside on port 18023, so
   tests pass `10.0.2.2:18023` to CLAWDOS (plain HTTP; log in build/mock.log; the test fails if that mock cannot start,
   say the port is taken, or dies during the run), `--expect TEXT` fails unless TEXT is in the
-  serial or mock log and `--reject TEXT` fails if it is. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
+  serial or mock log and `--reject TEXT` fails if it is. The mock checks every request against its own list of rules
+  (docs/API.md, "The tunnel": headers, fields, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks
+  returned byte-identical) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
+  that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
   (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
   errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `loop.bat` the 25-round cap (`!loop` calls a tool until a request says
-  `tool_choice` none); `think.bat` thinking_delta text in the history, and `!ping` events; `redacted.bat` a redacted_thinking block
+  `tool_choice` none); `think.bat` thinking_delta text in the history, and `!ping` events; `thinktool.bat` thinking text with a quote, a backslash and accents sent back whole; `redacted.bat` a redacted_thinking block
   echoed back (`redacted thinking round trip: PASS`); `busy.bat` three 529s so the retries run out; `ends.bat` a refusal and a
   max_tokens cutoff; `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`

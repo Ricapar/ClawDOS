@@ -14,7 +14,8 @@ The API is stateless, so the conversation arrives whole in every request. A
 tool call ends one response (stop_reason tool_use) and the scenario resumes
 when the next request carries the tool_result.
 
-Every request is validated as strictly as the real API would (see Validator): a
+Every request is checked against the rules of Validator (headers, fields, message
+structure, tool pairing, thinking blocks; docs/API.md lists them): a
 violation is answered with HTTP 400 and logged on a line starting `VALIDATION:`,
 so the boot tests can reject it. Stdlib only.
 """
@@ -23,6 +24,9 @@ import argparse
 import base64
 import json
 import os
+import re
+import select
+import socket
 import sys
 import threading
 import time
@@ -38,6 +42,11 @@ __all__ = ['CHUNKS_TEXT', 'make_server', 'main']
 MODEL = 'mock'
 SIGNATURE = base64.b64encode(bytes(range(256)) * 5).decode()   # 1708 bytes, like a real one
 API_VERSION = '2023-06-01'
+BODY_TIMEOUT = 10.0     # seconds of silence while the body arrives before the request is called short
+# The top-level fields HARNESS.EXE sends (docs/API.md, "The request"); any other is rejected like the real
+# API's "Extra inputs are not permitted". A task that adds a request field adds it here, with its rule.
+REQUEST_FIELDS = ('model', 'max_tokens', 'stream', 'output_config', 'cache_control', 'tool_choice', 'system',
+                  'tools', 'messages')
 
 
 class BadRequest(Exception):
@@ -199,10 +208,15 @@ def shape_of(messages):
     """'user[text] assistant[thinking,text,tool_use] ...': the block types of each message, for the log."""
     out = []
     for m in messages if isinstance(messages, list) else []:
+        role = m.get('role') if isinstance(m, dict) else None
         content = m.get('content') if isinstance(m, dict) else None
-        kinds = 'text' if isinstance(content, str) else ','.join(
-            str(b.get('type')) if isinstance(b, dict) else '?' for b in content) if isinstance(content, list) else '?'
-        out.append(f'{m.get("role") if isinstance(m, dict) else "?"}[{kinds}]')
+        if isinstance(content, str):
+            kinds = 'text'
+        elif isinstance(content, list):
+            kinds = ','.join(str(b.get('type')) if isinstance(b, dict) else '?' for b in content)
+        else:
+            kinds = '?'
+        out.append(f'{role or "?"}[{kinds}]')
     return ' '.join(out)
 
 
@@ -211,28 +225,26 @@ def same_json(a, b):
 
 
 class Validator:
-    """Holds what the strict request check needs to remember between requests: for each
+    """Holds what the request check needs to remember between requests: for each
     conversation (keyed by its first message), what the mock sent in it (the replies, to
-    check thinking blocks come back) and its system and tools (to check they stay put)."""
+    check thinking blocks come back) and its system and tools (to check they stay put).
+    A request of one message starts a conversation anew; one that arrives for a conversation
+    this mock never saw start (it was restarted meanwhile) is not held to the thinking rule."""
 
     def __init__(self, tools_path):
         self.tools_path = tools_path
+        with open(tools_path, encoding='utf-8') as f:       # unreadable: the mock must not start
+            self.tools = json.load(f)
         self.conversations = {}
         self.lock = threading.Lock()
-
-    def tools(self):
-        """The tools array of TOOLS.JSN, or None (with a warning) when the file is unreadable."""
-        try:
-            with open(self.tools_path, encoding='utf-8') as f:
-                return json.load(f)
-        except (OSError, ValueError) as e:
-            print(f'VALIDATION-WARN: cannot read {self.tools_path}, tools not checked: {e}', flush=True)
-            return None
 
     def conversation(self, messages):
         """The record of the conversation these messages belong to."""
         key = json.dumps(messages[0], sort_keys=True)
-        return self.conversations.setdefault(key, {'replies': [], 'system': None, 'tools': None, 'seen': False})
+        if len(messages) == 1 or key not in self.conversations:
+            self.conversations[key] = {'replies': [], 'system': None, 'tools': None, 'seen': False,
+                                       'known': len(messages) == 1}
+        return self.conversations[key]
 
     def check(self, headers, body):
         """Return (request, conversation) or raise BadRequest. `headers` maps names to values."""
@@ -242,12 +254,12 @@ class Validator:
         if headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
             raise BadRequest('content-type header: must be application/json')
         if headers.get('content-length') != str(len(body)):
-            raise BadRequest(f'content-length header {headers.get("content-length")!r} does not match '
+            raise BadRequest(f'Content-Length {headers.get("content-length")!r} does not match '
                              f'the {len(body)} body bytes')
         try:
             req = json.loads(body.decode('utf-8'))
         except (ValueError, UnicodeDecodeError) as e:
-            raise BadRequest(f'invalid JSON: {e}') from e
+            raise BadRequest(f'invalid JSON (a Content-Length shorter than the body cuts it): {e}') from e
         if not isinstance(req, dict):
             raise BadRequest('the body must be an object')
         self.check_fields(req)
@@ -259,6 +271,9 @@ class Validator:
 
     def check_fields(self, req):
         """The request's top-level fields and its messages."""
+        extra = sorted(set(req) - set(REQUEST_FIELDS))
+        if extra:
+            raise BadRequest(f'{extra[0]}: Extra inputs are not permitted')
         if not is_text(req.get('model')):
             raise BadRequest('model: required')
         if not isinstance(req.get('max_tokens'), int) or isinstance(req['max_tokens'], bool) or req['max_tokens'] < 1:
@@ -267,11 +282,8 @@ class Validator:
             raise BadRequest('messages: required')
         if req.get('stream') is not True:
             raise BadRequest('stream: must be true (the DOS PC reads server-sent events)')
-        tools = None
-        if 'tools' in req:
-            tools = self.tools()
-            if tools is not None and not same_json(req['tools'], tools):
-                raise BadRequest(f'tools: differ from {os.path.basename(self.tools_path)}')
+        if 'tools' in req and not same_json(req['tools'], self.tools):
+            raise BadRequest(f'tools: differ from {os.path.basename(self.tools_path)}')
         if 'tool_choice' in req:
             check_tool_choice(req['tool_choice'], req.get('tools'))
         if 'system' in req:
@@ -289,28 +301,27 @@ class Validator:
         ids = [b['id'] for b in blocks if b['type'] == 'tool_use']
         text = text_of(blocks)
         for r in reversed(replies):
-            if (ids and r['tool_id'] == ids[0]) or (not ids and r['tool_id'] is None and r['text'] == text):
+            if (ids and r['tool_id'] == ids[0]) or (not ids and r['tool_id'] is None and (r['text'] or '') == text):
                 return r
         return None
 
     def check_thinking(self, conv, messages):
-        """Every thinking block the mock sent comes back byte-identical and in place; any other
-        thinking block in the request is one the mock never sent."""
+        """Every thinking block the mock sent comes back byte-identical and in place, and every assistant
+        message is one the mock sent. Skipped for a conversation the mock did not see begin."""
+        if not conv['known']:
+            return
         replies = conv['replies']
         for i, m in enumerate(messages):
-            if m['role'] != 'assistant' or not isinstance(m['content'], list):
+            if m['role'] != 'assistant':
                 continue
-            blocks = m['content']
+            blocks = m['content'] if isinstance(m['content'], list) else [{'type': 'text', 'text': m['content']}]
             got = [(j, b) for j, b in enumerate(blocks) if b['type'] in THINKING_TYPES]
             reply = self.sent_reply(replies, blocks)
-            if reply is not None:
-                if len(got) != 1 or got[0][0] != 0 or not same_json(got[0][1], reply['thinking']):
-                    raise BadRequest(f'messages.{i}.content: the {reply["thinking"]["type"]} block the mock sent '
-                                     f'did not come back unchanged as the first block')
-                continue
-            for j, b in got:
-                if not any(same_json(b, r['thinking']) for r in replies):
-                    raise BadRequest(f'messages.{i}.content.{j}: a {b["type"]} block the mock never sent')
+            if reply is None:
+                raise BadRequest(f'messages.{i}: not a reply this mock sent in this conversation')
+            if len(got) != 1 or got[0][0] != 0 or not same_json(got[0][1], reply['thinking']):
+                raise BadRequest(f'messages.{i}.content: the {reply["thinking"]["type"]} block the mock sent '
+                                 f'did not come back unchanged as the first block')
 
     def check_stable(self, conv, req):
         """Within a conversation system and tools must not change, or the API drops or rejects thinking
@@ -335,6 +346,7 @@ class Pending:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
+    rbufsize = 0                # unbuffered: read_body can tell from the socket whether bytes are waiting
 
     def log_message(self, fmt, *args):   # quieter default logging, to stdout
         print(f'{self.address_string()} {fmt % args}', flush=True)
@@ -393,10 +405,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = b''
         try:
-            length = self.headers.get('Content-Length', '')
-            if not length.isdigit():
-                raise BadRequest(f'content-length header {length!r} is missing or not a number')
-            body = self.rfile.read(int(length))
+            body = self.read_body()
             req, conv = self.server.validator.check(self.headers, body)
         except BadRequest as e:
             shape = shape_of(self.try_messages(body))
@@ -406,6 +415,39 @@ class Handler(BaseHTTPRequestHandler):
         messages = req['messages']
         print(f'request: {len(messages)} messages, last role {messages[-1]["role"]}', flush=True)
         self.answer(req, conv)
+
+    def drain(self):
+        """Read what the client has sent and we will not use: closing with it unread would reset the
+        connection over our answer."""
+        while select.select([self.connection], [], [], 0.05)[0] and self.connection.recv(65536):
+            pass
+
+    def read_body(self):
+        """The request body, exactly as long as Content-Length says. Anything else is a BadRequest and the
+        connection is closed, since the next request could no longer be told from the body's leftovers:
+        a length that is missing or not a number; a body that stops short (nothing for BODY_TIMEOUT s, or
+        the client closing); bytes waiting after the body."""
+        text = self.headers.get('Content-Length', '')
+        if not re.fullmatch(r'[0-9]{1,9}', text):
+            self.close_connection = True
+            self.drain()
+            raise BadRequest(f'Content-Length {text!r} is missing or not a number')
+        length, body = int(text), b''
+        while len(body) < length:
+            if not select.select([self.connection], [], [], self.server.body_timeout)[0]:
+                self.close_connection = True
+                raise BadRequest(f'Content-Length says {length} bytes but only {len(body)} arrived '
+                                 f'in {self.server.body_timeout:g} s')
+            chunk = self.rfile.read(length - len(body))
+            if not chunk:
+                self.close_connection = True
+                raise BadRequest(f'Content-Length says {length} bytes but the client closed after {len(body)}')
+            body += chunk
+        if select.select([self.connection], [], [], 0.05)[0] and self.connection.recv(1, socket.MSG_PEEK):
+            self.close_connection = True
+            self.drain()
+            raise BadRequest(f'Content-Length says {length} bytes but more of the body follows')
+        return body
 
     @staticmethod
     def try_messages(body):
@@ -439,6 +481,12 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(b, dict) and b.get('type') == 'thinking']
                 print(f'big signature round trip: {"PASS" if want in sigs else "FAIL"} '
                       f'({len(want)} bytes sent, {[len(x or "") for x in sigs]} back)', flush=True)
+            thought = getattr(pending.chat, 'thinking_text', None)
+            if thought and len(messages) >= 2:
+                back = [b.get('thinking') for b in messages[-2].get('content', [])
+                        if isinstance(b, dict) and b.get('type') == 'thinking']
+                print(f'thinking round trip: {"PASS" if thought in back else "FAIL"} '
+                      f'({len(thought)} characters sent, {[len(x or "") for x in back]} back)', flush=True)
             data = getattr(pending.chat, 'redacted_data', None)
             if data and len(messages) >= 2:
                 back = [b.get('data') for b in messages[-2].get('content', [])
@@ -556,11 +604,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if text_open:
             self.event('content_block_stop', {'index': index})
+        # recorded before the final events, so the client's next request finds it
+        server.validator.record(conv, thinking, ''.join(texts) if texts else None, tool_id)
         self.event('message_delta', {'delta': {'stop_reason': stop, 'stop_sequence': None},
                                      'usage': {'output_tokens': out_tokens}})
         self.event('message_stop', {})
         self.end_stream()
-        server.validator.record(conv, thinking, ''.join(texts) if texts else None, tool_id)
 
     def message_start(self):
         self.event('message_start', {'message': {
@@ -610,6 +659,7 @@ class MockServer(ThreadingHTTPServer):
         self.speed = speed
         self.tools_path = tools_path
         self.validator = Validator(tools_path)
+        self.body_timeout = BODY_TIMEOUT
         self.state = {}             # what already happened (!drop, !retry)
         self.pending = None         # Pending tool call
         self._ids = 0
@@ -631,7 +681,10 @@ def main():
     ap.add_argument('--speed', type=float, default=1.0, help='scale the delays (0: none)')
     ap.add_argument('--tools', default=DEFAULT_TOOLS, help='TOOLS.JSN, to check requests and the tool tour against')
     a = ap.parse_args()
-    server = make_server(a.port, a.speed, a.tools)
+    try:
+        server = make_server(a.port, a.speed, a.tools)
+    except (OSError, ValueError) as e:
+        sys.exit(f'mockapi: cannot start ({a.tools} must be readable JSON): {e}')
     print(f'mock Messages API on port {a.port} (speed {a.speed})', flush=True)
     try:
         server.serve_forever()
