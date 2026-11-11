@@ -672,7 +672,7 @@ class ValidatorTest(unittest.TestCase):
 
     def test_unknown_top_level_fields_are_rejected(self):
         self.ok(output_config={'effort': 'low'}, cache_control={'type': 'ephemeral'}, thinking={'type': 'adaptive'})
-        self.bad('Extra inputs are not permitted', thread={'type': 'create'})
+        self.bad('Extra inputs are not permitted', fallbacks=['other-model'])
 
     def with_betas(self, betas, messages=None, **fields):
         """check() a request carrying the anthropic-beta header `betas`."""
@@ -738,6 +738,258 @@ class ValidatorTest(unittest.TestCase):
     def test_the_tools_file_must_be_readable(self):
         with self.assertRaises(OSError):
             mockapi.Validator('/nonesuch/TOOLS.JSN')
+
+
+
+THREADS = {'anthropic-beta': mockapi.BETA_THREADS}
+CREATE = {'type': 'create'}
+
+
+def message_id(events):
+    return events[0][1]['message']['id']
+
+
+class ThreadTest(unittest.TestCase):
+    """Message threads: what the mock stores, what a continue must look like and the error_code of each
+    refusal; a refusal a correct client never meets is also a VALIDATION: line."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = mockapi.make_server(0, speed=0)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        self.log = io.StringIO()
+        self.threads = self.server.validator.threads
+        self.threads.ttl = mockapi.THREAD_TTL
+
+    def post(self, messages, thread, extra=None, headers=None, system=True):
+        """POST a request as HARNESS.EXE sends it in a thread (`thread` None: without one); `system`
+        adds system and tools. Returns (status, events or the error body); a dropped link is (None, None)."""
+        fields = {'model': 'mock', 'max_tokens': 16000, 'stream': True, 'messages': messages,
+                  'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': True}}
+        if thread is not None:
+            fields['thread'] = thread
+        if system:
+            fields['system'] = 'be brief'
+            fields['tools'] = self.server.validator.tools
+        fields.update(extra or {})
+        sent = {'Content-Type': 'application/json', 'anthropic-version': '2023-06-01'}
+        sent.update(THREADS if headers is None else headers)
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+        try:
+            with contextlib.redirect_stdout(self.log):
+                conn.request('POST', '/v1/messages', body=json.dumps(fields).encode(), headers=sent)
+                r = conn.getresponse()
+                try:
+                    data = r.read()
+                except http.client.IncompleteRead:
+                    return None, None
+        finally:
+            conn.close()
+        return r.status, sse_events(data) if r.status == 200 else json.loads(data)
+
+    def create(self, text):
+        """A thread's first request: (response id, the conversation so far with the reply, the reply)."""
+        messages = [{'role': 'user', 'content': text}]
+        status, events = self.post(messages, CREATE)
+        self.assertEqual(status, 200, events)
+        said, blocks, stop, _ = reply(events)
+        return message_id(events), messages + [{'role': 'assistant', 'content': blocks}], (said, blocks, stop)
+
+    def cont(self, prev, new, extra=None, headers=None, system=False):
+        return self.post(new, {'type': 'continue', 'previous_message_id': prev}, extra, headers, system)
+
+    def refused(self, got, status, code):
+        self.assertEqual(got[0], status, got[1])
+        self.assertEqual(got[1]['error']['details']['error_code'], code)
+
+    def answer(self, conversation):
+        """The tool_result message for the call that ends the conversation."""
+        return [{'role': 'user', 'content': [tool_result(tool_block(conversation[-1]['content']), 'sysinfo says hi')]}]
+
+    def test_a_continue_brings_only_the_new_messages(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        new = self.answer(conv)
+        status, events = self.cont(prev, new)
+        self.assertEqual(status, 200, events)
+        said, _, stop, _ = reply(events)
+        self.assertIn('sysinfo -> ok: sysinfo says hi', said)
+        self.assertEqual(stop, 'end_turn')
+        self.assertIn('thread continue (1 sent)', self.log.getvalue())
+        self.assertIn('3 messages, last role user', self.log.getvalue())
+        self.assertRegex(self.log.getvalue(), r'thread create, \d+ bytes')
+        # the next turn continues from the reply just sent
+        status, _ = self.cont(message_id(events), [{'role': 'user', 'content': 'and then?'}])
+        self.assertEqual(status, 200)
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_a_continue_may_change_max_tokens_but_not_a_fixed_field(self):
+        changes = (('model', 'other'), ('tool_choice', {'type': 'none'}), ('thinking', {'type': 'adaptive'}),
+                   ('output_config', {'effort': 'high'}), ('cache_control', {'type': 'ephemeral'}))
+        for field, value in changes:
+            prev, conv, _ = self.create('!tool sysinfo')
+            self.log = io.StringIO()
+            self.refused(self.cont(prev, self.answer(conv), {field: value}), 400, 'thread_fingerprint_mismatch')
+            self.assertIn(f'VALIDATION: thread_fingerprint_mismatch: {field} changed', self.log.getvalue())
+        prev, conv, _ = self.create('!tool sysinfo')
+        betas = {'anthropic-beta': mockapi.BETA_THREADS + ',' + mockapi.BETA_PROGRESS}
+        self.refused(self.cont(prev, self.answer(conv), headers=betas), 400, 'thread_fingerprint_mismatch')
+        prev, conv, _ = self.create('!tool sysinfo')
+        self.assertEqual(self.cont(prev, self.answer(conv), {'max_tokens': 500})[0], 200)
+
+    def test_system_and_tools_must_be_absent_on_a_continue(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        for extra in ({'system': 'be brief'}, {'tools': self.server.validator.tools}, {'system': None}):
+            self.log = io.StringIO()
+            status, body = self.cont(prev, self.answer(conv), extra)
+            self.assertEqual(status, 400)
+            self.assertIn('must be absent on a continue request', body['error']['message'])
+            self.assertIn('VALIDATION:', self.log.getvalue())
+        self.assertEqual(self.cont(prev, self.answer(conv))[0], 200)    # a rejected request used nothing up
+
+    def test_a_thread_needs_its_beta_and_a_well_formed_thread_object(self):
+        status, body = self.post([{'role': 'user', 'content': 'hi'}], CREATE, headers={})
+        self.assertEqual(status, 400)
+        self.assertIn(mockapi.BETA_THREADS, body['error']['message'])
+        for thread in ({'type': 'fork'}, {'type': 'create', 'previous_message_id': 'x'}, {'type': 'continue'},
+                       'create'):
+            self.assertEqual(self.post([{'role': 'user', 'content': 'hi'}], thread)[0], 400, thread)
+        self.assertEqual(self.post([{'role': 'user', 'content': 'hi'}], None, headers={})[0], 200)
+
+    def test_an_unknown_or_expired_thread_is_not_found(self):
+        self.refused(self.cont('msg_nonesuch', [{'role': 'user', 'content': 'hi'}]), 404, 'thread_not_found')
+        prev, conv, _ = self.create('!tool sysinfo')
+        self.threads.expire_all()
+        self.refused(self.cont(prev, self.answer(conv)), 404, 'thread_not_found')
+        self.threads.ttl = 0.0
+        prev, conv, _ = self.create('!tool sysinfo')
+        time.sleep(0.01)
+        self.refused(self.cont(prev, self.answer(conv)), 404, 'thread_not_found')
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_a_response_is_continued_once(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        self.assertEqual(self.cont(prev, self.answer(conv))[0], 200)
+        self.refused(self.cont(prev, self.answer(conv)), 400, 'thread_already_continued')
+        self.assertIn('VALIDATION: thread_already_continued: a response continued twice', self.log.getvalue())
+
+    def test_a_continue_in_flight(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        self.threads.stored[prev].state = 'inflight'
+        self.refused(self.cont(prev, self.answer(conv)), 400, 'thread_continue_in_flight')
+        self.threads.stored[prev].state = 'ready'
+
+    def test_refusals_and_cut_replies_are_not_stored(self):
+        for text in ('!refuse', '!cutoff'):
+            self.log = io.StringIO()
+            prev, _, (_, _, stop) = self.create(text)
+            self.assertIn(stop, ('refusal', 'max_tokens'))
+            self.refused(self.cont(prev, [{'role': 'user', 'content': 'go on'}]), 404, 'thread_not_found')
+            self.assertIn(f'VALIDATION: thread_not_found: a continue of {prev}, a {stop} reply', self.log.getvalue())
+
+    def test_a_continue_never_resends_a_message_the_thread_has(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        status, body = self.cont(prev, conv[:1] + [conv[1]] + self.answer(conv))
+        self.assertEqual(status, 400)
+        self.assertIn('already in the thread', body['error']['message'])
+        status, body = self.cont(prev, conv + self.answer(conv))
+        self.assertEqual(status, 400)
+        self.assertIn('VALIDATION:', self.log.getvalue())
+
+    def test_an_error_before_the_model_runs_leaves_the_response_continuable(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        use = mockapi.ThreadUse('continue', self.threads.stored[prev])
+        self.threads.stored[prev].state = 'inflight'
+        self.threads.broken(use)
+        self.assertEqual(self.threads.stored[prev].state, 'ready')
+        self.assertEqual(self.cont(prev, self.answer(conv))[0], 200)
+
+    def test_a_dropped_continue_is_resent(self):
+        prev, conv, _ = self.create('!threaddrop')
+        self.assertEqual(self.cont(prev, self.answer(conv)), (None, None))        # the link drops
+        status, events = self.cont(prev, self.answer(conv))
+        self.assertEqual(status, 200)
+        self.assertIn('The reply after the dropped continue: sysinfo -> ok', reply(events)[0])
+        self.assertIn('thread resend: PASS', self.log.getvalue())
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_a_dropped_continue_that_used_its_response_up_is_replayed(self):
+        prev, conv, _ = self.create('!threaddrop burn')
+        self.assertEqual(self.cont(prev, self.answer(conv)), (None, None))
+        self.refused(self.cont(prev, self.answer(conv)), 400, 'thread_already_continued')
+        status, events = self.post(conv + self.answer(conv), CREATE)
+        self.assertEqual(status, 200, events)
+        self.assertIn('The reply after the dropped continue', reply(events)[0])
+        self.assertIn('thread replay after thread_already_continued: PASS (create of 3 messages)', self.log.getvalue())
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_a_lost_thread_is_replayed_with_the_whole_conversation(self):
+        prev, conv, _ = self.create('!threadlost')
+        self.refused(self.cont(prev, self.answer(conv)), 404, 'thread_not_found')
+        status, events = self.post(conv + self.answer(conv), CREATE)
+        self.assertEqual(status, 200)
+        self.assertIn('thread replay after thread_not_found: PASS', self.log.getvalue())
+        self.assertIn('threadlost sysinfo: the result came by thread create', self.log.getvalue())
+        prev, conv, _ = self.create('!threadlost')
+        self.cont(prev, self.answer(conv))
+        self.cont(prev, self.answer(conv))           # a client that continues where it should replay
+        self.assertIn('thread replay after thread_not_found: FAIL (continue of 1 messages)', self.log.getvalue())
+
+    def test_threadfail_refuses_the_continue_and_its_replay(self):
+        prev, conv, _ = self.create('!threadfail')
+        self.refused(self.cont(prev, self.answer(conv)), 404, 'thread_not_found')
+        self.refused(self.post(conv + self.answer(conv), CREATE), 404, 'thread_not_found')
+        self.assertIn('thread replay after thread_not_found: PASS', self.log.getvalue())
+        self.assertEqual(self.post([{'role': 'user', 'content': 'hi'}], CREATE)[0], 200)
+        self.assertNotIn('FAIL', self.log.getvalue())
+
+    def test_unsupported_threads_are_left_off_for_the_rest_of_the_conversation(self):
+        prev, conv, _ = self.create('!nothreads')
+        self.refused(self.cont(prev, self.answer(conv)), 400, 'thread_unsupported_request')
+        conv += self.answer(conv)
+        status, events = self.post(conv, None)
+        self.assertEqual(status, 200)
+        self.assertIn('thread replay after thread_unsupported_request: PASS (no thread', self.log.getvalue())
+        conv.append({'role': 'assistant', 'content': reply(events)[1]})
+        self.refused(self.post(conv + self.answer(conv), CREATE), 400, 'thread_unsupported_request')
+        self.assertIn('VALIDATION: thread_unsupported_request: a thread request after', self.log.getvalue())
+        status, events = self.post(conv + self.answer(conv), None)
+        self.assertEqual(status, 200)
+        self.assertIn('thread unsupported: PASS', self.log.getvalue())
+        self.assertEqual(self.post([{'role': 'user', 'content': 'hi'}], CREATE)[0], 200)   # switched back on
+
+    def test_the_tool_tour_continues_with_small_requests(self):
+        messages = [{'role': 'user', 'content': '!tooltour'}]
+        status, events = self.post(messages, CREATE)
+        for _ in range(40):
+            self.assertEqual(status, 200, events)
+            _, blocks, stop, _ = reply(events)
+            if stop != 'tool_use':
+                break
+            new = [{'role': 'user', 'content': [tool_result(tool_block(blocks), 'ok')]}]
+            status, events = self.cont(message_id(events), new)
+        self.assertRegex(self.log.getvalue(), r'tool tour threads: PASS \(a create of \d+ bytes, 25 continues, the largest \d+ bytes, 0 new')
+        self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_note_opens_the_reply_after_its_call_with_the_note(self):
+        betas = {'anthropic-beta': mockapi.BETA_THREADS + ',' + mockapi.BETA_PROGRESS}
+        updates = {'thinking': {'type': 'adaptive', 'display': 'updates'}}
+        messages = [{'role': 'user', 'content': '!note'}]
+        status, events = self.post(messages, CREATE, updates, betas)
+        said, blocks, stop, _ = reply(events)
+        self.assertEqual((said, stop), ('Text before the note.', 'tool_use'))
+        status, events = self.cont(message_id(events), [{'role': 'user', 'content': [
+            tool_result(tool_block(blocks))]}], updates, betas)
+        said, blocks, stop, _ = reply(events)
+        self.assertEqual((blocks[0]['thinking'], said, stop), (mockchat.NOTE_TEXT, 'Text after the note.', 'end_turn'))
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <dos.h>
 #include <direct.h>
 #include <io.h>
@@ -32,9 +33,10 @@
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL),
                rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
-               upTicks(0), reqLen(0), fixedSet(0)
+               upTicks(0), reqLen(0), fixedSet(0), sentFp(0), thSent(API_TH_NONE)
 {
     addr[0] = path[0] = prePath[0] = desc[0] = 0;
+    th.id[0] = 0;
     preLen = -1;
     ctxTokens = 0;
     turnsDone = 0;
@@ -198,6 +200,7 @@ int8_t Chat::newConversation(void)
     setPrefixPath();
     remove(prePath);                  /* one left by a chat file deleted since */
     fixedSet = 0;                     /* chosen again with the new prefix */
+    th.id[0] = 0;
     return 0;
 }
 
@@ -215,21 +218,29 @@ void Chat::setPrefixPath(void)
    (or when it has gone missing) from PROMPT.TXT, TOOLS.JSN and the memories
    as they are then, and the same bytes on every request after that, through
    /model, F5 and a relaunch. Edits to those apply to the next conversation.
-   The fixed settings (thinking, the cache markers) are chosen from the
-   provider in use at the same moment and kept as long. */
+   The fixed settings (thinking, the cache markers, threads) are chosen from
+   the provider in use at the same moment and kept as long; only once the
+   prefix is there, so a first attempt that wrote none (Esc, a full disk)
+   leaves them to be chosen again, after a /model perhaps. */
 int8_t Chat::preparePrefix(void)
 {
     ApiPrefix x;
+    ApiFixed f;
     ToolCtx t;
     char line[60];
     int status;
 
-    if (!fixedSet) {
-        api_fixed_from(&fix, prov);
-        fixedSet = 1;
-    }
-    if ((preLen = fs_size(prePath)) > 0)
+    if ((preLen = fs_size(prePath)) > 0) {
+        if (!fixedSet) {              /* a resumed conversation that carried none */
+            api_fixed_from(&fix, prov);
+            fixedSet = 1;
+        }
         return 0;
+    }
+    if (fixedSet)                     /* a prefix gone missing: rendered with the settings kept */
+        f = fix;
+    else
+        api_fixed_from(&f, prov);
     tout_reset(&t);
     /* Esc while the memories are listed (it polls the keyboard) stops the
        turn: a short list would be frozen into the conversation. */
@@ -239,10 +250,12 @@ int8_t Chat::preparePrefix(void)
     x.toolsPath = TOOLS_PATH;
     x.name = prov->name[0] ? prov->name : cfg->name;
     x.memories = status == TS_OK ? t.out : "";
-    x.cache = fix.cache;
-    x.ttl1h = fix.ttl1h;
+    x.cache = f.cache;
+    x.ttl1h = f.ttl1h;
     if ((preLen = api_prefix_file(prePath, &x)) < 0)
         return (int8_t)preLen;
+    fix = f;
+    fixedSet = 1;
     sprintf(line, "prefix %.30s: %ld bytes", prePath, preLen);
     ui->log(line);
     return 0;
@@ -358,8 +371,9 @@ void Chat::drain(void)
     }
 }
 
-/* The error message of a non-200 response (error.message), or the status. */
-void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
+/* The error message of a non-200 response (error.message), or the status,
+   and its error.details.error_code (the thread errors have one). */
+void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max, char *code, unsigned codeMax)
 {
     static char *body;
     unsigned len = 0;
@@ -370,11 +384,16 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
     if (!body)
         body = (char *)malloc(1600);
     sprintf(msg, "API error %d", h->status);
+    code[0] = 0;
     if (!body)
         return;
     while (len < 1500 && (n = waitRead(body + len, 1500 - len)) > 0)
         len += n;
     drain();
+    if (len && json_find(body, len, "error.details.error_code", &v, &vlen) == JSON_STRING) {
+        vlen = json_unescape(v, vlen, code, codeMax - 1);
+        code[vlen] = 0;
+    }
     if (len && json_find(body, len, "error.message", &v, &vlen) == JSON_STRING) {
         unsigned k = json_unescape(v, vlen, body, 1500);
         char *cp = (char *)malloc(max);
@@ -393,12 +412,100 @@ void Chat::logRound(int round)
 {
     char line[256];
     unsigned long now = TICKS_NOW;
-    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
+    static const char *const kinds[] = { "none", "create", "cont" };
+    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u th=%s",
             prov->id, as.model[0] ? as.model : prov->model, round,
             textShown ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
             upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?",
-            as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
+            as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen, kinds[thSent]);
     ui->log(line);
+}
+
+/* --- message threads (docs/API.md, "Threads") --------------------------------------- */
+
+/* The fields a thread holds fixed that can still change within a
+   conversation (ApiFixed holds the others): the provider and its betas line,
+   the model (/model), the effort (F5) and tool_choice (the round cap). A
+   collision only costs a refused continue, which is replayed. */
+unsigned long Chat::fingerprint(int noTools)
+{
+    const char *const parts[4] = { prov->id, prov->betas, prov->model, prov->effort };
+    unsigned long h = 2166136261UL;   /* FNV-1a */
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        const char *p;
+        for (p = parts[i]; ; p++) {
+            h = (h ^ (unsigned char)*p) * 16777619UL;
+            if (!*p)
+                break;
+        }
+    }
+    return h ^ (unsigned long)noTools;
+}
+
+/* Continue only from a reply that ended well (keepThread), with the same
+   fixed fields, when the history up to it has not been cut since and there
+   is something new to send. Anything else creates a thread with the whole
+   conversation, which is always safe. */
+int Chat::threadKind(int noTools)
+{
+    if (!fix.threads)
+        return API_TH_NONE;
+    if (th.id[0] && th.fp == fingerprint(noTools) && hist_low() >= th.at && hist_size() > th.at + 3)
+        return API_TH_CONTINUE;
+    th.id[0] = 0;
+    return API_TH_CREATE;
+}
+
+/* An id to send back: letters, digits, _ and -, and not cut short by as.id. */
+static int idOk(const char *id)
+{
+    unsigned n = 0;
+    for (; id[n]; n++)
+        if (!isalnum((unsigned char)id[n]) && id[n] != '_' && id[n] != '-')
+            return 0;
+    return n > 0 && n < sizeof ((ChatThread *)0)->id - 1;
+}
+
+/* After a reply is in the history: the API stores it, and it can be
+   continued, only when it was sent in a thread and stopped at end_turn or
+   tool_use (not a refusal, not a reply cut by max_tokens). */
+void Chat::keepThread(void)
+{
+    th.id[0] = 0;
+    if (thSent == API_TH_NONE || !idOk(as.id)
+        || (strcmp(as.stopReason, "end_turn") && strcmp(as.stopReason, "tool_use")))
+        return;
+    strcpy(th.id, as.id);
+    th.at = hist_size();
+    th.fp = sentFp;
+    hist_low_reset();
+}
+
+void Chat::setThread(const ChatThread *t)
+{
+    if (t->id[0] && idOk(t->id) && t->at > 0 && t->at <= hist_size()) {
+        th = *t;
+        hist_low_reset();             /* hist_open has, too: the file is as the run left it */
+    }
+}
+
+/* A thread error (error.details.error_code thread_...) comes before the model
+   runs: send the whole conversation as a new thread, or with
+   thread_unsupported_request without threads for the rest of the
+   conversation. thread_fingerprint_mismatch is a bug here (the fixed fields
+   were wrong), replayed the same way. The log says so; the screen does not. */
+void Chat::replayThread(ApiReq *r, const char *code)
+{
+    char line[80];
+
+    sprintf(line, "thread %.30s: replaying the conversation", code);
+    ui->log(line);
+    th.id[0] = 0;
+    if (!strcmp(code, "thread_unsupported_request"))
+        fix.threads = 0;
+    r->thread = fix.threads ? API_TH_CREATE : API_TH_NONE;
 }
 
 /* --- one API round ---------------------------------------------------------------- */
@@ -459,8 +566,8 @@ int8_t Chat::request(int noTools)
 {
     ApiReq r;
     HttpHead h;
-    char msg[160];
-    int attempt = 0;
+    char msg[160], code[32];
+    int attempt = 0, threadErrors = 0;
     int fresh, wait;
 
     switch (preparePrefix()) {
@@ -481,7 +588,12 @@ int8_t Chat::request(int noTools)
     r.prefixPath = prePath;
     r.prefixLen = preLen;
     r.noTools = noTools;
+    r.thread = threadKind(noTools);
+    r.prevId = th.id;
+    r.histFrom = th.at + 3;               /* past the ",\r\n" before the first new message */
 
+    /* Every attempt below sends the same request (a resend after a lost link
+       or a 529 continues the same thread), until a thread error replays it. */
     for (;;) {
         unsigned long length = api_length(&r);
         int8_t rc;
@@ -498,6 +610,7 @@ int8_t Chat::request(int noTools)
             fresh = 1;
         }
         reqStart = TICKS_NOW;
+        sentFp = fingerprint(noTools);
         rc = http.sendHead(prov, &fix, length);
         if (rc == 0 && (body = api_body(http.sink(), &r)) != 0)
             rc = -1;
@@ -537,14 +650,24 @@ int8_t Chat::request(int noTools)
             rc = stream();
             if (rc == 2)
                 continue;                 /* re-ask after a lost link */
-            if (rc != 3)
+            if (rc != 3) {
+                thSent = r.thread;
                 return rc;
+            }
             sprintf(msg, "%.120s", as.error);
             wait = 0;
         } else {
-            readErrorBody(&h, msg, sizeof msg);
+            readErrorBody(&h, msg, sizeof msg, code, sizeof code);
             if (h.close)
                 http.close();
+            if (r.thread != API_TH_NONE && !strncmp(code, "thread_", 7)) {
+                if (threadErrors++) {     /* the replay was refused too */
+                    warn(msg);
+                    return -1;
+                }
+                replayThread(&r, code);   /* not a retry: the API never ran */
+                continue;
+            }
             if (h.status != 429 && h.status < 500) {
                 warn(msg);
                 return -1;
@@ -570,14 +693,20 @@ int8_t Chat::request(int noTools)
 
 int8_t Chat::turn(const char *text)
 {
+    int8_t rc;
+
     convo_turn_begin(&convo);
     reasked = 0;
     if (convo_user_text(&convo, text)) {
         warn("Cannot write the conversation file.");
         convo_rollback_turn(&convo);
+        th.id[0] = 0;
         return -1;
     }
-    return rounds(0);
+    rc = rounds(0);
+    if (rc != 0 && rc != 2)           /* a turn cut short: the next request starts afresh */
+        th.id[0] = 0;
+    return rc;
 }
 
 void Chat::dropTurn(void)
@@ -621,7 +750,11 @@ int8_t Chat::continueTurn(int round, const char *toolId, int status, ToolCtx *t)
 
     reasked = 0;
     rc = finishTool(round, toolId, status, t);
-    return rc == -2 ? rounds(round + 1) : rc;
+    if (rc == -2)
+        rc = rounds(round + 1);
+    if (rc != 0 && rc != 2)
+        th.id[0] = 0;
+    return rc;
 }
 
 int8_t Chat::rounds(int round)
@@ -638,6 +771,7 @@ int8_t Chat::rounds(int round)
             convo_settle(&convo);
             return rc;
         }
+        keepThread();
         if (convo.assistantInTurn == 1)
             turnsDone++;              /* the turn's first reply */
         if (as.inTok || as.cacheRead)

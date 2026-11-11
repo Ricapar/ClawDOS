@@ -143,7 +143,10 @@ While Claude works through a run of tool calls it says what it is about to do:
 those progress notes appear dim, above the tool call they lead to (`progress`
 in the config; `dropthinking` keeps a conversation going if its prompt had to
 change, and `cachettl 1h` keeps the prompt cache for an hour instead of five
-minutes; see docs/API.md).
+minutes; see docs/API.md). With `threads` (on in the shipped config) each
+request after a conversation's first sends only what is new, a tool result or
+your message, instead of the whole conversation: the API keeps the rest for
+five minutes, and after a longer pause the PC sends it all again.
 
 **Memories** (F4 or `/memories`): a full screen listing what Claude has saved in
 `C:\MEMORY` (name, size, first line). Enter shows one, Del deletes it after a

@@ -619,6 +619,9 @@ static void testCfg(void)
           && c->providers[1].cacheTtl1h == 0 && c->providers[2].progress == 0
           && c->providers[2].dropThinking == 0 && c->providers[2].cacheTtl1h == 0);
     cfg_defaults(c);
+    CHECK("cfg threads", cfg_parse(c, "[a]\nthreads 1\n[b]\n") == 0 && c->providers[0].threads == 1
+          && c->providers[1].threads == 0);
+    cfg_defaults(c);
     CHECK("cfg bad cachettl names its line", cfg_parse(c, "[a]\nmodel m\ncachettl 2h\n") == 3);
     cfg_defaults(c);
     CHECK("cfg empty cachettl is bad", cfg_parse(c, "[a]\ncachettl\n") == 2);
@@ -787,6 +790,7 @@ static void testApiReq(void)
     p->maxTokens = 64000L;
     api_fixed_from(&fx, p);               /* progress, dropthinking off; cache on, 5 minutes */
     r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
+    r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
 
     remove("C:\\HISTTEST.JSN");
     hist_open("C:\\HISTTEST.JSN");
@@ -859,6 +863,111 @@ static void testApiReq(void)
     free(p);
 }
 
+/* Message threads: a create is the whole request plus its thread object; a
+   continue has no prefix and only the history from an offset; the beta goes
+   on every request of a conversation with threads, and lengths still match. */
+static void testApiThreads(void)
+{
+    static char body[900], head[600];
+    static const char wantCont[] =
+        "{\"model\":\"m\",\"max_tokens\":100,\"stream\":true,\"cache_control\":{\"type\":\"ephemeral\"},"
+        "\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},"
+        "\"thread\":{\"type\":\"continue\",\"previous_message_id\":\"msg_7\"},"
+        "\"messages\":[{\"role\":\"user\",\"content\":\"b\"}]}";
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    ApiPrefix x;
+    ApiFixed fx;
+    ApiReq r;
+    Sink buf;
+    long len, at;
+
+    writeFile("C:\\PTEST.TXT", "Hi.");
+    writeFile("C:\\TTEST.JSN", "[{\"name\":\"t\"}]");
+    memset(p, 0, sizeof *p);
+    strcpy(p->host, "h"); strcpy(p->path, "/v1/messages"); strcpy(p->model, "m"); p->maxTokens = 100;
+    p->cache = 1;
+    p->threads = 1;
+    api_fixed_from(&fx, p);
+    CHECK("threads: a fixed setting", fx.threads == 1);
+    x.promptPath = "C:\\PTEST.TXT"; x.toolsPath = "C:\\TTEST.JSN"; x.name = "C"; x.memories = "";
+    x.cache = fx.cache; x.ttl1h = fx.ttl1h;
+    len = api_prefix_file("C:\\PTEST.PRE", &x);
+    r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
+    r.thread = API_TH_CREATE; r.prevId = ""; r.histFrom = 0;
+
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts("{\"role\":\"user\",\"content\":\"a\"}");
+    hist_message_done();
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("threads: create has the thread object, the prefix and every message",
+          strstr(body, "\"disable_parallel_tool_use\":true},\"thread\":{\"type\":\"create\"},\"system\":") != NULL
+          && strstr(body, "\"messages\":[{\"role\":\"user\",\"content\":\"a\"}]}") != NULL && lengthMatches(&r));
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}");
+    hist_message_done();
+    at = hist_size();
+    hist_low_reset();
+    hist_puts("{\"role\":\"user\",\"content\":\"b\"}");
+    hist_message_done();
+    r.thread = API_TH_CONTINUE; r.prevId = "msg_7"; r.histFrom = at + 3;
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("threads: continue written", api_body(&buf, &r) == 0);
+    CHECK_STR("threads: continue sends no prefix and only the new message", body, wantCont);
+    CHECK("threads: continue length", lengthMatches(&r) && api_length(&r) == strlen(wantCont));
+    CHECK("threads: nothing cut since", hist_low() == at);
+    r.thread = API_TH_NONE;
+    sink_buffer(&buf, body, sizeof body);
+    api_body(&buf, &r);
+    CHECK("threads: none has no thread object", strstr(body, "thread") == NULL && lengthMatches(&r));
+
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 1);
+    CHECK("threads: the beta header", strstr(head, "anthropic-beta: message-threads-2026-08-12\r\n") != NULL);
+    strcpy(p->betas, "message-threads-2026-08-12");
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 1);
+    CHECK("threads: the beta not repeated", strstr(head, "anthropic-beta: message-threads-2026-08-12\r\n") != NULL);
+    p->betas[0] = 0;
+    fx.threads = 0;                       /* the API said it cannot: off for the rest of the conversation */
+    sink_buffer(&buf, head, sizeof head);
+    api_head(&buf, p, &fx, 1);
+    CHECK("threads: off, no beta", strstr(head, "anthropic-beta") == NULL);
+
+    /* the low-water mark: a cut at or past the thread's offset keeps it, one before it does not */
+    hist_puts("{\"role\":\"assistant\",\"con");
+    hist_rollback_message();
+    CHECK("threads: a message rolled back past the offset", hist_low() == at);
+    hist_turn_begin();
+    hist_reopen_last(1);
+    hist_puts(",\"x\":1}");
+    hist_message_done();
+    CHECK("threads: reopening after the offset", hist_low() == at);
+    hist_rollback_turn();
+    CHECK("threads: the reopened message put back", hist_low() == at && hist_size() == at + 3 + 29);
+    hist_turn_begin();
+    hist_puts("{\"role\":\"assistant\",\"content\":\"c\"}");
+    hist_message_done();
+    hist_low_reset();                     /* a thread up to the reply just written */
+    hist_rollback_turn();
+    CHECK("threads: a turn rolled back before the offset counts", hist_low() == at + 3 + 29
+          && hist_low() == hist_size());
+    {
+        long before = hist_size();
+        hist_close();
+        hist_open("C:\\HISTTEST.JSN");
+        CHECK("threads: open resets the mark", hist_low() == before && hist_size() == before);
+    }
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("threads: copy from past the end fails", hist_copy_from(&buf, hist_size() + 1) == -1);
+    sink_buffer(&buf, body, sizeof body);
+    CHECK("threads: copy from the end is empty", hist_copy_from(&buf, hist_size()) == 0 && body[0] == 0);
+
+    hist_close();
+    remove("C:\\HISTTEST.JSN"); remove("C:\\PTEST.TXT"); remove("C:\\TTEST.JSN"); remove("C:\\PTEST.PRE");
+    free(p);
+}
+
 /* The thinking object, the cache markers and the beta header for each of the
    fixed settings, with their lengths counted right. */
 static void testApiFixed(void)
@@ -905,6 +1014,7 @@ static void testApiFixed(void)
         x.cache = fx.cache; x.ttl1h = fx.ttl1h;
         len = api_prefix_file("C:\\PTEST.PRE", &x);
         r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
+    r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
         sink_buffer(&buf, body, sizeof body);
         api_body(&buf, &r);
         sprintf(name, "fixed %d: body", i);
@@ -1040,6 +1150,7 @@ static void testApiStream(void)
     CHECK("stream tool", a.hasTool && !strcmp(a.toolId, "toolu_1") && !strcmp(a.toolName, "read"));
     CHECK_STR("stream tool input", a.toolInput, "{\"path\":\"C:\\\\A.TXT\"}");
     CHECK("stream stop reason", !strcmp(a.stopReason, "tool_use") && !strcmp(a.model, "claude-opus-5-5"));
+    CHECK_STR("stream message id", a.id, "msg_1");
     CHECK("stream usage", a.inTok == 100 && a.outTok == 7 && a.cacheRead == 50 && a.cacheWrite == 0);
 
     asReset(&a, input, sizeof input);
@@ -1877,6 +1988,7 @@ int main(void)
     testHistory();
     testApiReq();
     testApiFixed();
+    testApiThreads();
     testPromptAcrossReads();
     testApiStream();
     testLongEvents();

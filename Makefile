@@ -55,7 +55,14 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
 	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "progress note: Tour step 1 of" \
-	    --expect "progress note: Tour done" --reject "VALIDATION:"
+	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/notes.bat --mock --expect "progress note: Two lines" --expect "stop=end_turn" \
+	    --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/threads.bat --mock --timeout 240 --expect "thread replay after thread_not_found: PASS" \
+	    --expect "thread resend: PASS" --expect "thread replay after thread_already_continued: PASS" \
+	    --expect "thread replay after thread_unsupported_request: PASS" --expect "thread unsupported: PASS" \
+	    --expect "Thread not found (simulated by !threadfail)" --expect "threadlost run: the result came by thread create" \
+	    --reject ": FAIL" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:"
@@ -81,7 +88,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "stop=max_tokens" --expect "reply cut off" --expect '"content":"!cutoff"' \
 	    --reject '"content":"!refuse"' --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
-	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" --reject "VALIDATION:"
+	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" \
+	    --expect "bigrun: the result came by thread continue" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/fixed.bat --mock --timeout 150 --expect "tool run -> ok" --expect "CLAWDOS.EXE exit code 0" \
 	    --expect "1 messages, last role user, thinking none, cache 1h" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/runrefuse.bat --mock --timeout 120 --expect "stop=refusal" --expect "relaunch:" \

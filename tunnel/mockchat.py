@@ -65,6 +65,15 @@ class Ping:
     """Yielded by a scenario: send a `ping` event here."""
 
 
+class Drop:
+    """Yielded by a scenario after a tool call: drop the link here. The resend of the request that brought
+    the result goes on from after this point. With `burn` the mock counts the dropped continue as having
+    used its response up, so a resend of it meets thread_already_continued."""
+
+    def __init__(self, burn=False):
+        self.burn = burn
+
+
 CHUNKS_TEXT = ('Chunked transfer with the chunks cut every seven bytes, so sizes, CRLFs, event '
                'lines and even UTF-8 sequences like \u00e9\u2500 land across pieces. All arrived.')
 
@@ -107,6 +116,12 @@ SCENARIOS = {
     '!toolstall': 'call sysinfo, then think for 30 seconds before answering (the spinner during tool rounds)',
     '!play': 'play a tune on the PC speaker',
     '!bench': 'the benchmark (scripts/bench.py): 20 reads of 4 KB, a full_memory run, a 4 KB reply',
+    '!note': 'text, a sysinfo call, then a progress note with blank lines and a break around it, then text',
+    '!threadlost': 'a sysinfo call (!threadlost run: a full_memory run) after which the mock forgets the thread',
+    '!threaddrop': 'a sysinfo call, then the link drops in the continue\'s reply (!threaddrop burn: and a resend '
+                   'meets thread_already_continued)',
+    '!threadfail': 'a sysinfo call, then thread_not_found for the continue and for its replay (the turn ends)',
+    '!nothreads': 'two sysinfo calls; from the second request on, thread_unsupported_request for any thread',
 }
 
 # A thinking signature longer than the DOS PC's 16 KB event buffer (see !bigsig).
@@ -116,6 +131,11 @@ PLAY_DEMO = 'T140 O3 L4 E E F G G F E D C C D E E. D8 D2 E E F G G F E D C C D E
 
 DEFAULT_TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              'image', 'clawdos', 'TOOLS.JSN')
+
+# !note's progress note: blank lines and spaces before it, a break inside, blank lines after.
+NOTE_TEXT = '\n\n  Two\nlines\n\n'
+# A tool tour's continue requests carry one tool result (at most 4 KB of output) and the fixed fields.
+TOUR_CONTINUE_MAX = 8192
 
 # The text of a !think block, and the opaque data of a !redacted one.
 THINKING_TEXT = ('The user sent !think. I should answer with a thinking block that has some text in it, '
@@ -281,8 +301,11 @@ SMALL_TALK = [
 class MockChat:
     """One mock conversation. `speed` scales every delay; 0 means no waiting."""
 
-    def __init__(self, speed=1.0, seed=None, state=None, tools_path=DEFAULT_TOOLS):
+    def __init__(self, speed=1.0, seed=None, state=None, tools_path=DEFAULT_TOOLS, threads=None):
         self.speed = speed
+        self.threads = threads                             # the server's Threads, for the thread scenarios
+        self.thread_kind = 'no thread'                     # what the request being answered was (the server)
+        self.requests = []                                 # (kind, body bytes) of each request answered
         self.tools_path = tools_path                       # the TOOLS.JSN the server checks requests against
         self.no_tools = False                              # the request said tool_choice none (set by the server)
         self.progress = False                              # the request asked for display "updates" (the server)
@@ -478,6 +501,7 @@ class MockChat:
     def _cmd_bigrun(self, text):
         yield from self.call('run', {'command': text.split(None, 1)[1] if ' ' in text.strip() else '',
                                      'full_memory': True})
+        print(f'bigrun: the result came by {self.thread_kind}', flush=True)
 
     def _cmd_tool(self, text):
         words = shlex.split(text, posix=False)[1:]
@@ -515,6 +539,52 @@ class MockChat:
         for i in range(0, len(BENCH_REPLY), BENCH_PIECE):
             yield BENCH_REPLY[i:i + BENCH_PIECE]
 
+    def _cmd_note(self, _text):
+        yield 'Text before the note.'
+        yield ToolCall('sysinfo', {})
+        self.progress_note = NOTE_TEXT          # the next response opens with it
+        yield 'Text after the note.'
+
+    def _cmd_threadlost(self, text):
+        tool, args = ('run', {'command': 'VER', 'full_memory': True}) if 'run' in text.split()[1:] else ('sysinfo', {})
+        if self.threads:
+            self.threads.lose_next = True
+        yield f'Calling {tool}; the mock forgets the thread before the next request.'
+        call = ToolCall(tool, args)
+        yield call
+        print(f'threadlost {tool}: the result came by {self.thread_kind}', flush=True)
+        yield f' {tool} -> {call.result.status}, after the thread was lost and the conversation replayed.'
+
+    def _cmd_threaddrop(self, text):
+        burn = 'burn' in text.split()[1:]
+        yield 'Calling sysinfo; the link drops in the reply after it.'
+        call = ToolCall('sysinfo', {})
+        yield call
+        yield 'Half a reply, then the link dro'
+        yield Drop(burn)
+        print(f'threaddrop{" burn" if burn else ""}: the result came again by {self.thread_kind}', flush=True)
+        yield f'The reply after the dropped continue: sysinfo -> {call.result.status}.'
+
+    def _cmd_threadfail(self, _text):
+        if self.threads:
+            self.threads.fail_next = 2
+        yield 'Calling sysinfo; the continue after it and its replay are both refused.'
+        yield ToolCall('sysinfo', {})
+        yield 'This text is never sent: the turn ends at the second refusal.'
+
+    def _cmd_nothreads(self, _text):
+        if self.threads:
+            self.threads.unsupported = 'on'
+        for n in (1, 2):
+            yield f'Calling sysinfo ({n} of 2).'
+            yield ToolCall('sysinfo', {})
+        replayed = self.threads is not None and self.threads.unsupported == 'replayed'
+        if self.threads:
+            self.threads.unsupported = None
+        print(f'thread unsupported: {"PASS" if replayed else "FAIL"} (the requests after the refusal '
+              f'came without a thread: {self.thread_kind})', flush=True)
+        yield 'Both calls done; threads stayed off after thread_unsupported_request.'
+
     def _cmd_toolstall(self, _text):
         yield from self.call('sysinfo', {})
         self.pause(30)
@@ -548,7 +618,27 @@ class MockChat:
                 failure = f'step {i} {name}: got {got.status} {got.text[:60]!r}'
         verdict = 'tool tour: PASS' if failure is None else f'tool tour: FAIL {failure}'
         print(verdict, flush=True)
+        self.tour_threads()
         yield verdict
+
+    def tour_threads(self):
+        """With threads, every request of the tour after the first continues it, and is small, except one
+        whose tool_choice changed (the round cap's none, a fixed field): that starts a new thread."""
+        if not self.requests or self.requests[0][0] != 'thread create':
+            return
+        continues, recreated, wrong = [], 0, 0
+        for (_, _, before), (kind, n, choice) in zip(self.requests, self.requests[1:]):
+            if kind == 'thread continue' and choice == before:
+                continues.append(n)
+            elif kind == 'thread create' and choice != before:
+                recreated += 1
+            else:
+                wrong += 1
+        largest = max(continues, default=0)
+        ok = not wrong and largest < TOUR_CONTINUE_MAX
+        print(f'tool tour threads: {"PASS" if ok else "FAIL"} (a create of {self.requests[0][1]} bytes, '
+              f'{len(continues)} continues, the largest {largest} bytes, {recreated} new for a tool_choice change, '
+              f'{wrong} wrong)', flush=True)
 
     def small_talk(self, text):
         """A canned reply to an ordinary message."""

@@ -25,6 +25,7 @@ typedef struct ApiStream {
     /* results */
     char stopReason[16];       /* end_turn, tool_use, max_tokens, refusal, ... */
     char model[48];
+    char id[48];               /* message_start's message.id: the response a thread continues from */
     long inTok, outTok, cacheRead, cacheWrite;
     int  hasTool;
     char toolId[64], toolName[24];

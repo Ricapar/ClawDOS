@@ -28,6 +28,7 @@ typedef struct Provider {
     int cacheTtl1h;       /* cachettl 1h: the markers last an hour; 0 (5m, absent): five minutes */
     int progress;         /* progress 1: thinking display "updates", the notes shown (beta) */
     int dropThinking;     /* dropthinking 1: thinking block_binding drop_block (beta) */
+    int threads;          /* threads 1: message threads, later requests send only what is new (beta) */
     long maxTokens;       /* max_tokens; default CFG_MAX_TOKENS */
 } Provider;
 

@@ -140,6 +140,7 @@ struct Resume {
     int hasTurn;
     ApiFixed fixed;                   /* the conversation's thinking and cache settings */
     int hasFixed;
+    ChatThread thread;                /* the message thread to continue; id "" none */
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -957,8 +958,8 @@ void ui_tool_header(const char *title, const char *arg)
         sprintf(buf, "%.20s", title);
     if (strlen(buf) > SCR_COLS - 6)
         strcpy(buf + SCR_COLS - 9, "...");
+    con_margins(0, SCR_COLS - 1);     /* first: the new line starts at column 0, not in the reply's margin */
     blankLine();
-    con_margins(0, SCR_COLS - 1);
     con_attr(A_GOOD);
     con_putc(G_BULLET);
     con_putc(' ');
@@ -1208,6 +1209,7 @@ static int writeState(void)
     FILE *f = fopen(RELAUNCH_STATE, "w");
     const Convo *c = chat.state();
     const ApiFixed *fx;
+    const ChatThread *th;
     HistTurn turn;
     unsigned i;
 
@@ -1221,7 +1223,9 @@ static int writeState(void)
             chat.provider()->id, chat.provider()->model, chat.provider()->effort, TICKS_NOW);
     fprintf(f, "tokens %ld\nturns %d\n", chat.contextTokens(), chat.turns());
     if ((fx = chat.fixed()) != NULL)  /* not the provider's: /model may have moved on */
-        fprintf(f, "fixed %d %d %d %d\n", fx->progress, fx->dropThinking, fx->cache, fx->ttl1h);
+        fprintf(f, "fixed %d %d %d %d %d\n", fx->progress, fx->dropThinking, fx->cache, fx->ttl1h, fx->threads);
+    if ((th = chat.thread()) != NULL) /* continued if the run is back within its lifetime */
+        fprintf(f, "thread %s %ld %lu\n", th->id, th->at, th->fp);
     hist_turn_get(&turn);
     fprintf(f, "turnstart %ld\ntailat %ld\ntail ", turn.start, turn.tailAt);
     for (i = 0; i < turn.tailLen; i++)
@@ -1261,8 +1265,10 @@ static int readState(Resume *r)
             r->hasTurn = 1;
         }
         if (!strcmp(line, "fixed"))
-            r->hasFixed = sscanf(v, "%d %d %d %d", &r->fixed.progress, &r->fixed.dropThinking,
-                                 &r->fixed.cache, &r->fixed.ttl1h) == 4;
+            r->hasFixed = sscanf(v, "%d %d %d %d %d", &r->fixed.progress, &r->fixed.dropThinking,
+                                 &r->fixed.cache, &r->fixed.ttl1h, &r->fixed.threads) == 5;
+        if (!strcmp(line, "thread") && sscanf(v, "%47s %ld %lu", r->thread.id, &r->thread.at, &r->thread.fp) != 3)
+            r->thread.id[0] = 0;
         if (!strcmp(line, "tailat"))
             r->turn.tailAt = atol(v);
         if (!strcmp(line, "tail"))            /* hex, two digits a byte */
@@ -1501,6 +1507,7 @@ int main(int argc, char *argv[])
         chat.setUsage(resumeState.tokens, resumeState.turns);
         if (resumeState.hasFixed)
             chat.setFixed(&resumeState.fixed);
+        chat.setThread(&resumeState.thread);
         remove(RELAUNCH_STATE);       /* resumed; until now CLAWDOS -resume could try again */
         statusNote = NULL;
         drawFooter();

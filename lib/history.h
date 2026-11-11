@@ -34,6 +34,11 @@ extern int hist_test_write_bad;       /* this many of them (0: all) */
 #endif
 void hist_close(void);
 long hist_size(void);                 /* bytes hist_copy would produce */
+/* The smallest size the file has had since hist_low_reset (or hist_open):
+   every rollback, reopen and cut counts, so a copy of the file up to an offset
+   at or below it is still what the file holds. */
+long hist_low(void);
+void hist_low_reset(void);
 /* Append raw bytes of the current message. The first write after a boundary
    (in a non-empty file) first emits the ",\r\n" separator. */
 int  hist_write(const char *p, unsigned n);
@@ -64,6 +69,7 @@ int  hist_reopen_last(unsigned n);
 /* File contents (no brackets) into the sink: 0, -1 the file could not be
    read (or written out first), -2 the sink failed. */
 int  hist_copy(Sink *s);
+int  hist_copy_from(Sink *s, long from);  /* the same from byte `from` on */
 
 #ifdef __cplusplus
 }

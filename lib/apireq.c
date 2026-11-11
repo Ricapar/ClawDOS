@@ -12,6 +12,7 @@
 /* The anthropic-beta values the fixed settings need (docs/API.md). */
 #define BETA_PROGRESS "thinking-display-updates-2026-08-18"
 #define BETA_BINDING  "thinking-binding-controls-2026-08-01"
+#define BETA_THREADS  "message-threads-2026-08-12"
 
 void api_fixed_from(ApiFixed *f, const Provider *p)
 {
@@ -19,6 +20,7 @@ void api_fixed_from(ApiFixed *f, const Provider *p)
     f->dropThinking = p->dropThinking != 0;
     f->cache = p->cache != 0;
     f->ttl1h = p->cacheTtl1h != 0;
+    f->threads = p->threads != 0;
 }
 
 /* A cache_control value; both markers of a request use this, so their ttl agrees. */
@@ -216,6 +218,13 @@ static int fields(Sink *s, const ApiReq *r)
         PUT("\"tool_choice\":{\"type\":\"none\"},");
     else
         PUT("\"tool_choice\":{\"type\":\"auto\",\"disable_parallel_tool_use\":true},");
+    if (r->thread == API_TH_CREATE)
+        PUT("\"thread\":{\"type\":\"create\"},");
+    else if (r->thread == API_TH_CONTINUE) {
+        PUT("\"thread\":{\"type\":\"continue\",\"previous_message_id\":\"");
+        PUT(r->prevId);                   /* an id of letters, digits and _ (chat.cpp checks) */
+        PUT("\"},");
+    }
     return 0;
 }
 
@@ -225,6 +234,8 @@ unsigned long api_length(const ApiReq *r)
 
     sink_count(&count);
     fields(&count, r);                    /* a few short strings in memory */
+    if (r->thread == API_TH_CONTINUE)     /* no prefix, the history from histFrom */
+        return count.count + (sizeof MESSAGES - 1) + (unsigned long)(hist_size() - r->histFrom) + 2;
     return count.count + (unsigned long)r->prefixLen + 1 + (sizeof MESSAGES - 1)
            + (unsigned long)hist_size() + 2;
 }
@@ -235,11 +246,13 @@ int api_body(Sink *s, const ApiReq *r)
 
     if ((rc = fields(s, r)) != 0)
         return rc;
-    if ((rc = copyFile(s, r->prefixPath, r->prefixLen)) != 0)
-        return rc;
-    PUT(",");
+    if (r->thread != API_TH_CONTINUE) {   /* a continue request has no system or tools */
+        if ((rc = copyFile(s, r->prefixPath, r->prefixLen)) != 0)
+            return rc;
+        PUT(",");
+    }
     PUT(MESSAGES);
-    if ((rc = hist_copy(s)) != 0)
+    if ((rc = hist_copy_from(s, r->thread == API_TH_CONTINUE ? r->histFrom : 0)) != 0)
         return rc;                        /* -1: the history could not be read */
     PUT("]}");
     return 0;
@@ -271,13 +284,15 @@ static int listHas(const char *list, const char *v)
    settings need that it lacks; nothing when there is neither. */
 static int betaHeader(Sink *s, const Provider *p, const ApiFixed *f)
 {
-    const char *need[2];
+    const char *need[3];
     int n = 0, i, any = p->betas[0] != 0;
 
     if (f->progress && !listHas(p->betas, BETA_PROGRESS))
         need[n++] = BETA_PROGRESS;
     if (f->dropThinking && !listHas(p->betas, BETA_BINDING))
         need[n++] = BETA_BINDING;
+    if (f->threads && !listHas(p->betas, BETA_THREADS))
+        need[n++] = BETA_THREADS;
     if (!any && !n)
         return 0;
     PUT("anthropic-beta: ");

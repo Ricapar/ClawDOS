@@ -248,6 +248,7 @@ int apistream_event(ApiStream *a, const char *event, const char *data, unsigned 
     if (!strcmp(type, "message_start")) {
         a->started = 1;
         field(data, n, "message.model", a->model, sizeof a->model);
+        field(data, n, "message.id", a->id, sizeof a->id);
         a->inTok = number(data, n, "message.usage.input_tokens", 0);
         a->cacheRead = number(data, n, "message.usage.cache_read_input_tokens", 0);
         a->cacheWrite = number(data, n, "message.usage.cache_creation_input_tokens", 0);

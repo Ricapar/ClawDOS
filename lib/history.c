@@ -30,6 +30,10 @@ static int seekNeeded;
    it, so nothing more is taken and hist_message_done fails until a rollback
    cuts the file back. */
 static int writeFailed;
+/* The smallest size the file has been cut to since hist_low_reset: a message
+   thread holds the file up to some offset, and is only good while nothing at
+   or before it has been cut away (and maybe written differently). */
+static long lowWater;
 
 #ifdef DOSUNIT
 int hist_test_scan_reads = -1;
@@ -152,6 +156,7 @@ int hist_open(const char *path)
     turnStart = boundary;
     turnMessages = 0;
     needSep = end > 0;
+    lowWater = end;
     return 0;
 }
 
@@ -162,7 +167,7 @@ void hist_close(void)
         close(fd);
     }
     fd = -1;
-    end = boundary = turnStart = 0;
+    end = boundary = turnStart = lowWater = 0;
     turnMessages = 0;
     needSep = 0;
     pending = 0;
@@ -172,6 +177,22 @@ void hist_close(void)
 long hist_size(void)
 {
     return end;
+}
+
+long hist_low(void)
+{
+    return lowWater;
+}
+
+void hist_low_reset(void)
+{
+    lowWater = end;
+}
+
+static void cutTo(long pos)
+{
+    if (pos < lowWater)
+        lowWater = pos;
 }
 
 /* Into wbuf, writing it out each time it fills. */
@@ -252,6 +273,7 @@ static int truncateTo(long pos)
     end -= pending;
     pending = 0;
     seekNeeded = 1;
+    cutTo(pos);
     if (chsize(fd, pos))
         return -1;
     writeFailed = 0;                  /* whatever a failed write left is cut off */
@@ -319,6 +341,7 @@ int hist_reopen_last(unsigned n)
     savedTailLen = n;
     savedTailAt = end - (long)n;
     end -= n;
+    cutTo(end);
     if (chsize(fd, end))
         return -1;
     boundary = end;
@@ -328,18 +351,23 @@ int hist_reopen_last(unsigned n)
 
 int hist_copy(Sink *s)
 {
+    return hist_copy_from(s, 0);
+}
+
+int hist_copy_from(Sink *s, long from)
+{
     char *buf;
     long left;
     int rc = 0;
 
-    if (fd < 0 || flushBuf())
+    if (fd < 0 || from < 0 || from > end || flushBuf())
         return -1;
-    left = end;
+    left = end - from;
     buf = (char *)malloc(COPY_BUF);
     if (!buf)
         return -1;
     seekNeeded = 1;
-    lseek(fd, 0, SEEK_SET);
+    lseek(fd, from, SEEK_SET);
     while (left > 0) {
         unsigned want = left > COPY_BUF ? COPY_BUF : (unsigned)left;
         int n = read(fd, buf, want);

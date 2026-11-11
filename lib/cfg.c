@@ -51,6 +51,7 @@ static int setValue(Cfg *c, Provider *p, const char *key, const char *val)
     else if (!stricmp(key, "cache")) p->cache = atoi(val);
     else if (!stricmp(key, "progress")) p->progress = atoi(val);
     else if (!stricmp(key, "dropthinking")) p->dropThinking = atoi(val);
+    else if (!stricmp(key, "threads")) p->threads = atoi(val);
     else if (!stricmp(key, "cachettl")) {
         if (!stricmp(val, "5m"))
             p->cacheTtl1h = 0;

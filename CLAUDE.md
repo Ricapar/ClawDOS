@@ -25,9 +25,14 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   say the port is taken, or dies during the run), `--expect TEXT` fails unless TEXT is in the
   serial or mock log and `--reject TEXT` fails if it is. The mock checks every request against its own list of rules
   (docs/API.md, "The tunnel": headers, fields, the thinking object and its beta headers, cache markers agreeing on their
-  ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
+  ttl, tools equal to TOOLS.JSN, message structure, tool pairing, thinking blocks returned byte-identical, the message
+  thread rules) and answers a violation with a 400 and a `VALIDATION:` line in its log, so every mock test rejects
   that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
-  every DOS tool (and `progress note:` lines show the mock's progress notes reached the screen);
+  every DOS tool (and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
+  that every request after the first continued a message thread, each small); `notes.bat` a progress note's blank
+  lines trimmed and its break joined (`progress note: Two lines`); `threads.bat --timeout 240` a thread lost, a
+  continue whose link drops (resent; with `burn` refused, then replayed), `thread_unsupported_request`, a refused
+  replay ending the turn, and a relaunch that finds its thread gone (`thread replay after CODE: PASS` lines);
   `fixed.bat` a conversation keeping its thinking and cache settings across a relaunch whose run changed CLAWDOS.CFG
   (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
@@ -39,7 +44,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   echoed back (`redacted thinking round trip: PASS`); `busy.bat` three 529s so the retries run out; `ends.bat` a refusal and a
   max_tokens cutoff; `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
-  for the resume, then the tour and `resume state consumed`); `runrefuse.bat --timeout 120` a refusal on the round after a
+  for the resume, whose request continues the thread: `bigrun: the result came by thread continue`, then the tour and
+  `resume state consumed`); `runrefuse.bat --timeout 120` a refusal on the round after a
   relaunch, which takes the whole turn with it (the resume carries the turn's start in RESUME.TXT); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
   (every lib/ parser, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
   which turns on test seams such as lib/history.c's failing scan and full disk). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
@@ -67,12 +73,13 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   heap in this build (DOSUNIT shows it after one malloc).
 - HARNESS.EXE (src/harness) is the whole harness: it speaks the Messages API itself (src/harness/chat.cpp drives the turn;
   lib/apireq.c renders PROMPT.TXT (with the memories) and TOOLS.JSN once per conversation into CHATS\*.PRE, the frozen
-  `system` and `tools` every request of it sends, and writes each request from that and the history file, whose writes
+  `system` and `tools` a conversation's creating requests send, and writes each request from that and the history file
+  (with `threads 1`, a continue request sends only the history since the last reply: docs/API.md "Threads"), whose writes
   lib/history.c buffers; lib/apistream.c turns the SSE stream into screen text, history and tool calls). Only TLS is off the PC: `python3 tunnel/tunnel.py` copies bytes between a plain port
   (8443) and api.anthropic.com:443, with no knowledge of the API (socat/stunnel work too). Conversations live in
   C:\CLAWDOS\CHATS\*.JSN in the API's own message format, notes and per-round usage in C:\CLAWDOS\CLAWDOS.LOG.
   `python3 tunnel/mockapi.py` fakes the API offline on plain HTTP (point CLAWDOS at it: `CLAWDOS 10.0.2.2:18023`); in a chat,
-  `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, `!overload`, ...); `!tool NAME k=v` calls one
+  `!help` lists its test scenarios (`!scroll`, `!wide`, `!cp437`, `!error`, `!drop`, `!retry`, `!overload`, `!threadlost`, ...); `!tool NAME k=v` calls one
   DOS tool, `!tooltour` all; tests `python3 tunnel/test_mockapi.py`. Tool schemas: image/clawdos/TOOLS.JSN (the one source;
   the mock reads it too); executors dispatched by src/harness/tools.cpp. CLAWDOS `-unsafe` skips the y/n prompts, `-q` quits
   after the `-m` reply, `-p NAME` picks a provider section.

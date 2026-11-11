@@ -15,6 +15,15 @@
 #include "history.h"
 #include "apireq.h"
 
+/* A message thread the next request may continue (docs/API.md, "Threads"):
+   the response it continues from, where that response ended in the history
+   file and a hash of the fixed fields it was sent with. */
+struct ChatThread {
+    char id[48];                           /* "" none: the next request creates one */
+    long at;                               /* hist_size() once the response was written */
+    unsigned long fp;                      /* Chat::fingerprint() of its request */
+};
+
 struct ChatUi {
     void (*text)(const char *cp437, unsigned n);   /* visible reply text */
     void (*progress)(int phase, const char *cp437, unsigned n);  /* thinking text (apistream.h THINK_*) */
@@ -62,6 +71,10 @@ class Chat {
        the ones it started with. */
     const ApiFixed *fixed(void) { return fixedSet ? &fix : NULL; }
     void   setFixed(const ApiFixed *f) { fix = *f; fixedSet = 1; }
+    /* The message thread a relaunch carries over (RELAUNCH_STATE); setThread
+       ignores one that does not fit the reopened history. */
+    const ChatThread *thread(void) { return th.id[0] ? &th : NULL; }
+    void   setThread(const ChatThread *t);
 
     int8_t switchProvider(const char *id, const char *model);   /* /model */
     const char *describe(void);            /* "anthropic: claude-opus-5-5" */
@@ -96,6 +109,9 @@ class Chat {
     long preLen;                           /* its size; -1 until a request looks */
     ApiFixed fix;                          /* chosen with the prefix, kept to the end */
     int fixedSet;
+    ChatThread th;                         /* what the next request may continue */
+    unsigned long sentFp;                  /* fingerprint() of the attempt that got the reply */
+    int thSent;                            /* its API_TH_* (logRound, keepThread) */
     char desc[80];
     char errBuf[160];
     const char *err;
@@ -121,7 +137,12 @@ class Chat {
     int    waitRead(char *buf, unsigned max);     /* >0, 0 end, -1 lost, -2 timeout, -3 Esc */
     int8_t waitHead(HttpHead *h);                 /* 0, -1, -2, -3 malformed, 1 Esc */
     void   drain(void);
-    void   readErrorBody(const HttpHead *h, char *msg, unsigned max);
+    /* msg: "API error N: error.message"; code: error.details.error_code or "" */
+    void   readErrorBody(const HttpHead *h, char *msg, unsigned max, char *code, unsigned codeMax);
+    unsigned long fingerprint(int noTools);   /* the fixed fields a request is sent with, hashed */
+    int    threadKind(int noTools);        /* API_TH_* for the next request */
+    void   keepThread(void);               /* after a reply: continue from it next, or not */
+    void   replayThread(ApiReq *r, const char *code);
     void   logRound(int round);
     void   setPrefixPath(void);
     int8_t preparePrefix(void);            /* 0: prePath holds preLen bytes, 1 Esc, -1 unreadable, -2 unwritable */
