@@ -607,6 +607,19 @@ void Chat::replayThread(ApiReq *r, const char *code)
 
 /* --- one API round ---------------------------------------------------------------- */
 
+/* apistream's way to put a cut-off tool call's input right (apistream.h). */
+static long histPos(void *ctx)
+{
+    (void)ctx;
+    return hist_size();
+}
+
+static int histCut(void *ctx, long pos)
+{
+    (void)ctx;
+    return hist_cut_back(pos);
+}
+
 int8_t Chat::stream(void)
 {
     char *rxBuf = runmem_slot(RM_RX);
@@ -618,6 +631,8 @@ int8_t Chat::stream(void)
     as.text = onText;
     as.thinking = onThinking;
     as.hist = onHist;
+    as.histPos = histPos;
+    as.histCut = histCut;
     as.ctx = this;
     streamRc = 0;
     textShown = 0;
@@ -916,6 +931,10 @@ int8_t Chat::rounds(int round)
         if (as.toolInputOverflow) {
             warn("Tool call arguments too long; not run.");
             tout_puts(&t, "arguments too long");
+            status = TS_ERROR;
+        } else if (as.toolInputCut) {       /* stored as {} (apistream.h): nothing to run */
+            warn("Tool call arguments cut off; not run.");
+            tout_puts(&t, "arguments cut off before they were complete");
             status = TS_ERROR;
         } else {
             status = ui->tool(as.toolName, as.toolInput, as.toolInputLen, &t);

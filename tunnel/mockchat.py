@@ -35,6 +35,12 @@ class ToolCall:
     result: ToolResult = None
 
 
+@dataclass
+class CutCall(ToolCall):
+    """A tool call max_tokens cuts in the middle of its input: the input_json_delta pieces stop inside a
+    string and the reply ends with stop_reason max_tokens. Nothing answers it; the scenario ends there."""
+
+
 # Raised by scenario generators; mockapi.py turns them into API behaviour.
 
 class Refused(Exception):
@@ -108,6 +114,8 @@ SCENARIOS = {
     '!refuse': 'a refusal (the message is dropped from history)',
     '!runrefuse': 'a full_memory run of VER, then a refusal (the whole turn goes, the run with it)',
     '!cutoff': 'a reply that hits max_tokens',
+    '!cutcall': 'a write call whose input max_tokens cuts mid-string (stored as input {}, answered with an error)',
+    '!cutcheck': 'checks the cut call came back with input {} and an error result: cut call round trip: PASS',
     '!drop': 'the connection drops mid-reply (once; the retry succeeds)',
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
     '!busy': 'HTTP 529 three times (retry-after 1), so the DOS PC\'s retries run out; then a normal reply',
@@ -537,6 +545,24 @@ class MockChat:
     def _cmd_cutoff(self, _text):
         yield from self.stream(LOREM.split('\n\n', maxsplit=1)[0])
         yield '\n[reply cut off: too long]'
+
+    def _cmd_cutcall(self, _text):
+        yield from self.stream('Writing the file now.')
+        yield CutCall('write', {'path': 'C:\\CUT.TXT', 'text': 'a line max_tokens cuts ' * 8})
+
+    def _cmd_cutcheck(self, _text):
+        calls = [(i, b) for i, m in enumerate(self.messages) if m['role'] == 'assistant' and isinstance(m['content'], list)
+                 for b in m['content'] if b.get('type') == 'tool_use' and b.get('name') == 'write']
+        ok = False
+        if calls:
+            i, call = calls[-1]
+            answer = self.messages[i + 1]['content'] if i + 1 < len(self.messages) else []
+            results = [b for b in answer if isinstance(b, dict) and b.get('type') == 'tool_result'
+                       and b.get('tool_use_id') == call['id']] if isinstance(answer, list) else []
+            ok = call.get('input') == {} and len(results) == 1 and results[0].get('is_error') is True \
+                and 'cut off' in str(results[0].get('content'))
+        print(f'cut call round trip: {"PASS" if ok else "FAIL"}', flush=True)
+        yield 'The cut call came back ' + ('with no input and an error result.' if ok else 'wrong.')
 
     def _cmd_drop(self, _text):
         yield from self.stream('This sentence will never be fin')

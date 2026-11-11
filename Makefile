@@ -135,6 +135,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/ends.bat --mock --expect "stop=refusal" --expect "The model declined" \
 	    --expect "stop=max_tokens" --expect "reply cut off" --expect '"content":"!cutoff"' \
 	    --reject '"content":"!refuse"' --reject "VALIDATION:" --expect "HARNESS.EXE exit code 1" --expect "HARNESS.EXE exit code 0"
+	$(BOOTTEST) image/tests/cutcall.bat --mock --expect "cut call round trip: PASS" --expect '"name":"write","input":{}}' \
+	    --expect "stop=max_tokens" --expect "cut exit code 0" --expect "check exit code 0" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" \
 	    --expect "bigrun: the result came by thread continue" \

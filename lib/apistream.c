@@ -129,7 +129,7 @@ static int textDelta(ApiStream *a, const char *raw, unsigned len, int thinking)
 static int inputDelta(ApiStream *a, const char *raw, unsigned len)
 {
     while (len) {
-        unsigned take = safeCut(raw, len, SCRATCH / 2), n8;
+        unsigned take = safeCut(raw, len, SCRATCH / 2), n8, i;
         n8 = json_unescape(raw, take, raw8, SCRATCH);
         if (emitHist(a, raw8, n8))
             return -1;
@@ -141,6 +141,24 @@ static int inputDelta(ApiStream *a, const char *raw, unsigned len)
             a->toolInputOverflow = 1;
         }
         a->sigOpen = 1;                     /* some input was written */
+        for (i = 0; i < n8; i++) {          /* follow the JSON, to know at the end whether it closed */
+            char c = raw8[i];
+            if (a->inStr) {
+                if (a->inEsc)
+                    a->inEsc = 0;
+                else if (c == '\\')
+                    a->inEsc = 1;
+                else if (c == '"')
+                    a->inStr = 0;
+            } else if (c == '"') {
+                a->inStr = 1;
+            } else if (c == '{' || c == '[') {
+                a->inDepth++;
+                a->inSeen = 1;
+            } else if (c == '}' || c == ']') {
+                a->inDepth--;
+            }
+        }
         raw += take;
         len -= take;
     }
@@ -181,6 +199,8 @@ static int blockStart(ApiStream *a, const char *data, unsigned n)
         a->blockType = B_TOOL;
         a->hasTool = 1;
         a->toolInputLen = 0;
+        a->toolInputCut = 0;
+        a->inDepth = a->inStr = a->inEsc = a->inSeen = 0;
         if (a->toolInput)
             a->toolInput[0] = 0;
         field(data, n, "content_block.id", a->toolId, sizeof a->toolId);
@@ -188,6 +208,7 @@ static int blockStart(ApiStream *a, const char *data, unsigned n)
         if (emitHistZ(a, "{\"type\":\"tool_use\",\"id\":\"") || emitHistZ(a, a->toolId)
             || emitHistZ(a, "\",\"name\":\"") || emitHistZ(a, a->toolName) || emitHistZ(a, "\",\"input\":"))
             return -1;
+        a->inputAt = a->histPos ? a->histPos(a->ctx) : -1;
         return 0;
     }
     fail(a, "unknown block type ", type);
@@ -233,6 +254,20 @@ static int blockStop(ApiStream *a)
             a->thinking(a->ctx, THINK_END, "", 0);
         break;
     case B_TOOL:
+        /* Input that stops before its JSON closes (max_tokens cut the call)
+           would leave the message invalid for every later request: it goes,
+           and the call is stored with no input. */
+        if (a->sigOpen && (a->inDepth || a->inStr || !a->inSeen)) {
+            if (a->inputAt < 0 || !a->histCut || a->histCut(a->ctx, a->inputAt)) {
+                fail(a, "a tool call's input was cut off", NULL);
+                return -1;
+            }
+            a->sigOpen = 0;
+            a->toolInputCut = 1;
+            a->toolInputLen = 0;
+            if (a->toolInput)
+                a->toolInput[0] = 0;
+        }
         rc = emitHistZ(a, a->sigOpen ? "}" : "{}}");
         break;
     default:

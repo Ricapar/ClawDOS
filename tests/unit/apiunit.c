@@ -13,6 +13,7 @@
 #include "apireq.h"
 #include "dosfs.h"
 #include "chatfile.h"
+#include "apistream.h"
 
 void check(const char *name, int ok, const char *detail);              /* dosunit.c */
 void check_str(const char *name, const char *got, const char *want);
@@ -240,4 +241,103 @@ void testChatFileImage(void)
     CHECK_STR("chatfile image: shown", shownLog, "U:Hi|T:run:{\"command\":\"Q\"}|U:next|");
     free(big);
     free(shownLog);
+}
+
+/* A tool call whose input max_tokens cuts mid-string (fine-grained input
+   streaming sends it in pieces): the message is stored with "input":{} so it
+   stays valid JSON, and the call is marked cut. An input that closes, braces
+   inside its strings included, is kept as it came. */
+static char cutHist[400];
+static int cutPut(void *c, const char *p, unsigned n)
+{
+    unsigned have = strlen(cutHist);
+    (void)c;
+    if (have + n >= sizeof cutHist)
+        return -1;
+    memcpy(cutHist + have, p, n);
+    cutHist[have + n] = 0;
+    return 0;
+}
+static long cutPos(void *c) { (void)c; return (long)strlen(cutHist); }
+static int cutCut(void *c, long pos) { (void)c; cutHist[pos] = 0; return 0; }
+
+static int cutRun(ApiStream *a, char *in, const char *const *pieces, const char *stop)
+{
+    static char ev[200];
+    int i, rc = 0;
+
+    cutHist[0] = 0;
+    apistream_init(a, in, 200);
+    a->hist = cutPut; a->histPos = cutPos; a->histCut = cutCut;
+    strcpy(ev, "{\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}");
+    rc |= apistream_event(a, "message_start", ev, strlen(ev));
+    sprintf(ev, "{\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"write\",\"input\":{}}}");
+    rc |= apistream_event(a, "content_block_start", ev, strlen(ev));
+    for (i = 0; pieces[i]; i++) {
+        sprintf(ev, "{\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"%s\"}}", pieces[i]);
+        rc |= apistream_event(a, "content_block_delta", ev, strlen(ev));
+    }
+    rc |= apistream_event(a, "content_block_stop", "{\"index\":0}", 11);
+    sprintf(ev, "{\"delta\":{\"stop_reason\":\"%s\"},\"usage\":{\"output_tokens\":5}}", stop);
+    rc |= apistream_event(a, "message_delta", ev, strlen(ev));
+    return rc == 0 && apistream_event(a, "message_stop", "{}", 2) == 1;
+}
+
+void testToolInputCut(void)
+{
+    static const char *const cut[] = { "{\\\"path\\\":\\\"C:\\\\\\\\A.TXT\\\",", "\\\"text\\\":\\\"half a li", NULL };
+    static const char *const whole[] = { "{\\\"text\\\":\\\"}{[\\\\\\\"\\\"", ",\\\"n\\\":[1,{\\\"a\\\":2}]}", NULL };
+    static const char *const nested[] = { "{\\\"a\\\":{\\\"b\\\":1}", NULL };
+    ApiStream *a = (ApiStream *)malloc(sizeof(ApiStream));
+    char *in = (char *)malloc(200);
+
+    if (!a || !in) {
+        CHECK("tool input cut: memory", 0);
+        return;
+    }
+    CHECK("tool input cut: the stream ends", cutRun(a, in, cut, "max_tokens"));
+    CHECK_STR("tool input cut: stored with no input", cutHist,
+              "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"write\",\"input\":{}}]}");
+    CHECK("tool input cut: marked, no input kept", a->toolInputCut && a->hasTool && a->toolInputLen == 0
+          && !strcmp(a->stopReason, "max_tokens"));
+    CHECK("tool input whole: the stream ends", cutRun(a, in, whole, "tool_use"));
+    CHECK_STR("tool input whole: kept as it came", cutHist,
+              "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"write\","
+              "\"input\":{\"text\":\"}{[\\\"\",\"n\":[1,{\"a\":2}]}}]}");
+    CHECK("tool input whole: not marked", !a->toolInputCut && a->toolInputLen > 0);
+    CHECK("tool input cut after an inner object", cutRun(a, in, nested, "max_tokens") && a->toolInputCut
+          && strstr(cutHist, "\"input\":{}}]}") != NULL);
+    free(in);
+    free(a);
+}
+
+/* hist_cut_back: a cut inside the message being written, in the write-behind
+   buffer and on disk, never before the message's start. */
+void testHistCutBack(void)
+{
+    char *big = (char *)malloc(3001);
+    long at;
+
+    if (!big) {
+        CHECK("hist cut back: memory", 0);
+        return;
+    }
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    hist_puts(U1);
+    hist_message_done();
+    hist_puts("{\"role\":\"assistant\",\"content\":[{\"input\":");
+    at = hist_size();
+    hist_puts("{\"a\":\"hal");
+    CHECK("hist cut back: in the buffer", hist_cut_back(at) == 0 && hist_size() == at);
+    memset(big, 'x', 3000); big[3000] = 0;
+    hist_puts(big);                       /* past the 2 KB buffer: part of it on disk */
+    CHECK("hist cut back: on disk", hist_cut_back(at) == 0 && hist_size() == at);
+    CHECK("hist cut back: not before the message", hist_cut_back(10) == -1);
+    hist_puts("{}}]}");
+    CHECK("hist cut back: the message ends whole", hist_message_done() == 0
+          && hist_size() == (long)strlen(U1) + 3 + 45);
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+    free(big);
 }

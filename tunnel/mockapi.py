@@ -44,8 +44,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mockchat import (CHUNKS_TEXT, DEFAULT_TOOLS, Disconnect, Drop, Fail, HttpError, MockAPIError,  # noqa: E402
-                      MockChat, Ping, Refused, ToolCall, ToolResult)
+from mockchat import (CHUNKS_TEXT, DEFAULT_TOOLS, CutCall, Disconnect, Drop, Fail, HttpError,  # noqa: E402
+                      MockAPIError, MockChat, Ping, Refused, ToolCall, ToolResult)
 
 __all__ = ['CHUNKS_TEXT', 'make_server', 'main']
 
@@ -1093,6 +1093,16 @@ class Handler(BaseHTTPRequestHandler):
                     raise Disconnect()
                 if isinstance(item, Ping):
                     self.event('ping', {})
+                elif isinstance(item, CutCall):
+                    if text_open:
+                        self.event('content_block_stop', {'index': index})
+                        index += 1
+                        text_open = False
+                    item.id = tool_id = f'toolu_mock_{server.next_id()}'
+                    self.tool_use_block(index, item, cut=True)
+                    index += 1
+                    stop = 'max_tokens'
+                    break
                 elif isinstance(item, ToolCall) and chat.no_tools:
                     # tool_choice none: the model never calls a tool, so the scenario is told the call failed
                     item.result = ToolResult('error', 'tool_choice is none: no tool call was made')
@@ -1195,12 +1205,15 @@ class Handler(BaseHTTPRequestHandler):
         self.event('content_block_stop', {'index': 0})
         return {'type': 'thinking', 'thinking': text, 'signature': signature}
 
-    def tool_use_block(self, index, call):
+    def tool_use_block(self, index, call, cut=False):
+        """A tool_use block, its input in two input_json_delta pieces; with cut, only the first, which stops
+        inside the last string (max_tokens cut the call)."""
         self.event('content_block_start', {'index': index, 'content_block': {
             'type': 'tool_use', 'id': call.id, 'name': call.name, 'input': {}}})
         text = json.dumps(call.args)
-        cut = len(text) // 2
-        for piece in (text[:cut], text[cut:]):
+        half = len(text) // 2
+        pieces = (text[:text.rindex(': "') + 8],) if cut else (text[:half], text[half:])
+        for piece in pieces:
             self.event('content_block_delta',
                        {'index': index, 'delta': {'type': 'input_json_delta', 'partial_json': piece}})
         self.event('content_block_stop', {'index': index})

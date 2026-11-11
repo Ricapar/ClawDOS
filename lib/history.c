@@ -284,6 +284,25 @@ static int truncateTo(long pos)
     return 0;
 }
 
+int hist_cut_back(long pos)
+{
+    if (fd < 0 || pos < boundary || pos > end)
+        return -1;
+    noteCut(pos);
+    if (pos >= end - (long)pending) {         /* all of it still in wbuf */
+        pending -= (unsigned)(end - pos);
+        end = pos;
+        return 0;
+    }
+    end -= pending;                           /* what wbuf holds lies past pos */
+    pending = 0;
+    seekNeeded = 1;
+    if (chsize(fd, pos))
+        return -1;
+    end = pos;
+    return 0;
+}
+
 int hist_rollback_message(void)
 {
     return truncateTo(boundary);

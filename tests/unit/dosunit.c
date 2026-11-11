@@ -2501,6 +2501,8 @@ void testShotPng(void);               /* shotunit.c: its own module, for room in
 void testApiReqSnapshot(void);        /* apiunit.c, the same */
 void testFixedSwitch(void);
 void testChatFileImage(void);
+void testToolInputCut(void);
+void testHistCutBack(void);
 void testConvoImage(void);
 void testShotSeconds(void);
 void testRunmem(void);                /* memunit.c */
@@ -2550,6 +2552,8 @@ int main(void)
     testHistoryScanFails();
     testChatFile();
     testChatFileImage();
+    testToolInputCut();
+    testHistCutBack();
     testConvoJoinText();
     testPrefixCache();
     testFixedSwitch();

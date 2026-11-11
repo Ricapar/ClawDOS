@@ -21,6 +21,12 @@ typedef struct ApiStream {
        and nothing comes), THINK_END when it ends. */
     void (*thinking)(void *ctx, int phase, const char *cp437, unsigned n);
     int  (*hist)(void *ctx, const char *p, unsigned n);      /* bytes of the assistant message; 0 ok */
+    /* Where the next history byte goes, and a cut of the message back to such
+       a place (0 ok): a tool_use block whose input ends before its JSON does
+       (max_tokens cut it) is stored with "input":{} instead, so the history
+       stays valid; the harness then answers the call with an error. */
+    long (*histPos)(void *ctx);
+    int  (*histCut)(void *ctx, long pos);
     void *ctx;
     /* results */
     char stopReason[16];       /* end_turn, tool_use, max_tokens, refusal, ... */
@@ -32,12 +38,15 @@ typedef struct ApiStream {
     char *toolInput;           /* the tool_use input object, JSON text */
     unsigned toolInputLen, toolInputMax;
     int  toolInputOverflow;    /* the input did not fit toolInputMax */
+    int  toolInputCut;         /* the input ended before its JSON did: stored as {} */
     char error[160];           /* why apistream_event returned -1 */
     char errorType[24];        /* an error event's error.type: overloaded_error, api_error, ... */
     /* private */
     int blocks, inBlock, blockType, sigOpen, started;
     int bigKind;               /* the long event being streamed (apistream_big) */
     int bigEsc, bigDone;       /* inside an escape; its string has ended */
+    long inputAt;              /* histPos where the tool's input began */
+    int inDepth, inStr, inEsc, inSeen;   /* the input's JSON so far: whole when back at depth 0 */
 } ApiStream;
 
 void apistream_init(ApiStream *a, char *toolInputBuf, unsigned max);
