@@ -108,15 +108,18 @@ is in [API.md](API.md).
 
 ## Benchmark
 
-`python3 scripts/bench.py` (`make bench`, about half an hour) runs
+`python3 scripts/bench.py` (`make bench`, about six minutes since `e90da2f`) runs
 `image/tests/bench.bat` in 86Box against the mock API: the mock's `!bench` has
 CLAWDOS.EXE do 20 `read`s of a 4 KB file, one `run` of `VER` with
 `full_memory` (a real relaunch) and a 3.9 KB reply. Per round: `gap` the
 seconds since the previous round ended (the tool call, its result written to
 the history, the request's length counted), `len` the request body, `up` the
 time to send it, `ttft-up` the wait for the (mock) API, `total` the round.
-Taken 2026-11-10 at `f521559`, 86Box IBM PC 5160 (8088 4.77 MHz, NE1000 on
-SLiRP). Later changes rerun it and compare; the scenario and the format stay.
+The baseline was taken 2026-11-10 at `f521559`, 86Box IBM PC 5160 (8088 4.77
+MHz, NE1000 on SLiRP). Later changes rerun it and compare; the scenario and the
+format stay.
+
+### Baseline (`f521559`)
 
 | round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -157,6 +160,55 @@ round, with a short result, has ~6 s besides the relaunch), most likely the
 4 KB tool_result going into the history a character at a time
 (`json_escape_cp437` into `hist_write`, an `lseek` and a `write` per
 character). The stack never came within 2.4 KB of its end.
+
+### The frozen prefix and buffered history (`e90da2f`, 2026-11-11)
+
+| round | gap s | len | up ms | up KB/s | ttft-up ms | total ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | - | 11790 | 715 | 16.1 | 990 | 2090 |
+| 1 | 2 | 17895 | 1045 | 16.7 | 990 | 2530 |
+| 2 | 2 | 24000 | 1375 | 17.0 | 990 | 2805 |
+| 3 | 3 | 30105 | 1650 | 17.8 | 990 | 3080 |
+| 4 | 3 | 36210 | 1925 | 18.4 | 990 | 3410 |
+| 5 | 2 | 42317 | 2200 | 18.8 | 990 | 3685 |
+| 6 | 2 | 48424 | 2475 | 19.1 | 990 | 3905 |
+| 7 | 3 | 54531 | 2750 | 19.4 | 990 | 4180 |
+| 8 | 2 | 60638 | 3135 | 18.9 | 935 | 4565 |
+| 9 | 3 | 66745 | 3410 | 19.1 | 990 | 4840 |
+| 10 | 2 | 72853 | 3630 | 19.6 | 990 | 5115 |
+| 11 | 2 | 78961 | 4015 | 19.2 | 1045 | 5500 |
+| 12 | 3 | 85069 | 4345 | 19.1 | 990 | 7315 |
+| 13 | 3 | 91177 | 4620 | 19.3 | 1045 | 6050 |
+| 14 | 3 | 97285 | 4950 | 19.2 | 990 | 6435 |
+| 15 | 2 | 103393 | 5170 | 19.5 | 990 | 6600 |
+| 16 | 3 | 109501 | 5555 | 19.3 | 990 | 6985 |
+| 17 | 3 | 115609 | 5775 | 19.5 | 1045 | 7260 |
+| 18 | 2 | 121717 | 6105 | 19.5 | 990 | 7590 |
+| 19 | 2 | 127825 | 6435 | 19.4 | 990 | 7920 |
+| 20 | 3 | 133933 | 6655 | 19.7 | 990 | 8140 |
+| 21 | 24 | 136072 | 6820 | 19.5 | 990 | 25630 |
+| all | | 1666050 | 84755 | 19.2 | | 135630 |
+
+The turn took 211 s from the first request to the last reply.
+
+Final round: 3948 characters streamed in 17820 ms after the first, 222 characters/s (stop=end_turn).
+Relaunch round trip: program 2.1 s, CLAWDOS away 23.5 s.
+Stack: used 1379 of 4027 bytes; used 1565 of 4055 bytes (one line per HARNESS.EXE).
+
+The turn takes 211 s instead of 1,627 s. Nearly all of it is the gap between
+rounds, down from about 68 s to 2-3 s: a 4 KB tool result now reaches the
+history in three 2 KB writes instead of about 4,000 seeks and writes, and the
+request is written once, with its length added up from known sizes, instead
+of being read through twice. Upload rose from 12-13 KB/s to 19-20 KB/s (the
+136 KB request takes 6.8 s instead of 10.4 s), since the body is read from
+disk 2 KB at a time and PROMPT.TXT is no longer escaped a byte at a time on
+every request. Each request is about 1.1 KB shorter than at the baseline,
+because of changes made between the two runs (TOOLS.JSN minified in the
+image, whole-line results with a trailer), not this one. `ttft-up` is about
+990 ms against 1,100-1,210 ms: 50 ms of that is the mock, which no longer
+waits before it answers; the rest is unexplained. The final round streams at
+222 characters/s (182 before), most likely because the reply's deltas now go
+to the history through the buffer instead of a seek and a write each.
 
 ## M6.2: full-memory run
 

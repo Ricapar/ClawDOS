@@ -44,7 +44,7 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;
   `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023).
-- Benchmark: `python scripts/bench.py` (`make bench`, about half an hour) runs image/tests/bench.bat in 86Box: the mock's
+- Benchmark: `python scripts/bench.py` (`make bench`, about six minutes) runs image/tests/bench.bat in 86Box: the mock's
   `!bench` (20 reads of 4 KB, a `full_memory` run, a 4 KB reply) through CLAWDOS.EXE, then a table from CLAWDOS.LOG's
   `api` lines (`up=` upload ms, `len=` body bytes), the relaunch and the `stack:` high-water mark. docs/ROADMAP.md's
   "Benchmark" holds the baseline; keep the scenario and format stable. `--dosbox` is a quick, not comparable, run.

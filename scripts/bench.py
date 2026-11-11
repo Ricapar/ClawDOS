@@ -134,7 +134,7 @@ def main():
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
     a = ap.parse_args()
     timeout = a.timeout or TIMEOUT['dosbox' if a.dosbox else '86box']
-    print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about ten minutes)"}...',
+    print(f'bench: running image/tests/bench.bat in {"DOSBox-X" if a.dosbox else "86Box (about six minutes)"}...',
           file=sys.stderr, flush=True)
     if a.dosbox:
         output = run_dosbox(timeout, a.no_build)
