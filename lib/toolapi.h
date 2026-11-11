@@ -45,7 +45,6 @@ struct ToolCtx {
     unsigned len;
     int truncated;            /* some output didn't fit */
     char summary[64];         /* shown in the transcript */
-    int unattended;           /* nobody at the keyboard (-q): don't wait long */
     unsigned showFrom, showTo; /* out[showFrom..showTo): what the transcript shows the
                                   last lines of (a run's last output); empty if equal */
 };

@@ -31,7 +31,7 @@
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
-               rxBuf(NULL), err(""), reasked(0), streamRc(0), reqStart(0), firstText(0),
+               rxBuf(NULL), err(""), reasked(0), streamRc(0), textShown(0), reqStart(0), firstText(0),
                upTicks(0), reqLen(0)
 {
     addr[0] = path[0] = desc[0] = 0;
@@ -201,7 +201,6 @@ void Chat::loadMemories(void)
 {
     ToolCtx t;
     tout_reset(&t);
-    t.unattended = 1;
     memories[0] = 0;
     if (tool_memory_list(&t) == TS_OK) {
         unsigned n = t.len < MEMORIES_MAX - 1 ? t.len : MEMORIES_MAX - 1;
@@ -222,8 +221,10 @@ void Chat::warn(const char *text)
 void Chat::onText(void *ctx, const char *cp437, unsigned n)
 {
     Chat *c = (Chat *)ctx;
-    if (!c->firstText)
+    if (!c->textShown) {
+        c->textShown = 1;
         c->firstText = TICKS_NOW;
+    }
     c->ui->text(cp437, n);
 }
 
@@ -355,7 +356,7 @@ void Chat::logRound(int round)
     unsigned long now = TICKS_NOW;
     sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
             prov->id, as.model[0] ? as.model : prov->model, round,
-            firstText ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
+            textShown ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
             upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?",
             as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
     ui->log(line);
@@ -375,6 +376,7 @@ int8_t Chat::stream(void)
     as.hist = onHist;
     as.ctx = this;
     streamRc = 0;
+    textShown = 0;
     firstText = 0;
     for (;;) {
         n = waitRead(rxBuf, RX_MAX);
@@ -393,7 +395,7 @@ int8_t Chat::stream(void)
                 /* An overload reported inside the stream, as it is once
                    streaming has begun: with nothing shown yet it is retried
                    like an HTTP 529. */
-                if (!firstText && (!strcmp(as.errorType, "overloaded_error") || !strcmp(as.errorType, "api_error")))
+                if (!textShown && (!strcmp(as.errorType, "overloaded_error") || !strcmp(as.errorType, "api_error")))
                     return 3;
                 warn(as.error);
                 return -1;
@@ -488,7 +490,7 @@ int8_t Chat::request(int noTools)
             sprintf(msg, "%.120s", as.error);
             wait = 0;
         } else {
-            readErrorBody(&h, msg, sizeof msg - 24);   /* room for "; trying again in N s" */
+            readErrorBody(&h, msg, sizeof msg);
             if (h.close)
                 http.close();
             if (h.status != 429 && h.status < 500) {
@@ -503,6 +505,7 @@ int8_t Chat::request(int noTools)
             warn(msg);
             return -1;
         }
+        msg[sizeof msg - 28] = 0;         /* room for the rest, any int included */
         sprintf(msg + strlen(msg), "; trying again in %d s", wait);
         warn(msg);
         pause(wait);

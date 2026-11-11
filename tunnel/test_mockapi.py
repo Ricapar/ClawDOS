@@ -151,6 +151,12 @@ class MockApiTest(unittest.TestCase):
         self.assertIn('after the overload', text)
         self.assertEqual(stop, 'end_turn')
 
+    def test_badstream_is_an_invalid_request_error_before_any_text(self):
+        events = self.ask('!badstream')
+        self.assertEqual(events[-1][0], 'error')
+        self.assertEqual(events[-1][1]['error']['type'], 'invalid_request_error')
+        self.assertEqual(reply(events)[0], '')
+
     def test_refusal_and_cutoff(self):
         self.assertEqual(reply(self.ask('!refuse'))[2], 'refusal')
         self.assertEqual(reply(self.ask('!cutoff'))[2], 'max_tokens')

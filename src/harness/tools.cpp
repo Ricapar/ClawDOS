@@ -43,7 +43,6 @@ struct ToolDef {
 };
 
 static int safe = 1;
-static int unattended;
 
 
 /* --- the small tools ---------------------------------------------------------- */
@@ -256,10 +255,9 @@ static int __far criticalError(unsigned deverr, unsigned errcode, unsigned __far
     return _HARDERR_FAIL;
 }
 
-void tools_init(int safeMode, int noUser)
+void tools_init(int safeMode)
 {
     safe = safeMode;
-    unattended = noUser;
     _harderr(criticalError);
 }
 
@@ -366,7 +364,6 @@ static int execute(const char *name, int overflow, ToolCtx *t)
     int status = -1;
 
     tout_reset(t);
-    t->unattended = unattended;
     if (d == NULL) {
         ui_tool_header(name, "");
         sprintf(text, "unknown tool %.20s", name);

@@ -480,12 +480,19 @@ static void blankLine(void)
     con_newline();
 }
 
+/* Anything written into the transcript while a reply streams calls this
+   first: the reply text after it starts a new bullet, in its own colour and
+   margin, instead of carrying on in whatever was written last. */
+static void breakReply(void)
+{
+    if (state == STREAMING)
+        state = WAITING;
+}
+
 /* "  L text" under the message it belongs to. */
 static void note(const char *text, unsigned char attr)
 {
-    if (state == STREAMING)
-        state = WAITING;              /* reply text after the note starts a new bullet,
-                                         in its own colour and margin */
+    breakReply();
     con_margins(0, SCR_COLS - 1);
     con_ensure_blank_line();
     con_attr(A_DIM);
@@ -518,6 +525,7 @@ static void showHelp(void)
         "F5 cycles effort for the next message: low, medium, high, xhigh, max",
         0
     };
+    breakReply();
     blankLine();
     dimLines(help);
 }
@@ -868,8 +876,7 @@ void ui_tool_header(const char *title, const char *arg)
 
     if (scr_viewing())
         scr_view(0);
-    if (state == STREAMING)
-        state = WAITING;              /* text after the tool starts a new bullet */
+    breakReply();
     if (*arg)
         sprintf(buf, "%.20s(%.60s", title, arg);
     else
@@ -1349,7 +1356,7 @@ int main(int argc, char *argv[])
     } else {
         quitAfterReply = quick && firstMessage != NULL;
     }
-    tools_init(!unsafe, quick);
+    tools_init(!unsafe);
     quickFlag = quick;
     cfg = (Cfg *)malloc(sizeof(Cfg));
     if (cfg == NULL) {

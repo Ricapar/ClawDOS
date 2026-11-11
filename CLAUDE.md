@@ -26,7 +26,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   serial or mock log and `--reject TEXT` fails if it is. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool; `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529
-  (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `chunks.bat` awkward chunk
+  (`trying again`); `overload.bat` an `overloaded_error` event before any text, retried like a 529; `streamerr.bat` stream
+  errors that are not retried (after text, or another type); `chunks.bat` awkward chunk
   boundaries; `bigevent.bat` an event over the 16 KB buffer (`event too long`); `bigsig.bat` a 24 KB thinking signature streamed into the history
   and echoed back whole (`big signature round trip: PASS`); `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`

@@ -90,6 +90,7 @@ class Chat {
     Convo convo;                           /* the messages and the rules that keep the file valid */
     int reasked;                           /* re-sent after a lost link this turn */
     int streamRc;
+    int textShown;                         /* this round's reply has put text on the screen */
     unsigned long reqStart, firstText;
     unsigned long upTicks, reqLen;         /* the request's upload time and body length (logRound) */
     int pendRound;                         /* the call the launcher is running (turn() returned 2) */

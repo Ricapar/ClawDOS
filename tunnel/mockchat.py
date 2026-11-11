@@ -46,7 +46,11 @@ class Disconnect(Exception):
 
 
 class MockAPIError(Exception):
-    """Stands in for an Anthropic API error (an `error` event mid-stream)."""
+    """Stands in for an Anthropic API error (an `error` event mid-stream) of type `kind`."""
+
+    def __init__(self, message, kind='overloaded_error'):
+        super().__init__(message)
+        self.kind = kind
 
 
 class RetryOnce(Exception):
@@ -73,6 +77,7 @@ SCENARIOS = {
     '!drop': 'the connection drops mid-reply (once; the retry succeeds)',
     '!retry': 'HTTP 529 once, then a normal reply saying "second attempt"',
     '!overload': 'an overloaded_error event before any text (once; the retry succeeds)',
+    '!badstream': 'an invalid_request_error event before any text (not retried)',
     '!chunks': 'chunked encoding split every 7 bytes',
     '!bigevent': 'one text delta of 20 KB (over the DOS PC\'s event buffer)',
     '!bigsig': 'a 24 KB thinking signature (over the event buffer), a tool call, then a check that it came back intact',
@@ -352,7 +357,12 @@ class MockChat:
         if not self.state.get('overloaded'):
             self.state['overloaded'] = True
             raise MockAPIError('Overloaded (simulated, before any text)')
-        yield from self.stream('The stream said overloaded_error before any text; this is the reply after the overload.')
+        yield from self.stream('The stream said overloaded_error before any text; '
+                               'this is the reply after the overload.')
+
+    def _cmd_badstream(self, _text):
+        raise MockAPIError('Bad request (simulated, before any text)', 'invalid_request_error')
+        yield   # never reached: makes this a generator like the others
 
     def _cmd_chunks(self, _text):
         self.chunk_every = 7

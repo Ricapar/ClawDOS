@@ -366,6 +366,7 @@ int shell_run(ToolCtx *t, const char *cmds)
     for (i = 0, p = cmds; i < count; i++) {
         nextCmd(&p, cmd);
         if (i > 0 && tool_esc()) {
+            t->showFrom = t->showTo = 0;  /* the transcript's note is about this, not the last output */
             tout_printf(t, "stopped by the user before: %s\n", cmd);
             strcpy(t->summary, "stopped by user");
             return TS_STOPPED;
@@ -373,6 +374,7 @@ int shell_run(ToolCtx *t, const char *cmds)
         if (count > 1)
             tout_printf(t, "> %s\n", cmd);
         if ((code = runOne(cmd, why)) == -1) {
+            t->showFrom = t->showTo = 0;
             tout_printf(t, "%s\n", why);
             strncpy(t->summary, why, sizeof(t->summary) - 1);
             t->summary[sizeof(t->summary) - 1] = 0;

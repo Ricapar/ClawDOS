@@ -59,6 +59,8 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/overload.bat --mock --expect "before any text); trying again" --expect "stop=end_turn" \
 	    --reject "link lost"
+	$(BOOTTEST) image/tests/streamerr.bat --mock --expect "API error 529: Overloaded (simulated)" \
+	    --expect "Bad request (simulated, before any text)" --reject "trying again"
 	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn"
 	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn"

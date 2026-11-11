@@ -165,7 +165,6 @@ static void testMemoryList(void)
     char *line;
 
     tout_reset(&t);
-    t.unattended = 1;
     targ_reset();
     targ_set("name", "ABCDEFGH", 8);
     targ_set("text", "Unit test memory\nsecond line", 28);
@@ -204,7 +203,6 @@ static void testMemoryManage(void)
     int n, a, b, cut;
 
     tout_reset(&t);
-    t.unattended = 1;
     targ_reset();
     targ_set("name", "ZZUNITB", 7);
     targ_set("text", "Second unit memory\nmore", 24);
@@ -883,7 +881,6 @@ static void newCall(void)
 {
     targ_reset();
     tout_reset(&ft);
-    ft.unattended = 1;
 }
 
 /* An argument as the harness stores it: UTF-8 through targ_set. */

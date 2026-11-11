@@ -273,7 +273,7 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.close()
             return
         except MockAPIError as e:
-            self.event('error', {'error': {'type': 'overloaded_error', 'message': str(e)}})
+            self.event('error', {'error': {'type': e.kind, 'message': str(e)}})
             self.end_stream()
             return
         if text_open:

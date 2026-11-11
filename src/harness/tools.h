@@ -5,7 +5,7 @@
 
 #include "toolapi.h"
 
-void tools_init(int safe, int unattended);
+void tools_init(int safe);
 int  tools_safe(void);
 void tools_toggle_safe(void);
 /* Started by CLAWDOS.EXE (-launched): run hands its commands to the launcher and
