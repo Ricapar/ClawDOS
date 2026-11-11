@@ -140,16 +140,23 @@ networking. It is faster but less exact (it emulates an 80186).
    log): update it in place with `python scripts/build.py --update /path/to/CLAWDOS.IMG`
    (`make update IMG=/path/to/CLAWDOS.IMG`). It builds as usual, copies the old image to
    `CLAWDOS.IMG.bak`, then replaces or adds every file the build ships and nothing else:
-   everything under `MEMORY\`, `CLAWDOS\CHATS\`, `CLAWDOS.LOG`, `CLAWDOS.CFG`, the
-   relaunch state files and any file the build does not ship (your own programs) stay as
-   they are, and it says so for each shipped file it left alone. It lists the files it
+   everything under `MEMORY\`, `CLAWDOS\CHATS\`, `CLAWDOS.LOG`, `CLAWDOS.CFG`, `NET\MTCP.CFG`
+   (the DHCP lease lives there), the relaunch state files and any file the build does not
+   ship (your own programs) stay as they are, and it says so for each shipped file it left
+   alone. Other shipped files you edited on the PC (`AUTOEXEC.BAT`, `CONFIG.SYS`,
+   `TC\TURBOC.CFG`, the programs) are replaced, and survive only in the backup. An existing
+   backup is never overwritten: the next one is `CLAWDOS.IMG.bak.2`, then `.bak.3`, and the
+   output names the one written. A run that would add and change nothing writes nothing
+   (no backup, no new image). It lists the files it
    added or changed, counts the unchanged, and, since it leaves `CLAWDOS.CFG` alone, lists
    the template's `[anthropic]` settings the image's copy lacks so you can add them.
    `--dry-run` shows all that and changes nothing; `--memories` also replaces the memory
    files the build ships (not your others); `--cfg` replaces `CLAWDOS.CFG` with the
-   build's (tunnel address and key line included); `--no-backup` skips the `.bak`. Quit
-   CLAWDOS and keep the card out of the PC while you update. It refuses an image with no
-   `CLAWDOS` directory.
+   build's (tunnel address and key line included; it warns if that writes a key into a
+   config that says `auth tunnel`); `--no-backup` skips the backup. `--no-key` is remembered
+   by later builds until you give `--key`. If the build's boot code differs from the
+   card's it says so but does not rewrite it. Quit CLAWDOS and keep the card out of the PC
+   while you update. It refuses an image with no `CLAWDOS` directory.
 4. **Configure the PicoMEM**: in its BIOS menu pick the image as HDD0 (Disk) and
    make sure NE2000 is enabled (Other). The card's WiFi settings are its own;
    see the PicoMEM documentation.

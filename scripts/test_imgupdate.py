@@ -5,6 +5,8 @@ Every image here is made in a temporary directory; no real image is involved.
 The "PC" image holds data the build must never touch, the "fresh" one is what a build ships.
 """
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -29,6 +31,7 @@ FRESH = {
     'CLAWDOS/CLAWDOS.EXE': b'launcher',
     'CLAWDOS/CLAWDOS.CFG': CFG_TEMPLATE,
     'CLAWDOS/PROMPT.TXT': b'prompt v2',
+    'NET/MTCP.CFG': b'PACKET_INT 0x60\r\n',
     'MEMORY/DEVTOOLS.TXT': b'devtools v2',
     'MEMORY/NEWMEM.TXT': b'a new memory',
     'SKILLS/DEEP/ONE.TXT': b'a new folder tree',
@@ -45,6 +48,7 @@ PC = {
     'CLAWDOS/RESUME.TXT': b'resume', 'CLAWDOS/SCREEN.SAV': b'screen',
     'MEMORY/DEVTOOLS.TXT': b'devtools v1, edited by the user',
     'MEMORY/MINE.TXT': b'the PC wrote this',
+    'NET/MTCP.CFG': b'PACKET_INT 0x60\r\nIPADDR 10.0.0.9 (a DHCP lease)\r\n',
     'GAMES/PONG.EXE': b'the user\'s own program',
     'CLAWDOS/NOTES.TXT': b'a file in a folder the build ships to',
 }
@@ -94,6 +98,7 @@ class UpdateFsTest(unittest.TestCase):
         self.assertEqual(after['CLAWDOS/CLAWDOS.CFG'], CFG_PC)
         self.assertEqual(after['MEMORY/DEVTOOLS.TXT'], PC['MEMORY/DEVTOOLS.TXT'])
         self.assertNotIn('MEMORY/NEWMEM.TXT', after)
+        self.assertEqual(after['NET/MTCP.CFG'], PC['NET/MTCP.CFG'])     # the DHCP lease lives there
 
     def test_nothing_is_deleted(self):
         _, after = self.update()
@@ -105,6 +110,7 @@ class UpdateFsTest(unittest.TestCase):
         self.assertIn('CLAWDOS/CLAWDOS.CFG', left)
         self.assertIn('MEMORY/DEVTOOLS.TXT', left)
         self.assertIn('MEMORY/NEWMEM.TXT', left)
+        self.assertIn('NET/MTCP.CFG', left)
 
     def test_other_files_counted(self):
         rep, _ = self.update()
@@ -118,6 +124,10 @@ class UpdateFsTest(unittest.TestCase):
         self.assertEqual(after['MEMORY/MINE.TXT'], PC['MEMORY/MINE.TXT'])
         self.assertEqual(after['CLAWDOS/CLAWDOS.CFG'], CFG_PC)
         self.assertIn('MEMORY/NEWMEM.TXT', rep.added)
+
+    def test_no_flag_replaces_mtcp_cfg(self):
+        _, after = self.update(memories=True, cfg=True)
+        self.assertEqual(after['NET/MTCP.CFG'], PC['NET/MTCP.CFG'])
 
     def test_cfg_flag_replaces_the_config_only(self):
         rep, after = self.update(cfg=True)
@@ -250,6 +260,203 @@ class UpdateImageTest(unittest.TestCase):
             imgupdate.update_image(self.pc, self.fresh)
         self.assertEqual(self.read(self.pc), before)
         self.assertFalse(os.path.exists(self.pc + '.bak'))
+
+
+class UpdateWarningsTest(unittest.TestCase):
+    def run_update(self, pc_cfg, fresh_cfg, **kw):
+        pc_img = make_image({'CLAWDOS/CLAWDOS.CFG': pc_cfg})
+        fresh = fatimg.open_fs(make_image({'CLAWDOS/CLAWDOS.CFG': fresh_cfg}))
+        return imgupdate.update_fs(imgupdate.open_target(pc_img), fresh, **kw)
+
+    def test_a_key_written_over_auth_tunnel_warns(self):
+        pc = b'[anthropic]\r\nmodel m\r\nauth tunnel      # the tunnel has the key\r\n'
+        rep = self.run_update(pc, CFG_TEMPLATE, cfg=True)
+        self.assertEqual(len(rep.warnings), 1)
+        text = '\n'.join(rep.lines())
+        self.assertIn('WARNING', text)
+        self.assertNotIn('sk-ant', text)
+        self.assertEqual(self.run_update(CFG_PC, CFG_TEMPLATE, cfg=True).warnings, [])
+        self.assertEqual(self.run_update(pc, CFG_TEMPLATE).warnings, [])   # config left alone: nothing to warn of
+
+    def test_no_anthropic_section_is_said(self):
+        rep = self.run_update(b'[other]\r\nx 1\r\n', CFG_TEMPLATE)
+        self.assertIn('no [anthropic] section', '\n'.join(rep.lines()))
+        self.assertEqual(rep.new_settings, [])
+
+
+class UpdateBackupTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.pc = os.path.join(self.tmp.name, 'PC.IMG')
+        self.fresh = os.path.join(self.tmp.name, 'FRESH.IMG')
+        self.write(self.pc, make_image(PC))
+        self.write(self.fresh, make_image(FRESH))
+
+    @staticmethod
+    def write(path, data):
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    @staticmethod
+    def read(path):
+        with open(path, 'rb') as f:
+            return f.read()
+
+    def names(self):
+        return sorted(os.listdir(self.tmp.name))
+
+    def test_an_existing_backup_is_never_overwritten(self):
+        original = self.read(self.pc)
+        imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.read(self.pc + '.bak'), original)
+        after_first = self.read(self.pc)
+        self.write(self.fresh, make_image(dict(FRESH, **{'CLAWDOS/PROMPT.TXT': b'prompt v3'})))
+        rep = imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.read(self.pc + '.bak'), original)                 # still the pre-update image
+        self.assertEqual(self.read(self.pc + '.bak.2'), after_first)
+        self.assertEqual(rep.backup, self.pc + '.bak.2')
+        self.assertIn(self.pc + '.bak.2', '\n'.join(rep.lines()))
+        self.write(self.fresh, make_image(dict(FRESH, **{'CLAWDOS/PROMPT.TXT': b'prompt v4'})))
+        self.assertEqual(imgupdate.update_image(self.pc, self.fresh).backup, self.pc + '.bak.3')
+
+    def test_nothing_to_do_writes_nothing(self):
+        imgupdate.update_image(self.pc, self.fresh)
+        done, bak = self.read(self.pc), self.read(self.pc + '.bak')
+        stamp = os.stat(self.pc).st_mtime_ns
+        rep = imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual((rep.added, rep.changed, rep.backup), ([], [], None))
+        self.assertEqual(self.read(self.pc), done)
+        self.assertEqual(os.stat(self.pc).st_mtime_ns, stamp)
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG', 'PC.IMG.bak'])
+        self.assertEqual(self.read(self.pc + '.bak'), bak)
+        self.assertIn('Nothing to update', '\n'.join(rep.lines()))
+
+    def test_a_failed_backup_copy_leaves_the_image_and_no_leftovers(self):
+        before = self.read(self.pc)
+
+        def fail(src, dst):
+            self.write(dst, b'trunc')
+            raise OSError(28, 'No space left on device')
+        with mock.patch.object(imgupdate.shutil, 'copyfile', fail):
+            with self.assertRaisesRegex(imgupdate.UpdateError, 'unchanged.*No space'):
+                imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.read(self.pc), before)
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG'])
+
+    def test_a_failed_write_removes_the_temp_file_and_the_unused_backup(self):
+        before = self.read(self.pc)
+        with mock.patch.object(imgupdate.os, 'replace', side_effect=OSError(30, 'Read-only file system')):
+            with self.assertRaisesRegex(imgupdate.UpdateError, 'unchanged'):
+                imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.read(self.pc), before)
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG'])
+
+    def test_boot_code_difference_is_reported_not_rewritten(self):
+        mbr = bytes([0x90]) * 446
+        self.write(self.fresh, fatimg.make_hdd(9, mbr=mbr))
+        fresh = fatimg.open_fs(bytearray(self.read(self.fresh)))
+        for path, data in FRESH.items():
+            if '/' in path:
+                fresh.makedirs(path.rpartition('/')[0])
+            fresh.write_file(path, data)
+        self.write(self.fresh, bytes(fresh.img))
+        old_mbr = self.read(self.pc)[:446]
+        rep = imgupdate.update_image(self.pc, self.fresh)
+        self.assertTrue(rep.boot_differs)
+        self.assertIn('boot code', '\n'.join(rep.lines()))
+        self.assertEqual(self.read(self.pc)[:446], old_mbr)
+
+    def test_same_boot_code_is_not_reported(self):
+        self.assertFalse(imgupdate.update_image(self.pc, self.fresh, dry_run=True).boot_differs)
+
+    def test_check_not_built_sees_through_a_symlink(self):
+        link = os.path.join(self.tmp.name, 'LINK.IMG')
+        os.symlink(self.fresh, link)
+        with self.assertRaisesRegex(imgupdate.UpdateError, 'build writes'):
+            imgupdate.check_not_built(link, self.fresh)
+        imgupdate.check_not_built(self.pc, self.fresh)
+        imgupdate.check_not_built(self.pc, os.path.join(self.tmp.name, 'NOT-YET.IMG'))
+
+
+class BuildMainTest(unittest.TestCase):
+    """build.py's own flag checks, and --update through main with the toolchain steps stubbed out."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.pc = os.path.join(self.tmp.name, 'PC.IMG')
+        self.fresh = os.path.join(self.tmp.name, 'FRESH.IMG')
+        for path, files in ((self.pc, PC), (self.fresh, FRESH)):
+            with open(path, 'wb') as f:
+                f.write(make_image(files))
+
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        code = None
+        patches = [mock.patch.object(build, 'build_boot'), mock.patch.object(build, 'build_apps'),
+                   mock.patch.object(build, 'write_compiledb'),
+                   mock.patch.object(build, 'build_image', return_value=self.fresh),
+                   mock.patch.object(build, 'api_key', return_value=None),
+                   mock.patch.object(build, 'SETTINGS_FILE', os.path.join(self.tmp.name, 'settings.json')),
+                   mock.patch.object(build, 'BUILD', self.tmp.name)]
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            try:
+                build.main(list(args))
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_flags_that_go_with_update_need_it(self):
+        for flag in ('--dry-run', '--memories', '--cfg', '--no-backup'):
+            code, _, err = self.run_main(flag)
+            self.assertEqual(code, 2, flag)
+            self.assertIn('--update', err)
+
+    def test_update_refuses_autotest_and_key_with_no_key(self):
+        self.assertEqual(self.run_main('--update', self.pc, '--autotest', 'x.bat')[0], 2)
+        self.assertEqual(self.run_main('--key', '--no-key')[0], 2)
+
+    def test_update_refuses_a_non_image_before_building(self):
+        with open(self.pc, 'wb') as f:
+            f.write(make_image({'DOS/X.TXT': b'x'}))
+        with mock.patch.object(build, 'build_boot') as boot:
+            code, _, _ = self.run_main('--update', self.pc)
+        self.assertIn('no CLAWDOS directory', str(code))
+        boot.assert_not_called()
+
+    def test_update_through_main(self):
+        code, out, _ = self.run_main('--update', self.pc, '--dry-run')
+        self.assertIsNone(code)
+        self.assertRegex(out, r'would change\s+KERNEL.SYS')
+        code, out, _ = self.run_main('--update', self.pc)
+        self.assertIsNone(code)
+        self.assertIn('The old image is saved as ' + self.pc + '.bak', out)
+        with open(self.pc, 'rb') as f:
+            self.assertEqual(contents(f.read())['KERNEL.SYS'], b'kernel v2')
+
+    def test_no_key_is_remembered_until_key(self):
+        self.run_main('--no-key', '--update', self.pc, '--dry-run')
+        self.assertTrue(self.settings_nokey())
+        self.run_main('--key', '--update', self.pc, '--dry-run')
+        self.assertFalse(self.settings_nokey())
+
+    def settings_nokey(self):
+        with mock.patch.object(build, 'SETTINGS_FILE', os.path.join(self.tmp.name, 'settings.json')):
+            return build.settings()['nokey']
+
+    def test_remembered_no_key_makes_the_config_say_auth_tunnel(self):
+        with open(os.path.join(build.ROOT, 'image', 'clawdos', 'CLAWDOS.CFG'), 'rb') as f:
+            template = f.read()
+        with mock.patch.object(build, 'api_key', return_value='sk-ant-made-up'), \
+                mock.patch.object(build, 'settings', return_value={'tunnel': '1.2.3.4:8443', 'nokey': True}):
+            text = build.clawdos_cfg(template).decode('cp437')
+        self.assertNotIn('sk-ant-made-up', text)
+        self.assertIn('auth tunnel  ', text)
 
 
 class BuildCfgTest(unittest.TestCase):

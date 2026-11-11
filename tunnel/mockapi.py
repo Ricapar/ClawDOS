@@ -1,6 +1,7 @@
 """A fake Anthropic Messages API for testing HARNESS.EXE offline.
 
-  python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1.0] [--tools image/clawdos/TOOLS.JSN] [--thread-ttl 300]
+  python3 tunnel/mockapi.py [--listen 127.0.0.1] [--port 18023] [--speed 1.0]
+                            [--tools image/clawdos/TOOLS.JSN] [--thread-ttl 300]
 
 Serves POST /v1/messages over plain HTTP (no tunnel needed) with the real
 API's streaming shape: chunked transfer encoding carrying server-sent events
@@ -1062,7 +1063,7 @@ class MockServer(ThreadingHTTPServer):
             return self._ids
 
 
-def make_server(port, speed=1.0, tools_path=DEFAULT_TOOLS, host='0.0.0.0', thread_ttl=THREAD_TTL):
+def make_server(port, speed=1.0, tools_path=DEFAULT_TOOLS, host='127.0.0.1', thread_ttl=THREAD_TTL):
     return MockServer((host, port), speed, tools_path, thread_ttl)
 
 
@@ -1081,7 +1082,8 @@ def main():
         server = make_server(a.port, a.speed, a.tools, host=a.listen, thread_ttl=a.thread_ttl)
     except (OSError, ValueError) as e:
         sys.exit(f'mockapi: cannot start ({a.tools} must be readable JSON): {e}')
-    print(f'mock Messages API on port {a.port} (speed {a.speed})', flush=True)   # scripts/boottest.py waits for this line
+    # scripts/boottest.py waits for the start of this line
+    print(f'mock Messages API on port {a.port} (speed {a.speed}), listening on {a.listen}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

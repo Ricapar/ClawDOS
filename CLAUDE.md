@@ -7,16 +7,16 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
 - Setup once: `python3 scripts/setup-tools.py` (Homebrew on macOS, winget on Windows). Toolchains live in `tools/`
   (gitignored), outputs in `build/`. The Python (tunnel/) is stdlib only: no venv.
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
-- The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (host unit tests: the mock API, bench.py's table),
+- The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (host unit tests: the mock API, the tunnel, the image updater, bench.py's table),
   `make boottests` (the DOSBox-X tests that run offline), `make boottests-online` (those that need the internet:
   clock.bat), `make check` (test and boottests, all offline), `make bench` (the 86Box benchmark), `make run`,
   `make tunnel`, `make mock`. Keep it in step with them.
 - Update a real PC's image in place instead of replacing it: `python scripts/build.py --update PATH/CLAWDOS.IMG [--dry-run]
-  [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). It copies
-  the old image to IMG.bak, then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
+  [--memories] [--cfg] [--no-backup]` (`make update IMG=...`; scripts/imgupdate.py, tests scripts/test_imgupdate.py). Unless nothing would change, it copies
+  the old image to IMG.bak (never overwritten: .bak.2, .bak.3, ...), then replaces/adds every file the fresh build ships (derived from the manifest, no directory list) and
   nothing else: MEMORY/ (`--memories`: only the memory files the build ships), CLAWDOS/CHATS/, CLAWDOS.LOG, CLAWDOS.CFG
-  (`--cfg`), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
-- The API key can stay off the DOS PC: `build.py --no-key` (image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
+  (`--cfg`), NET/MTCP.CFG (the DHCP lease), RUN.TXT/RUN.OUT/RESUME.TXT/SCREEN.SAV and files the build does not ship stay. Never test it on the real SD-card image.
+- The API key can stay off the DOS PC: `build.py --no-key` (remembered, `--key` undoes it; image says `auth tunnel`, no key) with `python3 tunnel/tunnel.py
   --key-file PATH --allow ADDR`, which adds `x-api-key` to each request for api.anthropic.com (opt-in; the default tunnel still
   copies bytes and knows nothing of HTTP; docs/API.md "The tunnel"). Tests: `python3 tunnel/test_tunnel.py` against a local
   stand-in upstream, never the internet. `mockapi.py --listen` defaults to 127.0.0.1 (the emulators reach it as 10.0.2.2).

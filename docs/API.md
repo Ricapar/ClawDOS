@@ -63,7 +63,7 @@ supplies it (below), and a `key` line in such a section is ignored. `tunnel`, `h
 ## The request
 
 One `POST {path} HTTP/1.1` per API round on a keep-alive connection to the
-tunnel, with `Host`, `x-api-key` (or `Authorization: Bearer`),
+tunnel, with `Host`, `x-api-key` (or `Authorization: Bearer`; neither with `auth tunnel`),
 `anthropic-version: 2023-06-01`, `anthropic-beta` (the provider's `betas`
 line, then `thinking-display-updates-2026-08-18` with `progress`,
 `thinking-binding-controls-2026-08-01` with `dropthinking` and
@@ -284,15 +284,18 @@ file, or one with anything but visible ASCII, is a start-up error. For every req
 on a map to `api.anthropic.com` (never another map: a second provider's port is still
 a byte copy, and `--key-file` without an `api.anthropic.com` map is an error) it:
 
-- finds the request head (up to the blank line, at most 64 KB), drops every
-  `x-api-key` and `authorization` header the client sent (with any folded continuation
-  lines) and puts `x-api-key: <key>` first among the headers;
+- finds the request head (up to the blank line, at most 64 KB), requires an origin-form
+  target (`/path`) and exactly one `Host` header naming the mapped host (case aside, with
+  or without its port), so the key goes only where it belongs whatever a client or a web
+  page asks; drops every `x-api-key` and `authorization` header the client sent and puts
+  `x-api-key: <key>` first among the headers;
 - forwards exactly `Content-Length` bytes of body unread and unchanged, then looks for
   the next request head on the same connection (keep-alive; pipelined requests work);
 - copies responses back unread, as before.
 
 Limits: only Content-Length framing. A request with `Transfer-Encoding`, `Upgrade` or
-`CONNECT` (501), a bad or repeated `Content-Length`, a bare CR/LF/NUL in the head or a
+`CONNECT` (501), a bad, repeated or over-18-digit `Content-Length`, a folded header line, an
+absolute-form target, a missing, repeated or foreign `Host`, a bare CR/LF/NUL in the head or a
 malformed header line (400), or a head over 64 KB (431) is answered with that status and
 the connection closed, never forwarded. A refusal may interleave with an upstream
 response if the client pipelined. The key and the requests are never logged, only

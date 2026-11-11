@@ -448,6 +448,8 @@ def clawdos_cfg(template, with_key=True, tunnel_key=False):
     tunnel_key turns on the template's `auth tunnel` line and never writes a key."""
     text = template.decode('cp437')
     text = re.sub(r'^tunnel .*$', f'tunnel {settings()["tunnel"]}', text, count=1, flags=re.M)
+    if with_key and settings().get('nokey'):
+        tunnel_key = True                  # remembered by --no-key
     key = api_key() if with_key and not tunnel_key else None
     if tunnel_key:
         text = re.sub(r'^# auth tunnel\b', 'auth tunnel  ', text, count=1, flags=re.M)
@@ -461,6 +463,8 @@ DEFAULT_SETTINGS = {
     # Where the DOS PC finds the TLS tunnel. 10.0.2.2 is the host PC as seen
     # from the emulators' NAT network; real hardware needs the tunnel machine's LAN IP.
     'tunnel': '10.0.2.2:8443',
+    # --no-key: images carry no API key and say `auth tunnel` (the tunnel adds the key); --key undoes it.
+    'nokey': False,
 }
 
 
@@ -488,8 +492,8 @@ def open_image(path):
         sys.exit(f'build: cannot read {path}: {e.strerror}')
 
 
-def main():
-    """Command line: set the tunnel address, then build the boot code, the programs and the image."""
+def parse_args(argv=None):
+    """The command line, checked: flags that go with --update need it, and so on."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--autotest', help='batch file installed as C:\\AUTOTEST.BAT')
     ap.add_argument('--tunnel', help='host:port of the TLS tunnel (remembered for later builds)')
@@ -498,37 +502,50 @@ def main():
     ap.add_argument('--update', metavar='IMG',
                     help='after building, bring this existing image up to date in place (keeps the PC\'s own '
                          'data: memories, chats, the log, CLAWDOS.CFG and files the build does not ship)')
-    ap.add_argument('--dry-run', action='store_true', help='with --update: change nothing, say what would change')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='with --update: change nothing, say what would change')
     ap.add_argument('--memories', action='store_true',
                     help='with --update: also replace the memory files the build ships (others are kept)')
     ap.add_argument('--cfg', action='store_true',
-                    help='with --update: also replace CLAWDOS.CFG (the tunnel address and key line become the build\'s)')
+                    help='with --update: also replace CLAWDOS.CFG (the build\'s tunnel address and key line)')
     ap.add_argument('--no-backup', action='store_true', help='with --update: do not copy IMG to IMG.bak first')
     ap.add_argument('--no-key', action='store_true',
                     help='leave the API key out of the image and say `auth tunnel`: the tunnel adds it '
-                         '(tunnel.py --key-file)')
-    a = ap.parse_args()
+                         '(tunnel.py --key-file); remembered for later builds')
+    ap.add_argument('--key', action='store_true',
+                    help='write the API key from .env into the image again (undoes --no-key)')
+    a = ap.parse_args(argv)
     if not a.update and (a.dry_run or a.memories or a.cfg or a.no_backup):
         ap.error('--dry-run, --memories, --cfg and --no-backup go with --update')
     if a.update and a.autotest:
         ap.error('--update does not take --autotest (it would put a test batch on a real image)')
+    if a.key and a.no_key:
+        ap.error('--key and --no-key contradict each other')
+    return a
+
+
+def main(argv=None):
+    """Command line: set the tunnel address, then build the boot code, the programs and the image."""
+    a = parse_args(argv)
     if a.update:
         try:     # fail before the long build, not after
             imgupdate.open_target(bytearray(open_image(a.update)))
+            imgupdate.check_not_built(a.update, os.path.join(BUILD, IMAGE_NAME))
         except imgupdate.UpdateError as e:
             sys.exit(f'build: {a.update}: {e}')
     if a.compiledb:
         print(write_compiledb())
         return
-    s = settings(tunnel=a.tunnel)
-    print(f'[settings] tunnel = {s["tunnel"]}, key {"left out (--no-key: auth tunnel)" if a.no_key else "from .env" if api_key() else "not set"}, build v{BUILD_STAMP}')
+    s = settings(tunnel=a.tunnel, nokey=True if a.no_key else False if a.key else None)
+    key_text = 'left out (--no-key: auth tunnel)' if s['nokey'] else 'from .env' if api_key() else 'not set'
+    print(f'[settings] tunnel = {s["tunnel"]}, key {key_text}, build v{BUILD_STAMP}')
     print('[boot]')
     build_boot()
     print('[apps]')
     build_apps()
     write_compiledb()
     print('[image]')
-    built = build_image(a.autotest, tunnel_key=a.no_key, with_key=not a.no_key)
+    built = build_image(a.autotest)
     if a.update:
         print(f'[update] {a.update}' + (' (dry run)' if a.dry_run else ''))
         try:
@@ -537,8 +554,6 @@ def main():
         except imgupdate.UpdateError as e:
             sys.exit(f'build: {a.update}: {e}')
         print('\n'.join(rep.lines(a.dry_run)))
-        if not a.dry_run and not a.no_backup:
-            print(f'  the old image is {a.update}.bak')
 
 
 if __name__ == '__main__':

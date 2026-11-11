@@ -20,8 +20,9 @@ to api.anthropic.com it removes any `x-api-key` and `authorization` header the
 client sent and adds `x-api-key: <the file's contents>`. To find each request's
 head it follows HTTP/1.1 framing: head up to the blank line, then Content-Length
 bytes of body, then the next request on the same connection. A request it cannot
-frame (Transfer-Encoding, Upgrade, CONNECT, a malformed head) is refused with an
-error and the connection closed. Responses are still copied unread. The key and
+frame (Transfer-Encoding, Upgrade, CONNECT, folded or malformed headers) is refused with
+an error and the connection closed, and so is one not meant for that host: the target
+must be a /path and there must be exactly one Host header naming it. Responses are still copied unread. The key and
 the requests are never logged. It will not start without an `--allow`, unless
 `--listen` is a loopback address: a tunnel that adds a key must not serve everyone.
 
@@ -111,10 +112,18 @@ class BadRequest(Exception):
         self.why = why
 
 
-def rewrite_head(head, key):
+def host_ok(value, host, rport):
+    """True if a Host header value names the mapped host (case aside), with or without its port."""
+    value = value.strip().lower()
+    return value in (host.lower(), f'{host.lower()}:{rport}')
+
+
+def rewrite_head(head, key, host, rport=443):
     """(new head, body length) for a request head (bytes, no final blank line): the client's
     x-api-key and authorization headers dropped, x-api-key: KEY first among the headers.
-    BadRequest for anything whose framing or syntax is in doubt: the body length must be certain."""
+    BadRequest for anything whose framing or syntax is in doubt (the body length must be certain),
+    and for a request that is not for `host`: the key is only ever sent to the host it belongs to,
+    so the target must be origin-form (/path) and there must be exactly one Host header naming it."""
     lines = head.split(b'\r\n')
     if any(b'\r' in l or b'\n' in l or b'\0' in l for l in lines):
         raise BadRequest('400 Bad Request', 'bare CR, LF or NUL in a request head')
@@ -123,33 +132,34 @@ def rewrite_head(head, key):
         raise BadRequest('400 Bad Request', 'malformed request line')
     if parts[0].upper() == b'CONNECT':
         raise BadRequest('501 Not Implemented', 'CONNECT')
-    out, length, dropping = [lines[0], b'x-api-key: ' + key.encode('ascii')], None, False
+    if not parts[1].startswith(b'/'):
+        raise BadRequest('400 Bad Request', 'request target is not a path')
+    out, length, hosts = [lines[0], b'x-api-key: ' + key.encode('ascii')], None, []
     for line in lines[1:]:
-        if line[:1] in (b' ', b'\t'):                     # an obsolete folded continuation of the line before
-            if not out[2:] and not dropping:
-                raise BadRequest('400 Bad Request', 'folded header with nothing before it')
-            if not dropping:
-                out.append(line)
-            continue
+        if line[:1] in (b' ', b'\t'):                     # obsolete folding: the one place two parsers can disagree
+            raise BadRequest('400 Bad Request', 'folded header line')
         name, colon, value = line.partition(b':')
         if not colon or not name or name != name.strip() or b' ' in name or b'\t' in name:
             raise BadRequest('400 Bad Request', 'malformed header line')
         lname = name.lower()
-        dropping = lname in (b'x-api-key', b'authorization')
-        if dropping:
+        if lname in (b'x-api-key', b'authorization'):
             continue
+        if lname == b'host':
+            hosts.append(value.decode('latin-1'))
         if lname in (b'transfer-encoding', b'upgrade'):
             raise BadRequest('501 Not Implemented', lname.decode('ascii') + ' request')
         if lname == b'content-length':
             value = value.strip()
-            if length is not None or not value.isdigit() or not value.isascii():
+            if length is not None or not value.isdigit() or len(value) > 18:
                 raise BadRequest('400 Bad Request', 'missing, repeated or bad Content-Length')
             length = int(value)
         out.append(line)
+    if len(hosts) != 1 or not host_ok(hosts[0], host, rport):
+        raise BadRequest('400 Bad Request', 'missing, repeated or foreign Host header')
     return b'\r\n'.join(out), length or 0
 
 
-async def forward_requests(reader, writer, key, counter):
+async def forward_requests(reader, writer, key, counter, host, rport=443):
     """Copy requests from reader to writer one at a time, each head rewritten by rewrite_head and
     followed by exactly its Content-Length bytes. counter[0] counts bytes, counter[1] requests.
     Returns at EOF; BadRequest if a request cannot be framed."""
@@ -157,16 +167,16 @@ async def forward_requests(reader, writer, key, counter):
     while True:
         while True:
             end = buf.find(b'\r\n\r\n')
-            if end >= 0:
+            if 0 <= end <= MAX_HEAD:
                 break
-            if len(buf) > MAX_HEAD:
+            if end > MAX_HEAD or len(buf) > MAX_HEAD:
                 raise BadRequest('431 Request Header Fields Too Large', 'request head too long')
             data = await reader.read(16384)
             if not data:
                 return
             buf += data
         head, buf = buf[:end], buf[end + 4:]
-        new_head, remaining = rewrite_head(head, key)
+        new_head, remaining = rewrite_head(head, key, host, rport)
         new_head += b'\r\n\r\n'
         writer.write(new_head)
         await writer.drain()                                 # a client waiting for 100 Continue needs this out first
@@ -208,11 +218,11 @@ async def pump(reader, writer, counter):
         close_quietly(writer)
 
 
-async def keyed_pump(reader, writer, key, counter, client):
+async def keyed_pump(reader, writer, key, counter, client, host, rport=443):
     """pump for the client's side in key mode: forward_requests, and an error reply to the client
     (then everything closed) for a request that cannot be forwarded."""
     try:
-        await forward_requests(reader, writer, key, counter)
+        await forward_requests(reader, writer, key, counter, host, rport)
     except BadRequest as e:
         log.warning('%s: refused a request: %s', client.get_extra_info('peername'), e.why)
         try:
@@ -256,7 +266,7 @@ async def serve_client(reader, writer, host, rport, connect, key=None, allow=())
         close_quietly(writer)
         return
     up, down = [0, 0], [0]
-    client_side = keyed_pump(reader, rwriter, key, up, writer) if key else pump(reader, rwriter, up)
+    client_side = keyed_pump(reader, rwriter, key, up, writer, host, rport) if key else pump(reader, rwriter, up)
     await asyncio.gather(client_side, pump(rreader, writer, down))
     log.info('close %s -> %s:%d (%d bytes up, %d down%s)', peer, host, rport, up[0], down[0],
              f', {up[1]} requests' if key else '')

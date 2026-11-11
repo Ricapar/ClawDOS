@@ -5,6 +5,7 @@ function, so nothing here reaches the internet. The key is made up.
 """
 
 import asyncio
+import io
 import logging
 import os
 import subprocess
@@ -85,6 +86,15 @@ async def read_response(reader):
     return head.split(b'\r\n')[0], await asyncio.wait_for(reader.readexactly(length), 5)
 
 
+async def until(condition, timeout=5.0):
+    """Wait for condition() to hold (a condition, not a guess at how long things take)."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError('timed out waiting for a condition')
+        await asyncio.sleep(0.005)
+
+
 def header_names(head):
     return [l.split(b':')[0].lower() for l in head.split(b'\r\n')[1:] if l]
 
@@ -98,7 +108,6 @@ class TunnelCase(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         for w in self.writers:                  # wait_closed() waits for open connections
             w.close()
-        await asyncio.sleep(0.05)
         for s in self.servers:
             s.close()
             await s.wait_closed()
@@ -226,14 +235,13 @@ class KeyModeTest(TunnelCase):
         self.assertEqual(up.requests[0][1], b'')
         self.assertIn(KEY.encode(), up.requests[0][0])
 
-    async def test_folded_continuation_of_a_dropped_header_goes_with_it(self):
+    async def test_host_with_a_port_or_other_case_is_the_mapped_host(self):
         port, up = await self.start()
-        reader, writer = await self.client(port)
-        writer.write(request(headers=[b'Authorization: Bearer one', b'  folded-secret', b'X-Kept: a', b'\tfolded-kept']))
-        await read_response(reader)
-        head = up.requests[0][0]
-        self.assertNotIn(b'folded-secret', head)
-        self.assertIn(b'X-Kept: a\r\n\tfolded-kept', head)
+        for host in (b'API.Anthropic.COM', b'api.anthropic.com:443'):
+            reader, writer = await self.client(port)
+            writer.write(b'POST /v1/messages HTTP/1.1\r\nHost: ' + host + b'\r\nContent-Length: 0\r\n\r\n')
+            await read_response(reader)
+        self.assertEqual(len(up.requests), 2)
 
     async def test_requests_it_cannot_frame_are_refused_and_never_forwarded(self):
         port, up = await self.start()
@@ -247,6 +255,21 @@ class KeyModeTest(TunnelCase):
             'header without colon': (b'POST / HTTP/1.1\r\nnonsense\r\n\r\n', b'400'),
             'space before colon': (b'POST / HTTP/1.1\r\nx-api-key : evil\r\n\r\n', b'400'),
             'junk': (b'\x16\x03\x01 not http at all\r\n\r\n', b'400'),
+            'folded header': (request(headers=[b'X-A: a', b'  Content-Length: 5']), b'400'),
+            'foreign Host': (request().replace(b'api.anthropic.com', b'evil.example'), b'400'),
+            'Host with a foreign port': (request().replace(b'anthropic.com', b'anthropic.com:8443'), b'400'),
+            'no Host': (b'POST /v1/messages HTTP/1.1\r\nContent-Length: 0\r\n\r\n', b'400'),
+            'two Hosts': (request(headers=[b'Host: api.anthropic.com']), b'400'),
+            'two Hosts, one foreign': (request(headers=[b'Host: evil.example']), b'400'),
+            'absolute-form target': (request(first=b'POST http://evil.example/x HTTP/1.1'), b'400'),
+            'absolute-form target, right host': (request(first=b'POST http://api.anthropic.com/x HTTP/1.1'), b'400'),
+            'asterisk target': (request(first=b'OPTIONS * HTTP/1.1'), b'400'),
+            'Content-Length of 30 digits': (b'POST / HTTP/1.1\r\nHost: api.anthropic.com\r\n'
+                                            b'Content-Length: ' + b'9' * 30 + b'\r\n\r\n', b'400'),
+            'Content-Length of 5000 digits': (b'POST / HTTP/1.1\r\nHost: api.anthropic.com\r\n'
+                                              b'Content-Length: ' + b'9' * 5000 + b'\r\n\r\n', b'400'),
+            'complete head over 64 KB': (b'POST / HTTP/1.1\r\nHost: api.anthropic.com\r\nX-Pad: ' + b'a' * 70000
+                                         + b'\r\n\r\n', b'431'),
             'huge head': (b'POST / HTTP/1.1\r\n' + b'X-Pad: ' + b'a' * 70000, b'431'),
         }
         for name, (data, status) in cases.items():
@@ -276,7 +299,7 @@ class KeyModeTest(TunnelCase):
             await read_response(reader)
             writer.write(request(headers=[b'Transfer-Encoding: chunked', b'X-Marker: header-marker']))
             await self.at_eof(reader)
-            await asyncio.sleep(0.05)
+            await until(lambda: any(':close ' in l for l in logs.output))
         text = '\n'.join(logs.output)
         for secret in (KEY, 'SECRET-BODY-MARKER', 'client-own-marker', 'header-marker', 'Transfer-Encoding'):
             self.assertNotIn(secret, text)
@@ -309,7 +332,6 @@ class AllowTest(TunnelCase):
             reader, writer = await self.client(port)
             writer.write(b'hello')
             self.assertEqual(await self.at_eof(reader), b'')
-            await asyncio.sleep(0.05)
         self.assertEqual(self.upstreams['api.anthropic.com'].connections, 0)
         self.assertTrue(any('refused' in l and '127.0.0.1' in l for l in logs.output))
 
@@ -330,10 +352,11 @@ class AllowTest(TunnelCase):
 
 class HelperTest(unittest.TestCase):
     def test_rewrite_head(self):
-        head, length = tunnel.rewrite_head(b'POST / HTTP/1.1\r\nHost: h\r\nauthorization: x\r\nContent-Length: 12', 'K')
+        head, length = tunnel.rewrite_head(
+            b'POST / HTTP/1.1\r\nHost: h\r\nauthorization: x\r\nContent-Length: 12', 'K', 'h')
         self.assertEqual(head, b'POST / HTTP/1.1\r\nx-api-key: K\r\nHost: h\r\nContent-Length: 12')
         self.assertEqual(length, 12)
-        self.assertEqual(tunnel.rewrite_head(b'GET / HTTP/1.0', 'K')[1], 0)
+        self.assertEqual(tunnel.rewrite_head(b'GET / HTTP/1.0\r\nhost: h:443', 'K', 'h')[1], 0)
 
     def test_allow_addresses(self):
         self.assertEqual(tunnel.parse_allow('::ffff:192.168.1.5'), tunnel.normalize('192.168.1.5'))
@@ -374,7 +397,7 @@ class CommandLineTest(unittest.TestCase):
             with open(path, 'w', encoding='ascii') as f:
                 f.write(key)
             argv = ['tunnel.py'] + [path if a == '@KEY' else a for a in args]
-            err = tempfile.TemporaryFile('w+')
+            err = io.StringIO()
             code = None
             with mock.patch.object(sys, 'argv', argv), mock.patch.object(sys, 'stderr', err), \
                     mock.patch.object(tunnel, 'run', lambda *a, **k: calls.append((a, k))), \
@@ -384,8 +407,7 @@ class CommandLineTest(unittest.TestCase):
                     tunnel.main()
                 except SystemExit as e:
                     code = e.code
-            err.seek(0)
-            return code, err.read(), calls
+            return code, err.getvalue(), calls
 
     def test_key_file_needs_allow_unless_loopback(self):
         code, err, calls = self.run_main('--key-file', '@KEY')
