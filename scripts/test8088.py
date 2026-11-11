@@ -2,24 +2,30 @@
 """Run a test batch file on the accurate 8088 PC (86Box: 8088 at 4.77 MHz, CGA) and print its log.
 
   python scripts/test8088.py image/tests/devtools.bat [--log DEVTEST.LOG] [--done DEVTEST-DONE]
-                           [--timeout 900] [--no-build]
+                           [--timeout 900] [--no-build] [--mock] [--expect TEXT ...]
 
-The batch file runs as C:\\AUTOTEST.BAT (no networking) and should append its
-results to C:\\<log>, ending with the --done marker. DOSBox-X boot tests run as
+The batch file runs as C:\\AUTOTEST.BAT (no networking unless it calls NETUP)
+and should append its results to C:\\<log>, ending with the --done marker. DOSBox-X boot tests run as
 an 80186 and can't catch 186/286 code; this is the check that a program really
 runs on an 8088. The log is read out of the disk image while 86Box runs, so
 once the marker is in it the result is safe however 86Box is closed. At the end
 this takes a screenshot (build/shot.png), closes 86Box and prints the log.
-Exit status 0 only if the marker was found in the log.
+--mock runs the mock Messages API (tunnel/mockapi.py) on the host for the
+test, as boottest.py does: 86Box's NAT reaches it at 10.0.2.2:18023 (start
+the network in the batch file with CALL C:\\NET\\NETUP.BAT); its log is in
+build/mock.log. Exit status 0 only if the marker was found in the log and
+every --expect TEXT in the log or the mock's.
 """
 
 import argparse
+import contextlib
 import os
 import shutil
 import subprocess
 import sys
 import time
 
+import boottest
 import fatimg
 import run86box
 import shot
@@ -62,6 +68,10 @@ def main():
     ap.add_argument('--done', default='DEVTEST-DONE', help='marker the test writes last')
     ap.add_argument('--timeout', type=int, default=900, help='seconds to wait for the marker')
     ap.add_argument('--no-build', action='store_true', help='reuse build/ outputs')
+    ap.add_argument('--mock', action='store_true',
+                    help=f'run the mock Messages API on port {boottest.TEST_API_PORT} during the test')
+    ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
+                    help='TEXT must appear in the log or the mock API log (repeatable)')
     a = ap.parse_args()
 
     if not a.no_build:
@@ -76,25 +86,45 @@ def main():
     os.makedirs(vm, exist_ok=True)
     with open(os.path.join(vm, '86box.cfg'), 'w', encoding='utf-8') as f:
         f.write(run86box.CFG.format(speed=4772728, cyl=build.CYLINDERS, image=IMAGE))
+    mock_log = os.path.join(build.BUILD, 'mock.log')
+    with boottest.mock_api(mock_log) if a.mock else contextlib.nullcontext():
+        log, elapsed = run_86box(vm, a.log, a.done, a.timeout)
+    print(log if log is not None else f'(no {a.log} on the image)')
+    found = bool(log) and a.done in log
+    if a.mock:
+        mock_text = boottest.read_log(mock_log).decode('utf-8', 'replace')
+        print('--- mock API log ---')
+        print(mock_text)
+        missing = [t for t in a.expect if t not in (log or '') and t not in mock_text]
+    else:
+        missing = [t for t in a.expect if t not in (log or '')]
+    if not found:
+        verdict = f'FAILED (no {a.done} in the log)'
+    elif missing:
+        verdict = 'FAILED (missing: ' + ', '.join(repr(t) for t in missing) + ')'
+    else:
+        verdict = 'PASS'
+    print(f'test8088: {verdict} after ~{elapsed}s; screenshot in build/shot.png')
+    sys.exit(0 if verdict == 'PASS' else 1)
+
+
+def run_86box(vm, log_name, done, timeout):
+    """Run 86Box on the VM until done is in the guest's log or timeout seconds pass, then
+    screenshot and close it; returns (the log or None, seconds taken)."""
     # Not a context manager: 86Box is closed by close_86box() once the log has the marker.
     proc = subprocess.Popen([run86box.find_86box(), '-P', vm], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # pylint: disable=consider-using-with
 
     started = time.time()
     log = None
-    while time.time() - started < a.timeout:
+    while time.time() - started < timeout:
         time.sleep(10)
-        log = read_log(a.log)
-        if log and a.done in log:
+        log = read_log(log_name)
+        if log and done in log:
             break
     elapsed = int(time.time() - started)
     shot.screenshot()
     close_86box(proc)
-    log = read_log(a.log) or log
-    print(log if log is not None else f'(no {a.log} on the image)')
-    found = bool(log) and a.done in log
-    print(f'test8088: {"PASS" if found else "FAILED (no " + a.done + " in the log)"} after ~{elapsed}s; '
-          f'screenshot in build/shot.png')
-    sys.exit(0 if found else 1)
+    return read_log(log_name) or log, elapsed
 
 
 if __name__ == '__main__':

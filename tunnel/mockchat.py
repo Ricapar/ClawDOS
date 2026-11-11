@@ -80,6 +80,7 @@ SCENARIOS = {
     '!tooltour': 'call every DOS tool in turn and check the results',
     '!toolstall': 'call sysinfo, then think for 30 seconds before answering (the spinner during tool rounds)',
     '!play': 'play a tune on the PC speaker',
+    '!bench': 'the benchmark (scripts/bench.py): 20 reads of 4 KB, a full_memory run, a 4 KB reply',
 }
 
 # A thinking signature longer than the DOS PC's 16 KB event buffer (see !bigsig).
@@ -136,6 +137,23 @@ def tour_steps():
             status, want = 'error', None
         out.append((name, args, status, want))
     return out
+
+# The benchmark (scripts/bench.py, image/tests/bench.bat). Tasks after it rerun
+# it and compare, so keep it as it is: no randomness, no pauses. Each read's
+# result (60 numbered lines of 60 characters, image/tests/bench/BENCH.TXT) is
+# close to the 4 KB tool output cap, so the history passes 100 KB by the end.
+BENCH_READS = 20
+BENCH_FILE = 'C:\\TESTS\\BENCH\\BENCH.TXT'
+BENCH_PIECE = 16          # characters per text delta of the final reply
+BENCH_PARAGRAPH = (
+    "The 8088 reads every byte of this reply off the network card, parses the "
+    "server-sent events and the JSON inside them, turns UTF-8 into code page "
+    "437, wraps the words and writes them into CGA memory between retraces, "
+    "while it also appends the same text to the conversation file on disk. "
+    "The streamed characters per second are therefore the PC's figure, not "
+    "the mock's, which sends this as fast as the link will take it. "
+)
+BENCH_REPLY = ''.join(f'Paragraph {i} of 9. {BENCH_PARAGRAPH}\n\n' for i in range(1, 10)).rstrip()
 
 LOREM = (
     "The IBM Personal Computer model 5160, arrived in March 1983. It kept "
@@ -343,6 +361,19 @@ class MockChat:
 
     def _cmd_tooltour(self, _text):
         yield from self.tooltour()
+
+    def _cmd_bench(self, _text):
+        failure = None
+        calls = [ToolCall('read', {'path': BENCH_FILE}) for _ in range(BENCH_READS)]
+        calls.append(ToolCall('run', {'command': 'VER', 'full_memory': True}))
+        for i, call in enumerate(calls, 1):
+            yield f'Bench call {i} of {len(calls)}: {call.name}.'
+            yield call
+            if call.result.status != 'ok' and failure is None:
+                failure = f'call {i} {call.name}: {call.result.status} {call.result.text[:60]!r}'
+        print('bench: PASS' if failure is None else f'bench: FAIL {failure}', flush=True)
+        for i in range(0, len(BENCH_REPLY), BENCH_PIECE):
+            yield BENCH_REPLY[i:i + BENCH_PIECE]
 
     def _cmd_toolstall(self, _text):
         yield from self.call('sysinfo', {})

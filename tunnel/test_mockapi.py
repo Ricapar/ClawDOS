@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import mockapi  # noqa: E402
+import mockchat  # noqa: E402
 
 
 def sse_events(body):
@@ -151,6 +152,34 @@ class MockApiTest(unittest.TestCase):
         text, _, _, _ = reply(sse_events(data))
         self.assertIn('1 earlier message', text)
         self.assertIn('first', text)
+
+    def test_bench_is_twenty_reads_a_full_memory_run_and_a_long_reply(self):
+        messages = [{'role': 'user', 'content': '!bench'}]
+        calls, deltas = [], []
+        for _ in range(30):
+            status, _, data = self.post(messages)
+            self.assertEqual(status, 200)
+            events = sse_events(data)
+            text, blocks, stop, tool_json = reply(events)
+            if stop != 'tool_use':
+                deltas = [d['delta']['text'] for e, d in events
+                          if e == 'content_block_delta' and d['delta']['type'] == 'text_delta']
+                break
+            tool = [b for b in blocks if b['type'] == 'tool_use'][0]
+            args = json.loads(tool_json)
+            calls.append((tool['name'], args))
+            result = [{'type': 'tool_result', 'tool_use_id': tool['id'], 'content': 'x' * 4000, 'is_error': False}]
+            messages += [{'role': 'assistant', 'content': [{'type': 'text', 'text': text},
+                                                           {'type': 'tool_use', 'id': tool['id'],
+                                                            'name': tool['name'], 'input': args}]},
+                         {'role': 'user', 'content': result}]
+        self.assertEqual(calls, [('read', {'path': mockchat.BENCH_FILE})] * 20
+                         + [('run', {'command': 'VER', 'full_memory': True})])
+        self.assertEqual(stop, 'end_turn')
+        self.assertEqual(text, mockchat.BENCH_REPLY)
+        self.assertTrue(3900 <= len(text) <= 4300)
+        self.assertEqual(len({len(d) for d in deltas[:-1]}), 1)    # fixed-size pieces: no randomness
+        self.assertGreater(len(json.dumps(messages)), 80 * 1024)
 
 
 if __name__ == '__main__':

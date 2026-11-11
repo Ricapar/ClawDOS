@@ -8,7 +8,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (gitignored), outputs in `build/`. The Python (tunnel/) is stdlib only: no venv.
 - macOS: the commands below say `python`; use `python3`. Watcom runs natively (tools/openwatcom/armo64).
 - The Makefile wraps the commands below (`make` lists targets): `make build`, `make test` (mock API unit tests),
-  `make boottests` (every DOSBox-X test), `make check` (both), `make run`, `make tunnel`, `make mock`. Keep it in step with them.
+  `make boottests` (every DOSBox-X test), `make check` (both), `make bench` (the 86Box benchmark), `make run`,
+  `make tunnel`, `make mock`. Keep it in step with them.
 - Build everything: `python scripts/build.py [--tunnel host:port]` (apps -> build/*.EXE, disk -> build/CLAWDOS.IMG).
   The image's C:\CLAWDOS\CLAWDOS.CFG gets the tunnel address (remembered in build/settings.json) and the API key from
   `.env` (`ANTHROPIC_API_KEY=...`, gitignored). Add DOS programs to `APPS` in scripts/build.py and to image/manifest.txt.
@@ -29,7 +30,12 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
-  as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker).
+  as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;
+  `--mock` and `--expect` as in boottest.py, the guest reaching the mock at 10.0.2.2:18023).
+- Benchmark: `python scripts/bench.py` (`make bench`, several minutes) runs image/tests/bench.bat in 86Box: the mock's
+  `!bench` (20 reads of 4 KB, a `full_memory` run, a 4 KB reply) through CLAWDOS.EXE, then a table from CLAWDOS.LOG's
+  `api` lines (`up=` upload ms, `len=` body bytes), the relaunch and the `stack:` high-water mark. docs/ROADMAP.md's
+  "Benchmark" holds the baseline; keep the scenario and format stable. `--dosbox` is a quick, not comparable, run.
 - Accurate 8088 PC: `python scripts/run86box.py`, then `python scripts/shot.py [--delay N]` and read build/shot.png
   (macOS: the terminal needs Screen Recording permission; 86Box ignores SIGTERM, quit it with
   `osascript -e 'tell application id "net.86Box.86Box" to quit'`).

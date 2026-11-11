@@ -31,7 +31,8 @@
 #define ROUND_CAP_NOTE "Tool limit reached; answer now without tools."
 
 Chat::Chat() : connections(0), cfg(NULL), prov(NULL), ui(NULL), sseBuf(NULL), toolInput(NULL), memories(NULL),
-               rxBuf(NULL), err(""), reasked(0), streamRc(0), reqStart(0), firstText(0)
+               rxBuf(NULL), err(""), reasked(0), streamRc(0), reqStart(0), firstText(0),
+               upTicks(0), reqLen(0)
 {
     addr[0] = path[0] = desc[0] = 0;
     ctxTokens = 0;
@@ -346,14 +347,16 @@ void Chat::readErrorBody(const HttpHead *h, char *msg, unsigned max)
     }
 }
 
+/* up= and len= are the upload of the attempt that got this reply: the 8088's
+   share of ttft, which also holds the API's wait (scripts/bench.py). */
 void Chat::logRound(int round)
 {
-    char line[200];
+    char line[256];
     unsigned long now = TICKS_NOW;
-    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
+    sprintf(line, "api %s %s round=%d ttft=%lu total=%lu up=%lu len=%lu stop=%s in=%ld out=%ld cr=%ld cw=%ld ev=%u",
             prov->id, as.model[0] ? as.model : prov->model, round,
             firstText ? ticks_elapsed(firstText, reqStart) * 55 : 0UL, ticks_elapsed(now, reqStart) * 55,
-            as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
+            upTicks * 55, reqLen, as.stopReason[0] ? as.stopReason : "?", as.inTok, as.outTok, as.cacheRead, as.cacheWrite, sse.maxLen);
     ui->log(line);
 }
 
@@ -445,8 +448,11 @@ int8_t Chat::request(int noTools)
             rc = -1;
         if (rc == 0 && http.flush())
             rc = -1;
-        if (rc == 0)
+        if (rc == 0) {                    /* the last body byte is with the socket */
+            upTicks = ticks_elapsed(TICKS_NOW, reqStart);
+            reqLen = count.count;
             rc = waitHead(&h);
+        }
         if (rc == 1) {
             http.close();
             return 1;

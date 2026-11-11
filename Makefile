@@ -5,6 +5,7 @@
 #   make build TUNNEL=172.16.0.100:8443   set the DOS PC's tunnel address (remembered)
 #   make boot TEST=image/tests/net.bat     one boot test in DOSBox-X
 #   make tunnel ARGS="--map 8444=openrouter.ai:443"   extra tunnel flags
+#   make bench ARGS=--dosbox               the benchmark in DOSBox-X (a quick check)
 
 ifeq ($(OS),Windows_NT)
 PYTHON ?= python
@@ -16,7 +17,7 @@ BOOTTEST := $(PYTHON) scripts/boottest.py --no-build
 
 .DEFAULT_GOAL := help
 .PHONY: help setup build compiledb clean test check boot boottests test8088 \
-        run dosbox shot tunnel mock
+        bench run dosbox shot tunnel mock
 
 help:
 	@echo "make <target>   (see the top of the Makefile for variables)"
@@ -65,6 +66,9 @@ boottests: build ## every DOSBox-X boot test
 
 test8088: ## a boot test on a real 8088 in 86Box (TEST=..., default devtools)
 	$(PYTHON) scripts/test8088.py $(or $(TEST),image/tests/devtools.bat)
+
+bench: ## the benchmark in 86Box against the mock: a table per round (docs/ROADMAP.md)
+	$(PYTHON) scripts/bench.py $(ARGS)
 
 # --- run ----------------------------------------------------------------------
 

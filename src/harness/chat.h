@@ -91,6 +91,7 @@ class Chat {
     int reasked;                           /* re-sent after a lost link this turn */
     int streamRc;
     unsigned long reqStart, firstText;
+    unsigned long upTicks, reqLen;         /* the request's upload time and body length (logRound) */
     int pendRound;                         /* the call the launcher is running (turn() returned 2) */
     long ctxTokens;
     int turnsDone;

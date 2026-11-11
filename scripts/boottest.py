@@ -14,6 +14,7 @@ import argparse
 import contextlib
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -84,15 +85,32 @@ def dosbox_command(extra_sets):
             '-c', 'boot -l c']
 
 
+def listening(proc, port, timeout=10):
+    """True once proc accepts connections on port; False if it exits or timeout seconds pass."""
+    deadline = time.time() + timeout
+    while time.time() < deadline and proc.poll() is None:
+        try:
+            socket.create_connection(('127.0.0.1', port), 0.5).close()
+        except OSError:
+            time.sleep(0.1)
+            continue
+        time.sleep(0.3)      # an old mock on the port answers too, but this one then dies on bind
+        return proc.poll() is None
+    return False
+
+
 @contextlib.contextmanager
 def mock_api(log_path):
-    """Run the mock Messages API (tunnel/mockapi.py), logging to log_path; it is killed when the block ends."""
+    """Run the mock Messages API (tunnel/mockapi.py), logging to log_path; it is killed when the block ends.
+    Exits if it does not start (say, the port is taken)."""
     cmd = [sys.executable, os.path.join(build.ROOT, 'tunnel', 'mockapi.py'),
            '--speed', '0', '--port', str(TEST_API_PORT)]
     with open(log_path, 'wb') as f:
         with subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL) as mock:
             try:
-                time.sleep(0.5)
+                if not listening(mock, TEST_API_PORT):
+                    sys.exit(f'mock API did not start on port {TEST_API_PORT}: '
+                             + read_log(log_path).decode('utf-8', 'replace').strip()[-300:])
                 yield mock
             finally:
                 mock.kill()

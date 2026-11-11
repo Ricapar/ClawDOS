@@ -1057,6 +1057,41 @@ static void handleKey(unsigned key)
 
 /* --- main ------------------------------------------------------------------ */
 
+/* The stack's high-water mark. Overflow checks are off (-s), so nothing tells
+   us how close the 4 KB stack comes to the heap. At startup the free part is
+   filled with a pattern; at exit the words the pattern survived in are the
+   ones never used. The timer, keyboard and packet interrupts run on this
+   stack too, so the mark includes them. */
+extern "C" unsigned _STACKLOW, _STACKTOP;   /* the C runtime's stack bounds, offsets in SS */
+#define STACK_FILL 0x5AA5u
+
+static unsigned stackPointer(void);
+#pragma aux stackPointer = "mov ax, sp" value [ax] modify exact [ax];
+static unsigned stackSegment(void);
+#pragma aux stackSegment = "mov ax, ss" value [ax] modify exact [ax];
+
+/* Inline code and a plain loop: no call pushes onto the words being filled. */
+static void stackFill(void)
+{
+    unsigned __far *p = (unsigned __far *)MK_FP(stackSegment(), _STACKLOW);
+    unsigned n = (stackPointer() - _STACKLOW - 16) / 2;   /* stop short of our own frame */
+
+    while (n--)
+        *p++ = STACK_FILL;
+}
+
+static void logStack(void)
+{
+    const unsigned __far *p = (const unsigned __far *)MK_FP(stackSegment(), _STACKLOW);
+    unsigned size = _STACKTOP - _STACKLOW, unused = 0;
+    char line[48];
+
+    while (unused < size && *p++ == STACK_FILL)
+        unused += 2;
+    sprintf(line, "stack: used %u of %u bytes", size - unused, size);
+    uiLog(line);
+}
+
 static void fatal(const char *text)
 {
     char line[200];
@@ -1077,6 +1112,7 @@ static void fatal(const char *text)
     chat.close();
     Net::stopStack();
     scr_done();
+    logStack();
     exit(1);
 }
 
@@ -1205,6 +1241,7 @@ static void relaunchExit(void)
     freopen("NUL", "w", stderr);
     scr_ticker_off();                 /* before mTCP puts back the INT 1Ch it hooked under ours */
     Net::stopStack();
+    logStack();
     exit(RELAUNCH_EXIT);
 }
 
@@ -1256,6 +1293,7 @@ int main(int argc, char *argv[])
     const char *providerArg = NULL;
     int i, bad, openMemories = 0;
 
+    stackFill();
     for (i = 1; i < argc; i++) {
         if (!stricmp(argv[i], "-unsafe")) {
             unsafe = 1;
@@ -1382,6 +1420,7 @@ int main(int argc, char *argv[])
     chat.close();
     Net::stopStack();
     scr_done();
+    logStack();
     printf("Thanks for chatting!\n");
     return exitCode;
 }

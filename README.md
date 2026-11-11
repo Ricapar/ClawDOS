@@ -242,8 +242,10 @@ on the DOS PC applies to the next message; ClawDOS can edit it itself.
 Every conversation is a file in `C:\CLAWDOS\CHATS\` (`MMDDnnn.JSN`): the
 messages exactly as the API sees them, which is also the log of what was said
 and done. `C:\CLAWDOS\CLAWDOS.LOG` gets a line per API round (time to first
-token, total, stop reason, tokens in/out, cache reads) and one per event worth
-knowing about (retries, lost links, errors).
+token, total, upload time and size, stop reason, tokens in/out, cache reads)
+and one per event worth knowing about (retries, lost links, errors).
+`python3 scripts/bench.py` (`make bench`) times a fixed agent turn in 86Box
+against the mock API; the results are in docs/ROADMAP.md ("Benchmark").
 
 ## Project layout
 
