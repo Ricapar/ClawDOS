@@ -117,6 +117,7 @@ int main(int argc, char *argv[])
 
             tout_reset(&t);
             remove(SHOT_RAW);
+            remove(RELAUNCH_OUT);         /* a run that never ends must not leave an older one's result */
             if (relaunch_read_run(cmds, sizeof cmds)) {
                 status = tool_fail(&t, "CLAWDOS: no " RELAUNCH_RUN);
             } else {

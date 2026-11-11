@@ -4,7 +4,6 @@
 #include <dos.h>
 #include <i86.h>
 #include "shot.h"
-#include "ems.h"
 #include "shell.h"
 
 #define BIOS_SEG   0x40
@@ -15,8 +14,7 @@
 static volatile unsigned left;              /* ticks to go; 0: nothing to do */
 static volatile unsigned char taken;        /* the copy was made */
 static volatile unsigned char bios[3];      /* mode, mode and colour shadows at that moment */
-static unsigned copySeg;                    /* where the copy goes (offset 0) */
-static unsigned dosSeg;                     /* the DOS block, when there was no EMS */
+static unsigned copySeg;                    /* where the copy goes: a DOS block held for the run */
 static int armed;                           /* 0, 1 armed, -1 asked but no buffer */
 static unsigned pending;                    /* ticks for the hook shell_run's program start sets */
 static int inChain;                         /* the hook is in INT 1Ch's chain (maybe under another) */
@@ -58,14 +56,6 @@ static void __interrupt __far shotIsr(void)
     _chain_intr(oldInt1C);
 }
 
-/* The EMS page's segment, or 0: the frame address normalized so that the
-   copy starts at offset 0. */
-static unsigned emsSeg(void)
-{
-    void __far *p = ems_map(EMS_SHOT_PAGE);
-    return p ? FP_SEG(p) + (FP_OFF(p) >> 4) : 0;
-}
-
 /* shell_run's program is about to start: the count begins. The hook goes in
    only now, so it is not there while nothing of ours could take it out (and
    DOS ending us in the shell's own code would leave it pointing nowhere). */
@@ -90,14 +80,13 @@ int shot_arm(unsigned ticks)
 {
     taken = 0;
     left = 0;
-    copySeg = emsSeg();
-    if (copySeg == 0) {
-        if (_dos_allocmem(SHOT_BYTES / 16, &dosSeg)) {
-            dosSeg = 0;
-            armed = -1;
-            return -1;
-        }
-        copySeg = dosSeg;
+    /* Never an EMS page: the program may map pages of its own into the frame
+       while it runs, and the copy would land on them. A block of ours is
+       ours whatever the program does. */
+    if (copySeg == 0 && _dos_allocmem(SHOT_BYTES / 16, &copySeg)) {
+        copySeg = 0;                         /* the call leaves the largest free size there */
+        armed = -1;
+        return -1;
     }
     pending = ticks ? ticks : 1;
     shell_before_run = start;
@@ -127,10 +116,7 @@ const unsigned char __far *shot_frame(ShotInfo *info)
         info->mode = bios[0];
         info->modeReg = bios[1];
         info->colorReg = bios[2];
-        if (dosSeg == 0)
-            copySeg = emsSeg();              /* the program may have mapped its own page there */
-        if (copySeg)
-            return (const unsigned char __far *)MK_FP(copySeg, 0);
+        return (const unsigned char __far *)MK_FP(copySeg, 0);
     }
     info->how = armed == 1 ? SHOT_LATE : armed < 0 ? SHOT_NOBUF : SHOT_AT_EXIT;
     info->mode = bda[0x49];
@@ -141,9 +127,8 @@ const unsigned char __far *shot_frame(ShotInfo *info)
 
 void shot_release(void)
 {
-    if (dosSeg)
-        _dos_freemem(dosSeg);
-    dosSeg = 0;
+    if (copySeg)
+        _dos_freemem(copySeg);
     copySeg = 0;
     armed = 0;
 }
