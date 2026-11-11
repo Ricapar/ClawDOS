@@ -113,6 +113,10 @@ void testShotPng(void)
     info.colorReg = 0x30;
     CHECK("shot: mode 5 is cyan, red, white", shot_palette(&info, SHOT_320, rgb) == 4
           && samePalette(rgb, 4, "000000 55FFFF FF5555 FFFFFF"));
+    info.color = 0x31;                           /* mode 5 from the BIOS, then only 3D9h written */
+    CHECK("shot: shot_color keeps the shadow's burst", shot_palette(&info, SHOT_320, rgb) == 4
+          && samePalette(rgb, 4, "0000AA 55FFFF FF5555 FFFFFF"));
+    info.color = SHOT_NO_COLOR;
 
     info.mode = 4;
     info.modeReg = 0x2A;                         /* the shadow says burst on; the program turned it off */

@@ -221,7 +221,7 @@
  },
  {
   "name": "run",
-  "description": "Run DOS command lines (programs, .BAT files, internal commands like DIR, TYPE, DEL). The screen switches to DOS while they run; you get the output each printed (or the final screen text) and its exit code, which FreeCOM passes through from the program (e.g. 2 for DIR of a missing file). Put several commands on separate lines (up to 12) to run them in order: they stop at the first whose exit code isn't 0, e.g. compile two files and link in one call. There is no & or && chaining. Programs cannot use the network, their standard input is empty (a program that asks for input gets end-of-file), and Ctrl-C can't stop them, so avoid interactive or endless programs.",
+  "description": "Run DOS command lines (programs, .BAT files, internal commands like DIR, TYPE, DEL). The screen switches to DOS while they run; you get the output each printed (or the final screen text) and its exit code, which FreeCOM passes through from the program (e.g. 2 for DIR of a missing file). Put several commands on separate lines (up to 12) to run them in order: they stop at the first whose exit code isn't 0, e.g. compile two files and link in one call. There is no & or && chaining. Programs cannot use the network, their standard input is empty (a program that asks for input gets end-of-file), and Ctrl-C can't stop them (with full_memory it can, unless shot_at is given), so avoid interactive or endless programs.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -252,7 +252,7 @@
     },
     "shot_color": {
      "type": "integer",
-     "description": "The colour register (3D9h) value to draw the picture with, 0-127, when the program wrote the registers itself: in 320x200 bits 0-3 are the background, bit 4 the bright foreground and bit 5 the palette (0 green/red/brown, 1 cyan/magenta/white); add 64 if it also turned the colour burst off in the mode register (3D8h bit 2, mode 5's cyan/red/white). In 640x200 bits 0-3 are the foreground colour."
+     "description": "The colour register (3D9h) value to draw the picture with, 0-127, when the program wrote the registers itself: in 320x200 bits 0-3 are the background, bit 4 the bright foreground and bit 5 the palette (0 green/red/brown, 1 cyan/magenta/white); add 64 if it also turned the colour burst off in the mode register itself (3D8h bit 2, mode 5's cyan/red/white; a mode 5 set through the BIOS is seen without it). In 640x200 bits 0-3 are the foreground colour."
     }
    },
    "required": [

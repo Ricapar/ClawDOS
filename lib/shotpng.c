@@ -166,12 +166,15 @@ unsigned shot_palette(const ShotInfo *info, int kind, unsigned char *rgb)
     unsigned reg = info->color != SHOT_NO_COLOR ? info->color : info->colorReg;
     /* 320x200: palette 0 is green, red, brown; 1 cyan, magenta, light grey;
        with the colour burst off (mode 5) cyan, red, light grey on an RGBI
-       monitor. Bit 4 makes the three bright. The burst bit is the mode
-       register's (bit 2, in a 320x200 graphics mode: bits 1, 2 and not 4),
-       or shot_color's bit 6 when the program wrote the registers itself. */
+       monitor. Bit 4 makes the three bright. The burst is off when the BIOS's
+       shadow of the mode register says so (bit 2, in a 320x200 graphics mode:
+       bits 1, 2 and not 4), or when shot_color's bit 6 does (a program that
+       wrote the mode register itself); a shot_color without it keeps the
+       shadow's, for one that set mode 5 through the BIOS and then wrote only
+       the colour register. */
     static const unsigned char fg[3][3] = { { 2, 4, 6 }, { 3, 5, 7 }, { 3, 4, 7 } };
-    int burstOff = info->color != SHOT_NO_COLOR ? (info->color & SHOT_BURST_OFF) != 0
-                                                : (info->modeReg & 0x16) == 0x06;
+    int burstOff = (info->modeReg & 0x16) == 0x06
+                   || (info->color != SHOT_NO_COLOR && (info->color & SHOT_BURST_OFF));
     unsigned i, set = burstOff ? 2 : (reg & 0x20 ? 1 : 0), hi = reg & 0x10 ? 8 : 0;
 
     if (kind == SHOT_640) {           /* black, and the colour register's colour */

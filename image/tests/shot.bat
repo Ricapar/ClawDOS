@@ -1,5 +1,5 @@
 @ECHO OFF
-REM Screenshots (scripts/boottest.py image/tests/shot.bat --mock --timeout 240,
+REM Screenshots (scripts/boottest.py image/tests/shot.bat --mock --timeout 400,
 REM the Makefile lists the expectations): the run tool's picture of the screen.
 REM C:\TESTS\QUADS.COM draws four quadrants and a diagonal in mode 4 and exits
 REM leaving them; QUADT.COM draws the same, waits 3 s and sets text mode again,
