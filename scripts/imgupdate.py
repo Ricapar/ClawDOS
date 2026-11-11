@@ -165,7 +165,7 @@ def missing_settings(template, image):
 def has_auth_tunnel(cfg_text):
     """True if the [anthropic] section says `auth tunnel`."""
     line = (section_settings(cfg_text) or {}).get('auth', '')
-    return line.split()[1:2] == ['tunnel']
+    return [w.lower() for w in line.split()[1:2]] == ['tunnel']
 
 
 def has_key(cfg_text):
@@ -183,6 +183,8 @@ def update_fs(target, fresh, memories=False, cfg=False, dry_run=False):
         data = fresh.read_file(path.lstrip('/'))
         state, old = current(target, path)
         why = owner(path, memories, cfg)
+        if why and state == 'missing' and norm(path) in (MTCP_CFG, CFG_FILE):
+            why = None                         # nothing of the PC's can be lost by adding what is not there
         if why:
             if state != 'file' or old != data:
                 rep.left.append((path.lstrip('/'), why))
@@ -205,6 +207,9 @@ def update_fs(target, fresh, memories=False, cfg=False, dry_run=False):
             rep.unchanged += 1
             continue
         (rep.changed if state == 'file' else rep.added).append(path.lstrip('/'))
+        if cfg and norm(path) == CFG_FILE and state == 'file':
+            rep.cfg_note = rep.cfg_note or ('CLAWDOS.CFG was replaced by the build\'s: the tunnel address and key '
+                                            'line are the build\'s, and any edit made on the PC is gone.')
         if not dry_run:
             parent = path.lstrip('/').rpartition('/')[0]
             if parent:
@@ -213,10 +218,13 @@ def update_fs(target, fresh, memories=False, cfg=False, dry_run=False):
     for path, ent in target.walk():
         if not ent.is_dir and norm(path) not in shipped:
             rep.not_ours += 1
-    if cfg:
-        rep.cfg_note = rep.cfg_note or ('CLAWDOS.CFG was replaced by the build\'s: the tunnel address and key line are '
-                        'the build\'s, and any edit made on the PC is gone.')
     return rep
+
+
+def remove_quietly(path):
+    """Delete a file of ours if it is there."""
+    if path and os.path.exists(path):
+        os.remove(path)
 
 
 def boot_code(img):
@@ -266,19 +274,32 @@ def update_image(path, fresh_path, memories=False, cfg=False, backup=True, dry_r
         return rep
     tmp = path + '.new'
     made = None
-    try:
-        if backup:
-            made = free_backup_name(path)
+    # Three stages, each with its own cleanup: only the first two are safe to undo by deleting.
+    if backup:
+        made = free_backup_name(path)
+        try:
             shutil.copyfile(path, made)
+        except OSError as e:
+            remove_quietly(made)               # a partial copy of ours; the image itself was not touched
+            raise UpdateError(f'{path} is unchanged (the backup copy failed: {e.strerror or e})') from e
+    try:
         with open(tmp, 'wb') as f:
             f.write(img)
             f.flush()
             os.fsync(f.fileno())
+    except OSError as e:
+        remove_quietly(tmp)                    # the image and the backup are intact
+        raise UpdateError(f'{path} is unchanged (writing {tmp} failed: {e.strerror or e})'
+                          + (f'; the backup {made} is complete and can be deleted' if made else '')) from e
+    try:
         os.replace(tmp, path)
     except OSError as e:
-        for leftover in (tmp, made):
-            if leftover and os.path.exists(leftover):
-                os.remove(leftover)
-        raise UpdateError(f'{path} is unchanged: {e.strerror or e}') from e
+        # On a FAT card replacing a file is remove, then rename: do not guess what survived, delete nothing.
+        raise UpdateError(
+            f'replacing {path} failed ({e.strerror or e}). Nothing was deleted. '
+            + ('The image still exists' if os.path.exists(path) else f'{path} DOES NOT EXIST now')
+            + f'; the complete updated image is {tmp}'
+            + (f' and the complete old one is {made}' if made else '')
+            + f'. Rename {tmp} to {path} to finish.') from e
     rep.backup = made
     return rep

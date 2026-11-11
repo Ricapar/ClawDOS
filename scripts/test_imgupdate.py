@@ -278,6 +278,28 @@ class UpdateWarningsTest(unittest.TestCase):
         self.assertEqual(self.run_update(CFG_PC, CFG_TEMPLATE, cfg=True).warnings, [])
         self.assertEqual(self.run_update(pc, CFG_TEMPLATE).warnings, [])   # config left alone: nothing to warn of
 
+    def test_auth_tunnel_is_recognised_in_any_case(self):
+        pc = b'[anthropic]\r\nAUTH Tunnel\r\n'
+        self.assertEqual(len(self.run_update(pc, CFG_TEMPLATE, cfg=True).warnings), 1)
+
+    def test_cfg_note_only_when_the_config_really_was_replaced(self):
+        rep = self.run_update(CFG_TEMPLATE, CFG_TEMPLATE, cfg=True)
+        self.assertEqual(rep.cfg_note, '')
+        self.assertNotIn('replaced', '\n'.join(rep.lines()))
+        self.assertIn('replaced', '\n'.join(self.run_update(CFG_PC, CFG_TEMPLATE, cfg=True).lines()))
+
+    def test_protected_files_missing_from_the_image_are_added(self):
+        pc_img = make_image({'CLAWDOS/X.TXT': b'x'})
+        fresh = fatimg.open_fs(make_image({'NET/MTCP.CFG': b'cfg', 'CLAWDOS/CLAWDOS.CFG': CFG_TEMPLATE,
+                                           'MEMORY/NEW.TXT': b'm', 'CLAWDOS/CLAWDOS.LOG': b'log'}))
+        rep = imgupdate.update_fs(imgupdate.open_target(pc_img), fresh)
+        after = contents(pc_img)
+        self.assertEqual(after['NET/MTCP.CFG'], b'cfg')
+        self.assertEqual(after['CLAWDOS/CLAWDOS.CFG'], CFG_TEMPLATE)
+        self.assertCountEqual(rep.added, ['NET/MTCP.CFG', 'CLAWDOS/CLAWDOS.CFG'])
+        self.assertNotIn('MEMORY/NEW.TXT', after)             # memories and PC state still wait for their flag
+        self.assertNotIn('CLAWDOS/CLAWDOS.LOG', after)
+
     def test_no_anthropic_section_is_said(self):
         rep = self.run_update(b'[other]\r\nx 1\r\n', CFG_TEMPLATE)
         self.assertIn('no [anthropic] section', '\n'.join(rep.lines()))
@@ -344,13 +366,38 @@ class UpdateBackupTest(unittest.TestCase):
         self.assertEqual(self.read(self.pc), before)
         self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG'])
 
-    def test_a_failed_write_removes_the_temp_file_and_the_unused_backup(self):
+    def test_a_failed_write_removes_only_the_temp_file(self):
         before = self.read(self.pc)
-        with mock.patch.object(imgupdate.os, 'replace', side_effect=OSError(30, 'Read-only file system')):
-            with self.assertRaisesRegex(imgupdate.UpdateError, 'unchanged'):
+        with mock.patch.object(imgupdate.os, 'fsync', side_effect=OSError(28, 'No space left on device')):
+            with self.assertRaisesRegex(imgupdate.UpdateError, 'unchanged.*writing.*No space'):
                 imgupdate.update_image(self.pc, self.fresh)
         self.assertEqual(self.read(self.pc), before)
-        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG'])
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG', 'PC.IMG.bak'])    # the complete backup stays
+        self.assertEqual(self.read(self.pc + '.bak'), before)
+
+    def test_a_failed_rename_deletes_nothing_and_says_where_everything_is(self):
+        before = self.read(self.pc)
+
+        def fail(src, dst):                   # a FAT card: the old file is already gone when the rename fails
+            os.remove(dst)
+            raise OSError(5, 'Input/output error')
+        with mock.patch.object(imgupdate.os, 'replace', fail):
+            with self.assertRaises(imgupdate.UpdateError) as cm:
+                imgupdate.update_image(self.pc, self.fresh)
+        msg = str(cm.exception)
+        self.assertIn('Nothing was deleted', msg)
+        self.assertIn(self.pc + ' DOES NOT EXIST', msg)
+        self.assertIn(self.pc + '.new', msg)
+        self.assertIn(self.pc + '.bak', msg)
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG.bak', 'PC.IMG.new'])
+        self.assertEqual(self.read(self.pc + '.bak'), before)
+        self.assertEqual(contents(self.read(self.pc + '.new'))['KERNEL.SYS'], b'kernel v2')
+
+    def test_a_failed_rename_that_left_the_image_says_so(self):
+        with mock.patch.object(imgupdate.os, 'replace', side_effect=OSError(30, 'Read-only file system')):
+            with self.assertRaisesRegex(imgupdate.UpdateError, 'The image still exists'):
+                imgupdate.update_image(self.pc, self.fresh)
+        self.assertEqual(self.names(), ['FRESH.IMG', 'PC.IMG', 'PC.IMG.bak', 'PC.IMG.new'])
 
     def test_boot_code_difference_is_reported_not_rewritten(self):
         mbr = bytes([0x90]) * 446
