@@ -17,8 +17,11 @@ extern "C" {
 
 /* Open (create or append). An existing file is scanned so a dangling separator
    or a half-written message after the last complete one is truncated away.
-   0 ok, -1 error. */
+   0 ok, -1 error (the file is left as it was if it could not be scanned). */
 int  hist_open(const char *path);
+#ifdef DOSUNIT
+extern int hist_test_scan_reads;      /* >= 0: the scan's read after that many fails */
+#endif
 void hist_close(void);
 long hist_size(void);                 /* bytes hist_copy would produce */
 /* Append raw bytes of the current message. The first write after a boundary

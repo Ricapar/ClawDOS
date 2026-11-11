@@ -241,7 +241,7 @@ static void tempPath(const char *path, char *out)
 int tool_edit(ToolCtx *t)
 {
     const char *path = targ("path"), *old = targ("old"), *repl = targ("new");
-    int all = targ_num("all", 0) != 0, crlf, status, rc;
+    int all, crlf, status, rc;
     unsigned seg, first = 0, count, line, shown;
     char tmp[FS_PATH_MAX + 16], where[64];
     char *src;
@@ -258,6 +258,8 @@ int tool_edit(ToolCtx *t)
         repl = "";
     if (!strcmp(old, repl))
         return tool_fail(t, "old and new are the same: nothing to change");
+    if (targ_bool(t, "all", &all))
+        return TS_ERROR;
     if ((src = load(t, path, &seg, &crlf, &status)) == NULL)
         return status;
 
@@ -271,7 +273,7 @@ int tool_edit(ToolCtx *t)
         whereLines(src, old, where);
         sprintf(t->summary, "old text occurs %u times", count);
         tout_printf(t, "old text occurs %u times%s: add surrounding lines to make it unique, "
-                       "or set all=1 to replace every one\n", count, where);
+                       "or set all to true to replace every one\n", count, where);
         _dos_freemem(seg);
         return TS_ERROR;
     }

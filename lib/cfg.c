@@ -126,6 +126,7 @@ int cfg_load(Cfg *c, const char *path)
     size = fread(text, 1, (unsigned)size, f);
     fclose(f);
     text[size] = 0;
+    text[strcspn(text, "\x1A")] = 0;  /* EDLIN and COPY CON end a file with Ctrl-Z */
     rc = cfg_parse(c, text);
     free(text);
     for (i = 0; i < c->nproviders; i++) {

@@ -19,7 +19,27 @@ static char savedTail[8];       /* what hist_reopen_last took off, so a rollback
 static unsigned savedTailLen;
 static long savedTailAt;
 
-/* Find the end of the last complete top-level object in the file. */
+#ifdef DOSUNIT
+int hist_test_scan_reads = -1;
+
+/* dosunit.c's way to a scan that cannot finish: after hist_test_scan_reads
+   good reads, one fails as a bad sector would. */
+static int scanRead(char *buf)
+{
+    if (hist_test_scan_reads == 0) {
+        hist_test_scan_reads = -1;
+        return -1;
+    }
+    if (hist_test_scan_reads > 0)
+        hist_test_scan_reads--;
+    return read(fd, buf, COPY_BUF);
+}
+#else
+#define scanRead(buf) read(fd, buf, COPY_BUF)
+#endif
+
+/* Find the end of the last complete top-level object in the file; -1 if the
+   file can't be read to its end (no memory, a read error). */
 static long scanBoundary(void)
 {
     char *buf = (char *)malloc(COPY_BUF);
@@ -27,9 +47,9 @@ static long scanBoundary(void)
     int depth = 0, inStr = 0, esc = 0, n;
 
     if (!buf)
-        return 0;
+        return -1;
     lseek(fd, 0, SEEK_SET);
-    while ((n = read(fd, buf, COPY_BUF)) > 0) {
+    while ((n = scanRead(buf)) > 0) {
         int i;
         for (i = 0; i < n; i++) {
             char c = buf[i];
@@ -49,7 +69,7 @@ static long scanBoundary(void)
         }
     }
     free(buf);
-    return last;
+    return n < 0 ? -1 : last;
 }
 
 int hist_open(const char *path)
@@ -60,6 +80,10 @@ int hist_open(const char *path)
         return -1;
     end = lseek(fd, 0, SEEK_END);
     boundary = end ? scanBoundary() : 0;
+    if (boundary < 0) {               /* never cut a file we couldn't read through */
+        hist_close();
+        return -1;
+    }
     if (boundary != end) {
         chsize(fd, boundary);
         end = boundary;

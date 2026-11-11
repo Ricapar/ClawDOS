@@ -46,6 +46,7 @@ MTCP_LIB = ['packet.cpp', 'arp.cpp', 'eth.cpp', 'ip.cpp', 'tcp.cpp', 'tcpsockm.c
 #   sources: files in this repo (.c, .cpp, .asm)
 #   model:   memory model letter (s, c, m, l)
 #   mtcp:    mTCP compile-time config (.cfg) if the program uses TCP/IP
+#   defines: macros defined for every source (unquoted: Watcom can't take quoted -D values)
 APPS = {
     # The launcher: starts CLAWDOS and runs the model's programs while CLAWDOS is out of memory (lib/relaunch.h).
     'clawdos.exe': {'sources': ['src/clawdos/clawdos.c', 'lib/shell.c', 'lib/toolapi.c', 'lib/utf8.c', 'lib/ticks.c',
@@ -61,7 +62,7 @@ APPS = {
                    'model': 'l', 'mtcp': 'src/harness/harness.cfg'},
     'dosunit.exe': {'sources': ['tests/unit/dosunit.c', 'lib/play.c', 'lib/memory.c', 'lib/toolapi.c', 'lib/console.c',
                                 'lib/edit.c', 'lib/search.c', 'lib/ticks.c', 'lib/utf8.c', 'lib/sink.c', 'lib/json.c', 'lib/chunked.c', 'lib/sse.c', 'lib/httpp.c', 'lib/cfg.c', 'lib/history.c', 'lib/apireq.c', 'lib/apistream.c', 'lib/convo.c', 'lib/dosfs.c'],
-                    'model': 'l'},
+                    'model': 'l', 'defines': ['DOSUNIT']},
 }
 
 TEXT_EXTS = {'.bat', '.sys', '.cfg', '.txt', '.ini', '.bas', '.asm', '.c', '.h'}
@@ -138,6 +139,7 @@ def compile_flags(spec, objdir):
     flags = ['-q', '-0', f'-m{model}', '-bt=dos', '-os', '-s', '-zp2', '-i=' + os.path.join(ROOT, 'lib')]
     if model in 'clh':
         flags.append('-zc')     # string literals in the code segment, out of DGROUP (data pointers are far)
+    flags += ['-d' + d for d in spec.get('defines', [])]
     extra = []
     # Watcom can't take a quoted -D value from a command line, so quoted
     # definitions go in a force-included header: the build stamp for every

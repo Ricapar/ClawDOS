@@ -1,4 +1,5 @@
-/* DOSUNIT.EXE - unit tests for ClawDOS's hardware-free code (parsers).
+/* DOSUNIT.EXE - unit tests for ClawDOS's hardware-free code (parsers, and the
+ * file tools on files the tests make and remove).
  * Runs on DOS; image/tests/units.bat sends its output to COM1 and
  * scripts/boottest.py checks for UNITS-OK.
  */
@@ -25,6 +26,7 @@
 #include "convo.h"
 #include "dosfs.h"
 #include <stdlib.h>
+#include <direct.h>
 
 static int passed, failed;
 
@@ -323,6 +325,10 @@ static void testConsole(void)
               "second row");
     CHECK_STR("console: 78-column art row is not torn", gridRow(1), "  second row");
     con_margins(2, SCR_COLS - 1);
+
+    con_init();
+    con_write("a\tb");
+    CHECK_STR("console: a tab is drawn as spaces", gridRow(0), "  a    b");
 }
 
 /* --- edit and search ------------------------------------------------------------ */
@@ -851,6 +857,275 @@ static void testToolArgs(void)
     CHECK("targ_set fills past 16 KB", rc == -1 && i < 20 && i > 12);
     targ_reset();
     CHECK("targ_set after reset", targ_set("a", "1", 1) == 0 && !strcmp(targ("a"), "1") && targ("path") == NULL);
+    CHECK("targ_set tab", targ_set("tab", "a\tb", 3) == 0);
+    CHECK_STR("targ_set keeps a tab", targ("tab"), "a\tb");
+}
+
+/* --- the file tools, on files the tests make and remove ------------------------ */
+
+static ToolCtx ft;
+
+/* A new call: no arguments yet, an empty result. */
+static void newCall(void)
+{
+    targ_reset();
+    tout_reset(&ft);
+    ft.unattended = 1;
+}
+
+/* An argument as the harness stores it: UTF-8 through targ_set. */
+static void arg(const char *key, const char *value)
+{
+    targ_set(key, value, strlen(value));
+}
+
+/* The bytes of a small file, NUL-terminated ("" if it can't be read). */
+static const char *fileText(const char *path)
+{
+    static char text[700];
+    FILE *f = fopen(path, "rb");
+    unsigned n = 0;
+
+    if (f) {
+        n = fread(text, 1, sizeof text - 1, f);
+        fclose(f);
+    }
+    text[n] = 0;
+    return text;
+}
+
+/* The result's lines from `from` up to `end` all have exactly `width`
+   characters: none was cut off by the 4 KB cap. Returns how many there are,
+   or -1 if one is short or long. */
+static int wholeLines(const char *from, const char *end, unsigned width)
+{
+    int lines = 0;
+    while (from < end) {
+        const char *nl = strchr(from, '\n');
+        if (nl == NULL || nl > end || (unsigned)(nl - from) != width)
+            return -1;
+        lines++;
+        from = nl + 1;
+    }
+    return lines;
+}
+
+/* The last line of the result (where a trailer goes), or NULL. */
+static const char *lastLine(void)
+{
+    const char *p = ft.out + ft.len;
+    if (ft.len == 0 || p[-1] != '\n')
+        return NULL;
+    for (p--; p > ft.out && p[-1] != '\n'; p--)
+        ;
+    return p;
+}
+
+static void testTypedArgs(void)
+{
+    ToolCtx t;
+    long n;
+    int on;
+
+    targ_reset();
+    tout_reset(&t);
+    arg("dec", "010");
+    arg("hex", "0x10");
+    arg("neg", "-3");
+    arg("frac", "1.5");
+    arg("t", "TRUE");
+    arg("f", "0");
+    arg("bad", "yes");
+    CHECK("targ_long decimal, not octal", targ_long(&t, "dec", 0, &n) == 0 && n == 10);
+    CHECK("targ_long 0x hex", targ_long(&t, "hex", 0, &n) == 0 && n == 16);
+    CHECK("targ_long negative", targ_long(&t, "neg", 0, &n) == 0 && n == -3);
+    CHECK("targ_long absent is the default", targ_long(&t, "none", 7, &n) == 0 && n == 7);
+    CHECK("targ_long fraction fails", targ_long(&t, "frac", 7, &n) == -1);
+    CHECK_STR("targ_long error names the argument", t.out, "frac must be a whole number");
+    CHECK("targ_flag true", targ_flag("t") == 1 && targ_flag("f") == 0 && targ_flag("none") == 0);
+    tout_reset(&t);
+    CHECK("targ_bool bad fails", targ_bool(&t, "bad", &on) == -1 && on == -1);
+    CHECK_STR("targ_bool error names the argument", t.out, "bad must be true or false");
+}
+
+static void testFileRead(void)
+{
+    FILE *f = fopen("C:\\ZZREAD.TXT", "wb");
+    const char *tail;
+    unsigned i, from = 0;
+    int shown;
+
+    for (i = 1; i <= 200; i++)        /* 200 lines of 60 characters */
+        fprintf(f, "line %03u xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n", i);
+    fclose(f);
+
+    newCall();
+    arg("path", "C:\\ZZREAD.TXT");
+    arg("lines", "200");
+    CHECK("read over the cap ok", tool_read(&ft) == TS_OK);
+    tail = lastLine();
+    CHECK("read over the cap: the result fits", ft.len <= TOOL_OUT_MAX);
+    CHECK("read over the cap: a trailer says it stopped",
+          tail != NULL && sscanf(tail, "...(more lines from %u; use start)", &from) == 1);
+    shown = tail ? wholeLines(ft.out, tail, 66) : -1;
+    CHECK("read over the cap: no line is cut", shown > 50);
+    CHECK("read over the cap: the trailer names the next line", shown > 0 && from == (unsigned)shown + 1);
+
+    newCall();
+    arg("path", "C:\\ZZREAD.TXT");
+    arg("start", "195");              /* a JSON integer arrives as its digits */
+    CHECK("read near the end ok", tool_read(&ft) == TS_OK && !strncmp(ft.out, "  195 line 195", 14));
+    CHECK("read near the end: no trailer", strstr(ft.out, "more lines") == NULL
+          && wholeLines(ft.out, ft.out + ft.len, 66) == 6);
+
+    newCall();
+    arg("path", "C:\\ZZREAD.TXT");
+    arg("lines", "ten");
+    CHECK("read unparsable lines fails", tool_read(&ft) == TS_ERROR && strstr(ft.out, "lines") != NULL);
+    remove("C:\\ZZREAD.TXT");
+}
+
+static void testFileWrite(void)
+{
+    newCall();
+    arg("path", "C:\\ZZWRITE.TXT");
+    arg("text", "a\tb\none\n");
+    CHECK("write ok", tool_write(&ft) == TS_OK);
+    CHECK_STR("write keeps tabs", fileText("C:\\ZZWRITE.TXT"), "a\tb\r\none\r\n");
+
+    newCall();
+    arg("path", "C:\\ZZWRITE.TXT");
+    arg("text", "two\n");
+    arg("append", "1");               /* JSON true, as setArg stores it */
+    CHECK("write append boolean ok", tool_write(&ft) == TS_OK);
+    CHECK_STR("write append boolean appends", fileText("C:\\ZZWRITE.TXT"), "a\tb\r\none\r\ntwo\r\n");
+
+    newCall();
+    arg("path", "C:\\ZZWRITE.TXT");
+    arg("text", "three\n");
+    arg("append", "true");            /* the string a model may send instead */
+    CHECK("write append \"true\" ok", tool_write(&ft) == TS_OK);
+    CHECK_STR("write append \"true\" appends", fileText("C:\\ZZWRITE.TXT"),
+              "a\tb\r\none\r\ntwo\r\nthree\r\n");
+
+    newCall();
+    arg("path", "C:\\ZZWRITE.TXT");
+    arg("text", "x");
+    arg("append", "false");
+    CHECK("write append \"false\" overwrites", tool_write(&ft) == TS_OK
+          && !strcmp(fileText("C:\\ZZWRITE.TXT"), "x"));
+
+    newCall();
+    arg("path", "C:\\ZZWRITE.TXT");
+    arg("text", "y");
+    arg("append", "maybe");
+    CHECK("write append unparsable fails", tool_write(&ft) == TS_ERROR && strstr(ft.out, "append") != NULL);
+    CHECK_STR("write append unparsable leaves the file", fileText("C:\\ZZWRITE.TXT"), "x");
+    remove("C:\\ZZWRITE.TXT");
+}
+
+static void testFileEdit(void)
+{
+    writeFile("C:\\ZZEDIT.C", "int main()\r\n{\r\n\tx;\r\n\treturn 0;\r\n\tx;\r\n}\r\n");
+
+    newCall();
+    arg("path", "C:\\ZZEDIT.C");
+    arg("old", "\treturn 0;");
+    arg("new", "\treturn 1;");
+    CHECK("edit a tabbed line ok", tool_edit(&ft) == TS_OK);
+    CHECK_STR("edit a tabbed line", fileText("C:\\ZZEDIT.C"),
+              "int main()\r\n{\r\n\tx;\r\n\treturn 1;\r\n\tx;\r\n}\r\n");
+
+    newCall();
+    arg("path", "C:\\ZZEDIT.C");
+    arg("old", "\tx;");
+    arg("new", "\ty;");
+    arg("all", "true");
+    CHECK("edit all \"true\" ok", tool_edit(&ft) == TS_OK);
+    CHECK_STR("edit all \"true\" replaces both", fileText("C:\\ZZEDIT.C"),
+              "int main()\r\n{\r\n\ty;\r\n\treturn 1;\r\n\ty;\r\n}\r\n");
+    remove("C:\\ZZEDIT.C");
+}
+
+static void testFileSearch(void)
+{
+    FILE *f = fopen("C:\\ZZSRCH.TXT", "wb");
+    const char *tail, *first;
+    unsigned i, more = 0;
+    int shown;
+
+    for (i = 1; i <= 100; i++)        /* 100 matching lines of 70 characters */
+        fprintf(f, "match %03u xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n", i);
+    fprintf(f, "a\tb\r\n");
+    fclose(f);
+
+    newCall();
+    arg("text", "MATCH");
+    arg("path", "C:\\ZZSRCH.TXT");
+    CHECK("search over the cap ok", tool_search(&ft) == TS_OK);
+    tail = lastLine();
+    first = strchr(ft.out, '\n');     /* after the file's name */
+    CHECK("search over the cap: the result fits", ft.len <= TOOL_OUT_MAX);
+    CHECK("search over the cap: a trailer says it stopped",
+          tail != NULL && sscanf(tail, "+%u more matches", &more) == 1);
+    shown = tail && first ? wholeLines(first + 1, tail, 77) : -1;
+    CHECK("search over the cap: no line is cut", shown > 40);
+    CHECK("search over the cap: the trailer counts the rest", shown > 0 && shown + more == 100);
+
+    newCall();
+    arg("text", "a\tb");
+    arg("path", "C:\\ZZSRCH.TXT");
+    CHECK("search finds a tab", tool_search(&ft) == TS_OK && strstr(ft.out, "  101: a\tb\n") != NULL);
+
+    newCall();
+    arg("text", "MATCH");
+    arg("path", "C:\\ZZSRCH.TXT");
+    arg("case", "true");
+    CHECK("search case \"true\" matches case", tool_search(&ft) == TS_OK && strstr(ft.out, "no matches") != NULL);
+    remove("C:\\ZZSRCH.TXT");
+}
+
+static void testFileDir(void)
+{
+    char path[24];
+    const char *tail;
+    unsigned i, more = 0;
+    int shown;
+
+    mkdir("C:\\ZZDIR");
+    for (i = 0; i < 100; i++) {
+        sprintf(path, "C:\\ZZDIR\\F%03u.TXT", i);
+        writeFile(path, "");
+    }
+    newCall();
+    arg("path", "C:\\ZZDIR");
+    CHECK("dir over the cap ok", tool_dir(&ft) == TS_OK);
+    tail = lastLine();
+    CHECK("dir over the cap: the result fits", ft.len <= TOOL_OUT_MAX);
+    CHECK("dir over the cap: a trailer says it stopped", tail != NULL && sscanf(tail, "+%u more", &more) == 1);
+    shown = tail ? wholeLines(ft.out, tail, 47) : -1;
+    CHECK("dir over the cap: no line is cut", shown > 40);
+    CHECK("dir over the cap: the trailer counts the rest", shown > 0 && shown + more == 101);   /* and .. */
+    for (i = 0; i < 100; i++) {
+        sprintf(path, "C:\\ZZDIR\\F%03u.TXT", i);
+        remove(path);
+    }
+    rmdir("C:\\ZZDIR");
+}
+
+static void testCfgFile(void)
+{
+    Cfg *c = (Cfg *)malloc(sizeof(Cfg));
+
+    writeFile("C:\\ZZCFG.CFG", "name Bob\r\n[x]\r\nhost h\r\n\x1A");
+    cfg_defaults(c);
+    CHECK("cfg file ending in Ctrl-Z loads", cfg_load(c, "C:\\ZZCFG.CFG") == 0);
+    CHECK("cfg file ending in Ctrl-Z settings", !strcmp(c->name, "Bob") && c->nproviders == 1);
+    writeFile("C:\\ZZCFG.CFG", "name Ann\r\n\x1Agarbage\r\nbogus 1\r\n");
+    cfg_defaults(c);
+    CHECK("cfg file: nothing after Ctrl-Z is read", cfg_load(c, "C:\\ZZCFG.CFG") == 0 && !strcmp(c->name, "Ann"));
+    remove("C:\\ZZCFG.CFG");
+    free(c);
 }
 
 /* --- long deltas cut safely ------------------------------------------------------ */
@@ -947,6 +1222,31 @@ static void testConvo(void)
     CHECK("convo: plain reply clears merge", c.mergeNext == 0 && convo_settle(&c) == 0);
     convo_tool_result(&c, "t9", "x", 1, "Tool limit reached; answer now without tools.");
     CHECK("convo: result with note", strstr(histText(), "\"is_error\":true},{\"type\":\"text\",\"text\":\"Tool limit reached") != NULL);
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+}
+
+/* A file whose scan can't finish (a read fails partway) is left whole and
+   the open fails, instead of being cut to what was read. */
+static void testHistoryScanFails(void)
+{
+    long size;
+    int i;
+
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+    for (i = 0; i < 40; i++) {        /* 40 messages, about 1.6 KB: four reads */
+        hist_puts("{\"role\":\"user\",\"content\":\"0123456789\"}");
+        hist_message_done();
+    }
+    hist_close();
+    size = fs_size("C:\\HISTTEST.JSN");
+    hist_test_scan_reads = 1;
+    CHECK("hist open fails when its scan can't finish", hist_open("C:\\HISTTEST.JSN") == -1);
+    hist_close();                     /* DOS updates the directory's size on close */
+    CHECK("hist open after a failed scan leaves the file", fs_size("C:\\HISTTEST.JSN") == size && size > 1024);
+    hist_test_scan_reads = -1;
+    CHECK("hist open after the failure works", hist_open("C:\\HISTTEST.JSN") == 0 && hist_size() == size);
     hist_close();
     remove("C:\\HISTTEST.JSN");
 }
@@ -1070,9 +1370,17 @@ int main(void)
     testApiStream();
     testLongEvents();
     testToolArgs();
+    testTypedArgs();
+    testFileRead();
+    testFileWrite();
+    testFileEdit();
+    testFileSearch();
+    testFileDir();
+    testCfgFile();
     testLongDeltas();
     testConvo();
     testHistoryCommit();
+    testHistoryScanFails();
 
     printf("%s %d\n", failed ? "UNITS-FAILED" : "UNITS-OK", failed ? failed : passed);
     return failed != 0;

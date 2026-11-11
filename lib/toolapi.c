@@ -34,7 +34,7 @@ int targ_set(const char *key, const char *utf8, unsigned n)
         return -1;
     memcpy(store + used, key, klen);
     room = TOOL_ARGS_MAX - (used + klen) - 1;
-    got = utf8_to_cp437(utf8, n, store + used + klen, room);
+    got = utf8_to_cp437_tabs(utf8, n, store + used + klen, room);
     if (got >= room) {                 /* did not fit: forget this key */
         store[used] = 0;
         return -1;
@@ -58,16 +58,46 @@ const char *targ(const char *key)
     return NULL;
 }
 
-long targ_num(const char *key, long def)
+int targ_flag(const char *key)
 {
     const char *v = targ(key);
-    char *end;
-    long n;
 
     if (v == NULL || !*v)
-        return def;
-    n = strtol(v, &end, 0);
-    return end == v ? def : n;
+        return 0;
+    if (!strcmp(v, "1") || !stricmp(v, "true"))
+        return 1;
+    if (!strcmp(v, "0") || !stricmp(v, "false"))
+        return 0;
+    return -1;
+}
+
+int targ_bool(ToolCtx *t, const char *key, int *on)
+{
+    char msg[48];
+
+    if ((*on = targ_flag(key)) >= 0)
+        return 0;
+    sprintf(msg, "%.20s must be true or false", key);
+    tool_fail(t, msg);
+    return -1;
+}
+
+int targ_long(ToolCtx *t, const char *key, long def, long *n)
+{
+    const char *v = targ(key);
+    char *end, msg[48];
+
+    *n = def;
+    if (v == NULL || !*v)
+        return 0;
+    /* decimal, or 0x hex; never octal, so "010" is ten */
+    *n = strtol(v, &end, v[0] == '0' && (v[1] == 'x' || v[1] == 'X') ? 16 : 10);
+    if (end != v && *end == 0)
+        return 0;
+    *n = def;
+    sprintf(msg, "%.20s must be a whole number", key);
+    tool_fail(t, msg);
+    return -1;
 }
 
 static int parse_hex(const char *s, unsigned *out, const char **end)
@@ -137,6 +167,27 @@ void tout_printf(ToolCtx *t, const char *fmt, ...)
     vsprintf(buf, fmt, ap);
     va_end(ap);
     tout_puts(t, buf);
+}
+
+int tout_room(ToolCtx *t, unsigned n)
+{
+    if (!t->truncated && t->len + n <= TOOL_OUT_MAX - TOUT_RESERVE)
+        return 1;
+    t->truncated = 1;
+    return 0;
+}
+
+int tout_line(ToolCtx *t, const char *fmt, ...)
+{
+    char buf[300];
+    va_list ap;
+    va_start(ap, fmt);
+    vsprintf(buf, fmt, ap);
+    va_end(ap);
+    if (!tout_room(t, strlen(buf)))
+        return -1;
+    tout_puts(t, buf);
+    return 0;
 }
 
 void tout_hexdump(ToolCtx *t, const unsigned char __far *p, unsigned n,

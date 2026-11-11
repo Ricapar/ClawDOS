@@ -90,7 +90,7 @@ int tool_dir(ToolCtx *t)
     do {
         if (!strcmp(f.name, "."))
             continue;
-        if (shown >= DIR_MAX) {
+        if (shown >= DIR_MAX || t->truncated) {
             more++;
             continue;
         }
@@ -100,15 +100,18 @@ int tool_dir(ToolCtx *t)
             strcpy(size, "<DIR>");
         else
             sprintf(size, "%lu", (unsigned long)f.size);
-        tout_printf(t, "%-12s %10s  %04u-%02u-%02u %02u:%02u  %c%c%c%c\n", f.name, size,
-                    (f.wr_date >> 9) + 1980, (f.wr_date >> 5) & 15, f.wr_date & 31,
-                    f.wr_time >> 11, (f.wr_time >> 5) & 63,
-                    f.attrib & _A_RDONLY ? 'R' : '-', f.attrib & _A_HIDDEN ? 'H' : '-',
-                    f.attrib & _A_SYSTEM ? 'S' : '-', f.attrib & _A_ARCH ? 'A' : '-');
+        if (tout_line(t, "%-12s %10s  %04u-%02u-%02u %02u:%02u  %c%c%c%c\n", f.name, size,
+                      (f.wr_date >> 9) + 1980, (f.wr_date >> 5) & 15, f.wr_date & 31,
+                      f.wr_time >> 11, (f.wr_time >> 5) & 63,
+                      f.attrib & _A_RDONLY ? 'R' : '-', f.attrib & _A_HIDDEN ? 'H' : '-',
+                      f.attrib & _A_SYSTEM ? 'S' : '-', f.attrib & _A_ARCH ? 'A' : '-')) {
+            more++;                   /* the result is full: count the rest */
+            continue;
+        }
         shown++;
     } while (_dos_findnext(&f) == 0);
     if (more)
-        tout_printf(t, "+%u more\n", more);
+        tout_printf(t, "+%u more (list them with a narrower wildcard, e.g. *.C)\n", more);
     sprintf(t->summary, "%u entries", shown + more);
     return TS_OK;
 }
@@ -130,11 +133,11 @@ static int looks_binary(const unsigned char *p, unsigned n)
 
 static int read_binary(ToolCtx *t, int h)
 {
-    long offset = targ_num("offset", 0);
-    long count = targ_num("bytes", BIN_MAX);
-    long size = lseek(h, 0, SEEK_END);
+    long offset, count, size = lseek(h, 0, SEEK_END);
     unsigned got;
 
+    if (targ_long(t, "offset", 0, &offset) || targ_long(t, "bytes", BIN_MAX, &count))
+        return TS_ERROR;
     if (count < 1 || count > BIN_MAX)
         count = BIN_MAX;
     if (offset < 0 || offset >= size) {
@@ -155,12 +158,14 @@ int tool_read(ToolCtx *t)
 {
     char line[LINE_MAX + 4];
     unsigned len = 0, lineno = 1, shown = 0, got, i;
-    long start = targ_num("start", 1), count = targ_num("lines", 100);
+    long start, count;
     int h, status, ended = 0;
     const char *p = path_arg(t, "path", &status);
 
     if (p == NULL)
         return status;
+    if (targ_long(t, "start", 1, &start) || targ_long(t, "lines", 100, &count))
+        return TS_ERROR;
     if ((status = _dos_open(p, O_RDONLY, &h)) != 0)
         return dos_fail(t, status);
     if (_dos_read(h, buf, sizeof(buf), &got)) {
@@ -193,12 +198,15 @@ int tool_read(ToolCtx *t)
             }
             if (lineno >= start) {
                 line[len] = 0;
-                tout_printf(t, "%5u %s\n", lineno, line);
+                if (tout_line(t, "%5u %s\n", lineno, line)) {
+                    ended = 2;             /* the result is full: this line is next */
+                    break;
+                }
                 shown++;
             }
             lineno++;
             len = 0;
-            if (shown >= count || t->truncated) {
+            if (shown >= count) {
                 ended = 2;                 /* stopped early: more may follow */
                 break;
             }
@@ -208,8 +216,10 @@ int tool_read(ToolCtx *t)
     }
     if (ended != 2 && len > 0 && lineno >= start) {
         line[len] = 0;
-        tout_printf(t, "%5u %s\n", lineno, line);
-        shown++;
+        if (tout_line(t, "%5u %s\n", lineno, line))
+            ended = 2;
+        else
+            shown++;
     }
     if (ended == 2)
         tout_printf(t, "...(more lines from %u; use start)\n", lineno);
@@ -226,16 +236,17 @@ int tool_read(ToolCtx *t)
 int tool_write(ToolCtx *t)
 {
     const char *text = targ("text");
-    int append = targ_num("append", 0) != 0;
     unsigned long total = 0;
     unsigned n = 0, wrote;
-    int h, status, err = 0;
+    int h, status, append, err = 0;
     const char *p = path_arg(t, "path", &status);
 
     if (p == NULL)
         return status;
     if (text == NULL)
         return tool_fail(t, "missing text");
+    if (targ_bool(t, "append", &append))
+        return TS_ERROR;
     if (append && _dos_open(p, O_WRONLY, &h) == 0) {
         lseek(h, 0, SEEK_END);
     } else if ((status = _dos_creat(p, _A_NORMAL, &h)) != 0) {

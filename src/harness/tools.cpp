@@ -60,10 +60,12 @@ static int toolSysinfo(ToolCtx *t)
 static int toolPeek(ToolCtx *t)
 {
     unsigned seg, off;
-    long n = targ_num("len", 64);
+    long n;
 
     if (targ_addr("addr", &seg, &off))
         return tool_fail(t, "addr must be hex seg:off, e.g. 0040:0000");
+    if (targ_long(t, "len", 64, &n))
+        return TS_ERROR;
     if (n < 1 || n > PEEK_MAX)
         n = n < 1 ? 64 : PEEK_MAX;
     tout_hexdump(t, (const unsigned char __far *)MK_FP(seg, off), (unsigned)n, seg, off);
@@ -110,7 +112,9 @@ static int toolPort(ToolCtx *t)
     if (targ_hex("port", &port))
         return tool_fail(t, "port must be hex, e.g. 3D9");
     if (targ("value") && *targ("value")) {
-        long v = targ_num("value", -1);
+        long v;
+        if (targ_long(t, "value", -1, &v))
+            return TS_ERROR;
         if (v < 0 || v > 255)
             return tool_fail(t, "value must be 0-255");
         outp(port, (int)v);
@@ -195,11 +199,11 @@ void tools_set_launched(int on) { launched = on; }
 static int toolRun(ToolCtx *t)
 {
     const char *cmd = targ("command");
-    const char *fm = targ("full_memory");     /* true arrives as "1" (setArg) */
-    int big = fm && (*fm == '1' || !stricmp(fm, "true"));
     unsigned short __far *save;
-    int status;
+    int status, big;
 
+    if (targ_bool(t, "full_memory", &big))
+        return TS_ERROR;
     if (big && launched) {
         if (relaunch_write_run(cmd, unattended ? 1 : 5))
             return tool_fail(t, "cannot write " RELAUNCH_RUN);
@@ -285,7 +289,7 @@ static void writePreview(char *buf)
             lines++;
     }
     sprintf(buf, "%u line%s, %lu bytes, %s", lines, lines == 1 ? "" : "s", bytes,
-            targ_num("append", 0) ? (size >= 0 ? "appends" : "new file")
+            targ_flag("append") > 0 ? (size >= 0 ? "appends" : "new file")
                                   : (size >= 0 ? "overwrites existing file" : "new file"));
 }
 
@@ -296,7 +300,7 @@ static void editPreview(char *buf)
     unsigned o = old ? edit_lines(old) : 0, n = repl ? edit_lines(repl) : 0;
 
     sprintf(buf, "replaces %u line%s with %u%s", o, o == 1 ? "" : "s", n,
-            targ_num("all", 0) ? ", everywhere it occurs" : "");
+            targ_flag("all") > 0 ? ", everywhere it occurs" : "");
 }
 
 /* The later commands of a run call, one per line under its header. */

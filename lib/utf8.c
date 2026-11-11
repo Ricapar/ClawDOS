@@ -63,11 +63,12 @@ static const struct Fallback fallbacks[] = {
 };
 #define N_FALLBACKS (sizeof(fallbacks) / sizeof(fallbacks[0]))
 
-/* The CP437 byte for a code point, or -1. */
-static int cp437Byte(unsigned long cp)
+/* The CP437 byte for a code point, or -1. A tab is -1 unless kept (it
+   then falls back to spaces). */
+static int cp437Byte(unsigned long cp, int keepTabs)
 {
     unsigned i;
-    if (cp < 0x80 && cp != 0x09)
+    if (cp < 0x80 && (cp != 0x09 || keepTabs))
         return (int)cp;
     for (i = 0; i < 128; i++)
         if (cp437High[i] == cp)
@@ -103,7 +104,7 @@ static unsigned long decode(const char **p, unsigned n)
     return cp;
 }
 
-unsigned utf8_to_cp437(const char *in, unsigned n, char *out, unsigned outmax)
+static unsigned convert(const char *in, unsigned n, char *out, unsigned outmax, int keepTabs)
 {
     const char *end = in + n;
     unsigned len = 0, i;
@@ -111,7 +112,7 @@ unsigned utf8_to_cp437(const char *in, unsigned n, char *out, unsigned outmax)
     while (in < end && len < outmax) {
         unsigned left = (unsigned)(end - in);
         unsigned long cp = decode(&in, left);
-        int b = cp == 0xFFFFFFFFUL ? -1 : cp437Byte(cp);
+        int b = cp == 0xFFFFFFFFUL ? -1 : cp437Byte(cp, keepTabs);
         if (b >= 0) {
             out[len++] = (char)b;
             continue;
@@ -127,6 +128,16 @@ unsigned utf8_to_cp437(const char *in, unsigned n, char *out, unsigned outmax)
             out[len++] = '?';
     }
     return len;
+}
+
+unsigned utf8_to_cp437(const char *in, unsigned n, char *out, unsigned outmax)
+{
+    return convert(in, n, out, outmax, 0);
+}
+
+unsigned utf8_to_cp437_tabs(const char *in, unsigned n, char *out, unsigned outmax)
+{
+    return convert(in, n, out, outmax, 1);
 }
 
 unsigned cp437_to_utf8(unsigned char c, char *out)

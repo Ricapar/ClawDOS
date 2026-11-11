@@ -180,8 +180,8 @@ static void rowFill(Row &r, int col, int n, unsigned char ch, unsigned char attr
 /* Put text at col (clipped to `width` chars); returns the column after it. */
 static int rowText(Row &r, int col, const char *s, unsigned char attr, int width = SCR_COLS)
 {
-    while (*s && col < SCR_COLS && width-- > 0)
-        r.c[col++] = (unsigned char)*s++ | (attr << 8);
+    for (; *s && col < SCR_COLS && width-- > 0; s++)   /* a tab (from a tool argument) as a space */
+        r.c[col++] = (*s == '\t' ? ' ' : (unsigned char)*s) | (attr << 8);
     return col;
 }
 

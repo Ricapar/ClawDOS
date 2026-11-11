@@ -159,6 +159,11 @@ void con_putc(unsigned char c)
     }
     if (c == '\r')
         return;
+    if (c == '\t') {                        /* tool arguments keep their tabs (utf8.h); the
+                                               screen shows them as the reply text does */
+        con_write("    ");
+        return;
+    }
     if (col >= rm) {                        /* the row is full: break before this char, not
                                                when the last column filled (a NL may follow) */
         if (c == ' ') {                     /* a space at the margin is the break itself */

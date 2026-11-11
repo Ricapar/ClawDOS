@@ -11,8 +11,11 @@ extern "C" {
 
 /* UTF-8 (n bytes, need not be NUL-terminated) -> CP437 bytes in out (no NUL).
    Returns the bytes written; stops when out is full. Invalid or truncated
-   sequences become '?'. */
+   sequences become '?'. A tab becomes four spaces (text for the screen). */
 unsigned utf8_to_cp437(const char *in, unsigned n, char *out, unsigned outmax);
+/* The same, but a tab stays a tab: for text that goes into files (tool
+   arguments), where utf8_to_cp437's four spaces would change it. */
+unsigned utf8_to_cp437_tabs(const char *in, unsigned n, char *out, unsigned outmax);
 
 /* One CP437 byte -> 1-3 bytes of UTF-8 in out; returns how many. Bytes 0x01-0x1F
    are the CP437 glyphs (0x07 is a bullet) except tab, LF and CR, which stay. */

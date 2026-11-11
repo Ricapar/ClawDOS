@@ -27,7 +27,8 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   and echoed back whole (`big signature round trip: PASS`); `relaunch.bat --timeout 150` the run
   tool through CLAWDOS.EXE (`!bigrun` sets full_memory; `plain run stayed in the harness` for one without) (`Largest executable program size` from MEM, `CLAWDOS.EXE exit code 0`
   for the resume, then the tour and `resume state consumed`); `units.bat --expect UNITS-OK` runs tests/unit/dosunit.c
-  (every lib/ parser). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
+  (every lib/ parser, and the file tools on files it makes and removes; it is built with `DOSUNIT` defined,
+  which turns on test seams such as lib/history.c's failing scan). Interactive DOSBox-X with networking: `python scripts/rundosbox.py`
   (cputype 80186: the Crynwr NE2000 driver garbles frames on an emulated 8086, see boottest.py).
 - Real 8088 check: `python scripts/test8088.py image/tests/devtools.bat` boots a test batch in 86Box (DOSBox-X runs
   as an 80186 and can't catch 186/286 code) and prints the log it leaves in C:\ (`--log`, `--done` marker;

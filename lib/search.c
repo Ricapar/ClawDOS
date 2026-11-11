@@ -46,12 +46,13 @@ static void checkLine(ToolCtx *t, Search *s, const char *path, unsigned len,
     line[len] = 0;
     if (!search_match(line, s->text, s->matchCase))
         return;
-    if (s->shown >= MATCH_MAX || t->truncated) {
+    line[SHOW_COLS] = 0;
+    /* the match line, and the file's name above its first: both or neither */
+    if (s->shown >= MATCH_MAX || !tout_room(t, (*hits ? 0 : strlen(path) + 1) + 7 + strlen(line) + 1)) {
         s->more++;
     } else {
         if (*hits == 0)
             tout_printf(t, "%s\n", path);
-        line[SHOW_COLS] = 0;
         tout_printf(t, "%5u: %s\n", lineno, line);
         s->shown++;
     }
@@ -133,7 +134,7 @@ static int searchSpec(ToolCtx *t, Search *s, const char *spec)
         } while (_dos_findnext(&f) == 0);
     }
     if (!found)
-        tout_printf(t, "(no files match %s)\n", spec);
+        tout_line(t, "(no files match %s)\n", spec);
     return TS_OK;
 }
 
@@ -142,7 +143,7 @@ int tool_search(ToolCtx *t)
     const char *text = targ("text"), *paths = targ("path");
     char spec[FS_PATH_MAX + 1];
     Search s;
-    int status;
+    int status, matchCase;
 
     if (text == NULL || !*text)
         return tool_fail(t, "missing text");
@@ -150,9 +151,11 @@ int tool_search(ToolCtx *t)
         return tool_fail(t, "text must be on one line");
     if (paths == NULL || !*paths)
         return tool_fail(t, "missing path");
+    if (targ_bool(t, "case", &matchCase))
+        return TS_ERROR;
     memset(&s, 0, sizeof(s));
     s.text = text;
-    s.matchCase = targ_num("case", 0) != 0;
+    s.matchCase = matchCase;
 
     while (*paths) {
         unsigned n;
