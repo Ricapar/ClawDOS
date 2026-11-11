@@ -125,6 +125,7 @@ static Chat chat;
 static Cfg *cfg;
 static State state = IDLE;
 static int quitting;
+static const char *quitWhy = "Ctrl-Break";   /* for CLAWDOS.LOG: what ended the session */
 static int exitCode;
 static int queued;                    /* Enter pressed while Claude was busy */
 static int quitAfterReply;            /* -q: leave once the -m message is answered */
@@ -140,7 +141,7 @@ struct Resume {
     int hasTurn;
     ApiFixed fixed;                   /* the conversation's thinking and cache settings */
     int hasFixed;
-    ChatThread thread;                /* the message thread to continue; id "" none */
+    ApiThread thread;                /* the message thread to continue; id "" none */
     unsigned long ticks;              /* TICKS_NOW when CLAWDOS left */
 };
 static Resume resumeState;
@@ -708,11 +709,17 @@ static void handleKey(unsigned key);
 static void modelCommand(const char *arg);
 static void relaunchExit(void);
 
+static void quit(const char *why)
+{
+    quitting = 1;
+    quitWhy = why;
+}
+
 static void finished(void)
 {
     setState(IDLE);
     if (quitAfterReply && !queued)
-        quitting = 1;
+        quit("-q after the reply");
     if (queued) {
         queued = 0;
         submit();
@@ -730,7 +737,7 @@ static void submit(void)
     }
     input[inputLen] = 0;
     if (!stricmp(input, "/quit")) {
-        quitting = 1;
+        quit("/quit");
         return;
     }
     if (histCount == 0 || strcmp(history[0], input)) {
@@ -1063,8 +1070,8 @@ static void handleKey(unsigned key)
 
     if (ch == 0 || ch == 0xE0) {
         switch (scan) {
-        case SCAN_F10:
-        case SCAN_ALTX: quitting = 1; break;
+        case SCAN_F10:  quit("F10"); break;
+        case SCAN_ALTX: quit("Alt-X"); break;
         case SCAN_F1:   showHelp(); break;
         case SCAN_F2:   if (state == IDLE) newChat(); break;
         case SCAN_F4:   memories(); return;
@@ -1209,7 +1216,7 @@ static int writeState(void)
     FILE *f = fopen(RELAUNCH_STATE, "w");
     const Convo *c = chat.state();
     const ApiFixed *fx;
-    const ChatThread *th;
+    const ApiThread *th;
     HistTurn turn;
     unsigned i;
 
@@ -1537,6 +1544,8 @@ int main(int argc, char *argv[])
         Net::service();
     }
 
+    sprintf(note_, "leaving: %s", quitWhy);   /* a session that ends by itself says why */
+    uiLog(note_);
     chat.close();
     Net::stopStack();
     scr_done();

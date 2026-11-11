@@ -258,6 +258,77 @@ int api_body(Sink *s, const ApiReq *r)
     return 0;
 }
 
+/* --- message threads ---------------------------------------------------------- */
+
+unsigned long api_fingerprint(const Provider *p, int noTools)
+{
+    const char *parts[4];
+    unsigned long h = 2166136261UL;       /* FNV-1a */
+    int i;
+
+    parts[0] = p->id;
+    parts[1] = p->betas;
+    parts[2] = p->model;
+    parts[3] = p->effort;
+
+    for (i = 0; i < 4; i++) {
+        const char *c;
+        for (c = parts[i]; ; c++) {
+            h = (h ^ (unsigned char)*c) * 16777619UL;
+            if (!*c)
+                break;
+        }
+    }
+    return h ^ (unsigned long)noTools;
+}
+
+int api_thread_kind(ApiThread *t, const ApiFixed *f, unsigned long fp)
+{
+    if (!f->threads)
+        return API_TH_NONE;
+    if (t->id[0] && t->fp == fp && hist_low() >= t->at && hist_size() > t->at + HIST_SEP_LEN)
+        return API_TH_CONTINUE;
+    t->id[0] = 0;
+    return API_TH_CREATE;
+}
+
+/* An id to send back: letters, digits, _ and -, and not cut short. */
+static int idOk(const char *id)
+{
+    unsigned n = 0;
+    for (; id[n]; n++) {
+        char c = id[n];
+        if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '_' && c != '-')
+            return 0;
+    }
+    return n > 0 && n < sizeof ((ApiThread *)0)->id - 1;
+}
+
+void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, unsigned long fp)
+{
+    t->id[0] = 0;
+    if (sent == API_TH_NONE || !idOk(id) || (strcmp(stopReason, "end_turn") && strcmp(stopReason, "tool_use")))
+        return;
+    strcpy(t->id, id);
+    t->at = hist_size();
+    t->fp = fp;
+    hist_low_reset();
+}
+
+int api_thread_set(ApiThread *t, const ApiThread *from)
+{
+    if (!idOk(from->id) || from->at <= 0 || from->at > hist_size())
+        return -1;
+    *t = *from;
+    hist_low_reset();                     /* hist_open has, too: the file is as the run left it */
+    return 0;
+}
+
+long api_thread_from(const ApiThread *t)
+{
+    return t->at + HIST_SEP_LEN;
+}
+
 /* Whether the comma-separated list holds the value v (blanks around it allowed). */
 static int listHas(const char *list, const char *v)
 {

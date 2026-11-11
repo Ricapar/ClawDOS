@@ -189,7 +189,8 @@ void hist_low_reset(void)
     lowWater = end;
 }
 
-static void cutTo(long pos)
+/* The file is being cut back to pos: remember it for hist_low. */
+static void noteCut(long pos)
 {
     if (pos < lowWater)
         lowWater = pos;
@@ -222,7 +223,7 @@ int hist_write(const char *p, unsigned n)
         return -1;
     if (needSep) {
         needSep = 0;
-        if (put(",\r\n", 3))
+        if (put(HIST_SEP, HIST_SEP_LEN))
             return -1;
     }
     return put(p, n);
@@ -273,7 +274,7 @@ static int truncateTo(long pos)
     end -= pending;
     pending = 0;
     seekNeeded = 1;
-    cutTo(pos);
+    noteCut(pos);
     if (chsize(fd, pos))
         return -1;
     writeFailed = 0;                  /* whatever a failed write left is cut off */
@@ -341,7 +342,7 @@ int hist_reopen_last(unsigned n)
     savedTailLen = n;
     savedTailAt = end - (long)n;
     end -= n;
-    cutTo(end);
+    noteCut(end);
     if (chsize(fd, end))
         return -1;
     boundary = end;

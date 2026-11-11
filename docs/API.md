@@ -157,7 +157,11 @@ as a create with the whole conversation, outside the retry budget.
 conversation instead (no `thread`, no beta). `thread_fingerprint_mismatch`
 means the fixed fields were wrong, a bug, and is replayed the same way. If the
 replay is refused with a thread error too, the turn ends with the message.
-A 404 without a thread code (an unknown model) is an ordinary error. A lost
+A 404 without a thread code (an unknown model) is an ordinary error.
+Threads are a fixed setting, so after `/model` to a provider whose host lacks
+the beta, mid-conversation, the requests still carry `thread` and the
+threads beta (and the other fixed settings): that host's plain 400 ends each
+turn until a new conversation (F2) takes that provider's settings. A lost
 link, a 529 or an overload in the stream during a continue resends the same
 continue (the retry rules below); if the API answers that it was already
 continued or is in flight, that is a thread error and is replayed.
@@ -320,16 +324,18 @@ across the thread. Its own rules, each answered with the API's status and
 known and not expired; continued once (`thread_already_continued`), not while
 another continue of it runs (`thread_continue_in_flight`); the fixed fields and
 the beta set unchanged (`thread_fingerprint_mismatch`); no assistant message the
-thread already has. An error before the model runs, or a dropped link, leaves
+thread already has; `"thread": null` is refused like any bad thread object. An error before the model runs, or a dropped link, leaves
 the response continuable. Refusals a correct client never meets are also
-`VALIDATION:` lines: a continue of a refusal or a `max_tokens` reply, a response
+`VALIDATION:` lines: a continue of a refusal or a `max_tokens` reply or one never stored (its reply
+did not reach `message_stop`), a response
 continued twice (other than a resend after a dropped link), a fixed field
 changed, a thread sent again after `thread_unsupported_request`. After a refusal
 a client does meet, the next request must replay the whole conversation, and the
 log says `thread replay after <code>: PASS` or `FAIL`. Scenarios: `!threadlost`
 (the mock forgets the thread after a call; `!threadlost run` with a
 `full_memory` run), `!threaddrop` (the link drops in the continue's reply;
-`burn` makes the dropped continue use its response up), `!threadfail` (the
+`burn` makes the dropped continue use its response up), `!threadretry` (the
+continue meets a 529 once; `overload`, `404`, `400` instead), `!threadfail` (the
 continue and its replay are refused), `!nothreads` (`thread_unsupported_request`
 from the second request on), and the tool tour's `tool tour threads: PASS` (each
 request after the first continued, each under 8 KB, except a create for a

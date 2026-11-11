@@ -32,9 +32,12 @@ README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDO
   that text; a task that adds a request field adds its rule to tunnel/mockapi.py. The Makefile's `boottests` target lists the offline ones: `tools.bat --mock --expect "tool tour: PASS"` runs
   every DOS tool (and `progress note:` lines show the mock's progress notes reached the screen; `tool tour threads: PASS`
   that every request after the first continued a message thread, each small); `notes.bat` a progress note's blank
-  lines trimmed and its break joined (`progress note: Two lines`); `threads.bat --timeout 240` a thread lost, a
+  lines trimmed and its break joined (`progress note: Two lines`), and a tool header after reply text starting in
+  column 0 (`!headercol` peeks CGA memory: `tool header column: 0 (PASS)`); `threads.bat --timeout 300` a thread lost, a
   continue whose link drops (resent; with `burn` refused, then replayed), `thread_unsupported_request`, a refused
-  replay ending the turn, and a relaunch that finds its thread gone (`thread replay after CODE: PASS` lines);
+  replay ending the turn, a 529 or an overload answering a continue (the same continue again), a plain 404 or 400
+  (the turn ends), and a relaunch that finds its thread gone (`thread replay after CODE: PASS` lines, and each run's
+  `exit code`);
   `fixed.bat` a conversation keeping its thinking and cache settings across a relaunch whose run changed CLAWDOS.CFG
   (`thinking none, cache 1h` for the next one); `drop.bat` a lost link (`connection #2`); `memory.bat` memory tools never asking; `clock.bat` (in
   `boottests-online`) NETUP's NTP clock from a 1980 boot (`System time set`; needs the internet); `retry.bat` a 529

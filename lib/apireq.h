@@ -65,6 +65,8 @@ int  api_prefix(Sink *s, const ApiPrefix *x);
    be read (or no memory to read them), -2 the file could not be written. */
 long api_prefix_file(const char *path, const ApiPrefix *x);
 
+enum { API_TH_NONE, API_TH_CREATE, API_TH_CONTINUE };
+
 typedef struct ApiReq {
     const Provider *p;
     const ApiFixed *fixed;       /* the conversation's thinking and cache settings */
@@ -76,7 +78,33 @@ typedef struct ApiReq {
     long histFrom;               /* _CONTINUE: where the messages since that response start in the history */
 } ApiReq;
 
-enum { API_TH_NONE, API_TH_CREATE, API_TH_CONTINUE };
+/* A message thread the next request may continue (docs/API.md, "Threads"):
+   the response it continues from, where that response ended in the history
+   file, and api_fingerprint() of the request that got it. */
+typedef struct ApiThread {
+    char id[48];                 /* "" none: the next request creates one */
+    long at;                     /* hist_size() once the response was written */
+    unsigned long fp;
+} ApiThread;
+
+/* The fields a thread holds fixed that can still change within a
+   conversation (ApiFixed holds the others): the provider and its betas line,
+   the model (/model), the effort (F5) and tool_choice (noTools, the round
+   cap), hashed. A collision only costs a refused continue, which replays. */
+unsigned long api_fingerprint(const Provider *p, int noTools);
+/* What the next request is: API_TH_NONE with threads off; API_TH_CONTINUE
+   when t holds a thread made with the same fingerprint, nothing at or before
+   its offset has been cut from the history since (hist_low) and something
+   follows it; else API_TH_CREATE, and t is forgotten. */
+int  api_thread_kind(ApiThread *t, const ApiFixed *f, unsigned long fp);
+/* After a reply is in the history: keep it as the thread to continue only if
+   the request was in a thread (sent != API_TH_NONE), the id is one to send
+   back and it stopped at end_turn or tool_use (the API stores no refusal, no
+   reply cut by max_tokens); otherwise t is forgotten. */
+void api_thread_keep(ApiThread *t, int sent, const char *id, const char *stopReason, unsigned long fp);
+/* t read back after a relaunch: 0 and kept if it fits the reopened history. */
+int  api_thread_set(ApiThread *t, const ApiThread *from);
+long api_thread_from(const ApiThread *t);    /* where a continue's messages start in the history */
 
 /* The body's length: what api_body will write, from the sizes alone. */
 unsigned long api_length(const ApiReq *r);

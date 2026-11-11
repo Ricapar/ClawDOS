@@ -22,6 +22,9 @@
 extern "C" {
 #endif
 
+#define HIST_SEP     ",\r\n"            /* between two messages */
+#define HIST_SEP_LEN 3
+
 /* Open (create or append). An existing file is scanned so a dangling separator
    or a half-written message after the last complete one is truncated away.
    0 ok, -1 error (the file is left as it was if it could not be scanned). */

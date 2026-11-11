@@ -57,12 +57,19 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "progress note: Tour step 1 of" \
 	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/notes.bat --mock --expect "progress note: Two lines" --expect "stop=end_turn" \
-	    --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/threads.bat --mock --timeout 240 --expect "thread replay after thread_not_found: PASS" \
+	    --expect "tool header column: 0 (PASS)" --expect "headercol exit code 0" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/threads.bat --mock --timeout 300 --expect "thread replay after thread_not_found: PASS" \
 	    --expect "thread resend: PASS" --expect "thread replay after thread_already_continued: PASS" \
 	    --expect "thread replay after thread_unsupported_request: PASS" --expect "thread unsupported: PASS" \
 	    --expect "Thread not found (simulated by !threadfail)" --expect "threadlost run: the result came by thread create" \
-	    --reject ": FAIL" --reject "VALIDATION:"
+	    --expect "threadretry 529: the result came again by thread continue" \
+	    --expect "threadretry overload: the result came again by thread continue" \
+	    --expect "API error 404: Not found (simulated, on a continue)" \
+	    --expect "API error 400: Bad request (simulated, on a continue)" \
+	    --expect "threadlost exit code 0" --expect "threaddrop exit code 0" --expect "threaddrop burn exit code 0" \
+	    --expect "nothreads exit code 0" --expect "threadfail exit code 1" --expect "threadretry 529 exit code 0" \
+	    --expect "threadretry overload exit code 0" --expect "threadretry 404 exit code 1" \
+	    --expect "threadretry 400 exit code 1" --expect "threadlost run exit code 0" --reject ": FAIL" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
 	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:"

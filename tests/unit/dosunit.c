@@ -330,9 +330,11 @@ static void testConsole(void)
     con_write("a\tb");
     CHECK_STR("console: a tab is drawn as spaces", gridRow(0), "  a    b");
 
-    /* ui_tool_header after reply text: the blank line is made after the margin
-       goes to 0, so the header row starts at column 0; made before it, the
-       row starts at the reply's margin */
+    /* The console calls ui_tool_header makes after reply text, in its order
+       and the old one (this does not run ui_tool_header itself; notes.bat's
+       !headercol checks the real header on screen): the blank line made after
+       the margin goes to 0 starts the header row at column 0; made before it,
+       the row starts at the reply's margin */
     con_init();
     con_write("reply");
     con_margins(0, SCR_COLS - 1);
@@ -988,6 +990,139 @@ static void testApiThreads(void)
     free(p);
 }
 
+/* A history message for the decision tests. */
+static void histMsg(const char *json)
+{
+    hist_puts(json);
+    hist_message_done();
+}
+
+#define U1 "{\"role\":\"user\",\"content\":\"a\"}"
+#define A1 "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}"
+
+/* The continue-or-create decision (api_thread_kind, api_thread_keep), turn by
+   turn as chat.cpp drives it: a reply kept, then what the next request is. */
+static void testThreadDecision(void)
+{
+    static char body[200];
+    Provider *p = (Provider *)malloc(sizeof(Provider));
+    ApiFixed fx;
+    ApiThread t, back, kept;
+    Sink buf;
+    unsigned long fp;
+
+    memset(p, 0, sizeof *p);
+    strcpy(p->id, "anthropic"); strcpy(p->model, "m"); strcpy(p->effort, "low");
+    p->threads = 1;
+    api_fixed_from(&fx, p);
+    fp = api_fingerprint(p, 0);
+    t.id[0] = 0;
+    remove("C:\\HISTTEST.JSN");
+    hist_open("C:\\HISTTEST.JSN");
+
+    histMsg(U1);
+    CHECK("decide: the first request creates", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", fp);
+    CHECK("decide: end_turn kept", !strcmp(t.id, "msg_1") && t.at == hist_size());
+    CHECK("decide: nothing new yet: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE && !t.id[0]);
+    api_thread_keep(&t, API_TH_CREATE, "msg_1", "end_turn", fp);
+    hist_turn_begin();
+    histMsg(U1);
+    CHECK("decide: end_turn, then the next user message: continue", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
+    sink_buffer(&buf, body, sizeof body);
+    hist_copy_from(&buf, api_thread_from(&t));
+    CHECK_STR("decide: a continue starts at the new message", body, U1);
+    kept = t;
+
+    /* the fixed fields: provider, model, effort, tool_choice */
+    strcpy(p->model, "other");
+    CHECK("decide: /model to another model: create", api_thread_kind(&t, &fx, api_fingerprint(p, 0)) == API_TH_CREATE);
+    strcpy(p->model, "m");
+    t = kept;
+    strcpy(p->effort, "high");
+    CHECK("decide: F5: create", api_thread_kind(&t, &fx, api_fingerprint(p, 0)) == API_TH_CREATE);
+    strcpy(p->effort, "low");
+    t = kept;
+    CHECK("decide: the round cap's tool_choice none: create",
+          api_thread_kind(&t, &fx, api_fingerprint(p, 1)) == API_TH_CREATE);
+    strcpy(p->id, "openrouter");
+    CHECK("decide: another provider hashes differently", api_fingerprint(p, 0) != fp);
+    strcpy(p->id, "anthropic");
+    t = kept;
+    CHECK("decide: the same fields still continue", api_thread_kind(&t, &fx, api_fingerprint(p, 0)) == API_TH_CONTINUE);
+    fx.threads = 0;
+    CHECK("decide: threads off: none", api_thread_kind(&t, &fx, fp) == API_TH_NONE);
+    fx.threads = 1;
+
+    /* replies the API does not store, or that were not in a thread */
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_2", "refusal", fp);
+    histMsg(U1);
+    CHECK("decide: after a refusal: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_3", "max_tokens", fp);
+    histMsg(U1);
+    CHECK("decide: after a max_tokens cut: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_NONE, "msg_4", "end_turn", fp);
+    histMsg(U1);
+    CHECK("decide: a reply sent without a thread: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CREATE, "msg\"5", "tool_use", fp);
+    CHECK("decide: an id not to send back is not kept", !t.id[0]);
+
+    /* a turn rolled back past the reply (a refusal on a later round) */
+    hist_turn_begin();
+    histMsg(U1);
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CREATE, "msg_6", "tool_use", fp);
+    histMsg(U1);
+    CHECK("decide: tool round: continue", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
+    hist_rollback_turn();
+    histMsg(U1);
+    CHECK("decide: after the turn's rollback: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+
+    /* a message rolled back that lies after the offset keeps the thread */
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CREATE, "msg_7", "tool_use", fp);
+    hist_puts("{\"role\":\"user\",\"con");
+    hist_rollback_message();
+    histMsg(U1);
+    CHECK("decide: a half message dropped after the offset: continue", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
+
+    /* a failed history write that took the turn back */
+    hist_turn_begin();
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CONTINUE, "msg_8", "tool_use", fp);
+    hist_test_write_ok = 0; hist_test_write_bad = 0;     /* every write fails: a full disk */
+    hist_puts(U1);
+    CHECK("decide: the write fails", hist_message_done() == -1);
+    hist_test_write_ok = -1;
+    hist_rollback_turn();
+    histMsg(U1);
+    CHECK("decide: after a failed write took the turn back: create", api_thread_kind(&t, &fx, fp) == API_TH_CREATE);
+
+    /* carried across a relaunch */
+    histMsg(A1);
+    api_thread_keep(&t, API_TH_CREATE, "msg_9", "end_turn", fp);
+    back = t;
+    t.id[0] = 0;
+    hist_close();
+    hist_open("C:\\HISTTEST.JSN");
+    CHECK("decide: a thread read back after a relaunch", api_thread_set(&t, &back) == 0 && !strcmp(t.id, "msg_9"));
+    histMsg(U1);
+    CHECK("decide: ...continues", api_thread_kind(&t, &fx, fp) == API_TH_CONTINUE);
+    back.at = hist_size() + 1;
+    CHECK("decide: one past the end of the history is refused", api_thread_set(&t, &back) == -1);
+    strcpy(back.id, "msg 9"); back.at = 1;
+    CHECK("decide: a bad id is refused", api_thread_set(&t, &back) == -1);
+
+    hist_close();
+    remove("C:\\HISTTEST.JSN");
+    free(p);
+}
+
 /* The thinking object, the cache markers and the beta header for each of the
    fixed settings, with their lengths counted right. */
 static void testApiFixed(void)
@@ -1034,7 +1169,7 @@ static void testApiFixed(void)
         x.cache = fx.cache; x.ttl1h = fx.ttl1h;
         len = api_prefix_file("C:\\PTEST.PRE", &x);
         r.p = p; r.fixed = &fx; r.prefixPath = "C:\\PTEST.PRE"; r.prefixLen = len; r.noTools = 0;
-    r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
+        r.thread = API_TH_NONE; r.prevId = ""; r.histFrom = 0;
         sink_buffer(&buf, body, sizeof body);
         api_body(&buf, &r);
         sprintf(name, "fixed %d: body", i);
@@ -2009,6 +2144,7 @@ int main(void)
     testApiReq();
     testApiFixed();
     testApiThreads();
+    testThreadDecision();
     testPromptAcrossReads();
     testApiStream();
     testLongEvents();

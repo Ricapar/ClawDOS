@@ -65,6 +65,22 @@ class Ping:
     """Yielded by a scenario: send a `ping` event here."""
 
 
+class Fail:
+    """Yielded by a scenario as the first thing of the reply to a tool result: answer that request with HTTP
+    `status` (error type `kind`), or with status None an `error` event of type `kind` before any text. The
+    resend of the request goes on from after this point."""
+
+    def __init__(self, status, kind, message):
+        self.status, self.kind, self.message = status, kind, message
+
+
+# !threadretry: what the continue after its call meets once.
+RETRY_FAILS = {'529': (529, 'overloaded_error', 'Overloaded (simulated, on a continue)'),
+               'overload': (None, 'overloaded_error', 'Overloaded (simulated, before any text of a continue)'),
+               '404': (404, 'not_found_error', 'Not found (simulated, on a continue)'),
+               '400': (400, 'invalid_request_error', 'Bad request (simulated, on a continue)')}
+
+
 class Drop:
     """Yielded by a scenario after a tool call: drop the link here. The resend of the request that brought
     the result goes on from after this point. With `burn` the mock counts the dropped continue as having
@@ -121,6 +137,9 @@ SCENARIOS = {
     '!threaddrop': 'a sysinfo call, then the link drops in the continue\'s reply (!threaddrop burn: and a resend '
                    'meets thread_already_continued)',
     '!threadfail': 'a sysinfo call, then thread_not_found for the continue and for its replay (the turn ends)',
+    '!threadretry': 'a sysinfo call, then the continue meets 529 once (!threadretry overload, 404 or 400 instead)',
+    '!headercol': 'text, a sysinfo call, then peeks of CGA memory until the tool header\'s row is found: '
+                   'logs the column its bullet starts in (0 is right)',
     '!nothreads': 'two sysinfo calls; from the second request on, thread_unsupported_request for any thread',
 }
 
@@ -296,6 +315,17 @@ SMALL_TALK = [
     (r'\b(bye|goodbye|see you)\b',
      "Goodbye! Press F10 to leave HARNESS.EXE."),
 ]
+
+
+def header_column(vram):
+    """The column of the bullet on the first screen row (160 bytes: character, attribute) whose text holds
+    "SysInfo", the tool header; None until such a row is complete."""
+    for row in range(len(vram) // 160):
+        text = bytes(vram[row * 160:(row + 1) * 160:2]).decode('cp437')
+        at = text.find('SysInfo')
+        if at >= 0:
+            return text.find('\x07') if '\x07' in text[:at] else -1
+    return None
 
 
 class MockChat:
@@ -564,6 +594,33 @@ class MockChat:
         yield Drop(burn)
         print(f'threaddrop{" burn" if burn else ""}: the result came again by {self.thread_kind}', flush=True)
         yield f'The reply after the dropped continue: sysinfo -> {call.result.status}.'
+
+    def _cmd_threadretry(self, text):
+        kind = (text.split()[1:] or ['529'])[0]
+        status, error, message = RETRY_FAILS.get(kind, RETRY_FAILS['529'])
+        yield f'Calling sysinfo; the continue after it meets {kind} once.'
+        call = ToolCall('sysinfo', {})
+        yield call
+        yield Fail(status, error, message)
+        print(f'threadretry {kind}: the result came again by {self.thread_kind}', flush=True)
+        yield f'The reply after the {kind}: sysinfo -> {call.result.status}.'
+
+    def _cmd_headercol(self, _text):
+        yield 'Reply text, then a tool header straight after it.'
+        call = ToolCall('sysinfo', {})
+        yield call
+        vram, column = bytearray(), None
+        for off in range(0, 0x4000, 256):         # the screen's ring of rows, 160 bytes each from offset 0
+            call = ToolCall('peek', {'addr': f'B800:{off:04X}', 'len': 256})
+            yield call
+            # each line: "B800:0000 " then " XX" sixteen times, then the characters
+            vram += bytes(int(h, 16) for line in call.result.text.splitlines()
+                          if re.match(r'[0-9A-F]{4}:[0-9A-F]{4} ', line) for h in line[10:58].split())
+            column = header_column(vram)
+            if column is not None:
+                break
+        print(f'tool header column: {column} ({"PASS" if column == 0 else "FAIL"})', flush=True)
+        yield f'The tool header starts in column {column}.'
 
     def _cmd_threadfail(self, _text):
         if self.threads:

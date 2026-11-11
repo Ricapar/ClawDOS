@@ -39,8 +39,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mockchat import (CHUNKS_TEXT, DEFAULT_TOOLS, Disconnect, Drop, HttpError, MockAPIError, MockChat,  # noqa: E402
-                      Ping, Refused, ToolCall, ToolResult)
+from mockchat import (CHUNKS_TEXT, DEFAULT_TOOLS, Disconnect, Drop, Fail, HttpError, MockAPIError,  # noqa: E402
+                      MockChat, Ping, Refused, ToolCall, ToolResult)
 
 __all__ = ['CHUNKS_TEXT', 'make_server', 'main']
 
@@ -362,6 +362,7 @@ class Validator:
             conv = self.conversation(req['messages'])
             self.check_thinking(conv, req['messages'])
             self.check_stable(conv, req)
+        self.threads.begin(use)
         return req, conv, use
 
     def check_fields(self, req):
@@ -498,6 +499,8 @@ class Threads:
         self.ttl = ttl
         self.stored = {}            # response id -> StoredThread
         self.unstored = {}          # response id -> why the API would not store it (refusal, max_tokens)
+        self.issued = set()         # every response id message_start gave out
+        self.gone = set()           # stored ones dropped since: expired or forgotten on demand
         self.lock = threading.Lock()
         self.lose_next = False
         self.fail_next = 0
@@ -517,7 +520,7 @@ class Threads:
         with self.lock:
             replay, self.replay = self.replay, None
             thread = req.get('thread')
-            if thread is None:
+            if 'thread' not in req:     # "thread": null is a thread object, and a bad one
                 if self.unsupported == 'asked':
                     self.unsupported = 'replayed'
                 if replay:
@@ -535,7 +538,6 @@ class Threads:
                     raise BadRequest(f'{field}: must be absent on a continue request (the thread has it)')
             rec = self.previous(thread['previous_message_id'], req['messages'])
             self.check_continue(rec, fixed, req['messages'])
-            rec.state = 'inflight'
             whole = {k: v for k, v in req.items() if k != 'thread'}
             whole['messages'] = rec.messages + req['messages']
             for field, value in (('system', rec.system), ('tools', rec.tools)):
@@ -575,20 +577,25 @@ class Threads:
         if self.lose_next:
             self.lose_next = False
             rec = self.stored.get(prev_id)
+            self.gone.update(self.stored)
             self.stored.clear()
             self.replay = ('thread_not_found', rec.messages + messages if rec else None)
             raise ThreadError('thread_not_found', 'Thread not found (simulated: the mock forgot it)')
         rec = self.stored.get(prev_id)
         if rec is not None and time.time() - rec.when > self.ttl:
             del self.stored[prev_id]
+            self.gone.add(prev_id)
             rec = None
         if rec is None:
             why = self.unstored.get(prev_id)
+            if why is None and prev_id in self.issued and prev_id not in self.gone:
+                why = 'never stored (its reply did not reach message_stop, or came without a thread)'
+            elif why is not None:
+                why = f'a {why} reply (the API does not store those)'
             if why is None:
                 self.replay = ('thread_not_found', None)
             raise ThreadError('thread_not_found', f'Thread {prev_id} not found (expired or never stored)',
-                              bug=f'a continue of {prev_id}, a {why} reply (the API does not store those)'
-                              if why else None)
+                              bug=f'a continue of {prev_id}, {why}' if why else None)
         return rec
 
     def check_continue(self, rec, fixed, messages):
@@ -619,6 +626,12 @@ class Threads:
         ok = kind == want and len(messages) > 1 and (expected is None or same_json(messages, expected))
         got = f'{kind or "no thread"} of {len(messages)} messages'
         print(f'thread replay after {code}: {"PASS" if ok else "FAIL"} ({got})', flush=True)
+
+    def begin(self, use):
+        """A continue passed every check: its response is in flight until the reply ends."""
+        with self.lock:
+            if use.prev is not None:
+                use.prev.state = 'inflight'
 
     def done(self, use, msg_id, stop, messages):
         """A reply was sent to its end (message_stop): the response continued is used up, and this one is
@@ -870,6 +883,9 @@ class Handler(BaseHTTPRequestHandler):
         burn = False
         try:
             first = next(gen)
+            if isinstance(first, Fail):
+                self.fail(chat, gen, first)
+                return
         except StopIteration:
             first = ''
         except HttpError as e:
@@ -963,9 +979,24 @@ class Handler(BaseHTTPRequestHandler):
         self.event('message_stop', {})
         self.end_stream()
 
+    def fail(self, chat, gen, item):
+        """A Fail a scenario yielded: this request gets an HTTP error, or an overloaded_error event before any
+        text, and its resend (the same tool result again) goes on from after the Fail."""
+        if self.resumed is not None:
+            self.server.pending = Pending(chat, gen, self.resumed)
+        if item.status:
+            self.send_error_json(item.status, item.kind, item.message, [('retry-after', '1')])
+            return
+        self.start_stream()
+        self.message_start()
+        self.event('error', {'error': {'type': item.kind, 'message': item.message}})
+        self.end_stream()
+
     def message_start(self):
         """Send message_start; returns the message's id."""
         msg_id = f'msg_mock_{self.server.next_id()}'
+        with self.server.validator.threads.lock:
+            self.server.validator.threads.issued.add(msg_id)
         message = {'id': msg_id, 'type': 'message', 'role': 'assistant', 'model': MODEL,
                    'content': [], 'stop_reason': None, 'stop_sequence': None,
                    'usage': {'input_tokens': 1200, 'cache_creation_input_tokens': 0,

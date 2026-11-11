@@ -134,8 +134,11 @@ def exclusive(who):
     with open(LOCK, 'a+', encoding='utf-8') as f:
         if not _lock(f, block=False):
             f.seek(0)
-            print(f'{who}: waiting for the boot test already running ({f.read().strip() or "pid unknown"})',
-                  flush=True)
+            try:
+                holder = f.read().strip()
+            except OSError:     # Windows: the holder's lock covers the byte
+                holder = ''
+            print(f'{who}: waiting for the boot test already running ({holder or "pid unknown"})', flush=True)
             _lock(f, block=True)
         f.seek(0)
         f.truncate()

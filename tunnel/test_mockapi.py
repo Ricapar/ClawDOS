@@ -740,7 +740,6 @@ class ValidatorTest(unittest.TestCase):
             mockapi.Validator('/nonesuch/TOOLS.JSN')
 
 
-
 THREADS = {'anthropic-beta': mockapi.BETA_THREADS}
 CREATE = {'type': 'create'}
 
@@ -966,6 +965,49 @@ class ThreadTest(unittest.TestCase):
         self.assertIn('thread unsupported: PASS', self.log.getvalue())
         self.assertEqual(self.post([{'role': 'user', 'content': 'hi'}], CREATE)[0], 200)   # switched back on
 
+    def test_a_null_thread_is_refused(self):
+        status, body = self.post([{'role': 'user', 'content': 'hi'}], None, {'thread': None})
+        self.assertEqual(status, 400)
+        self.assertIn('thread', body['error']['message'])
+
+    def test_a_continue_of_a_reply_that_never_ended_is_a_client_bug(self):
+        status, events = self.post([{'role': 'user', 'content': '!error'}], CREATE)
+        self.assertEqual(status, 200)
+        self.assertEqual(events[-1][0], 'error')
+        self.refused(self.cont(message_id(events), [{'role': 'user', 'content': 'go on'}]), 404, 'thread_not_found')
+        self.assertIn('never stored (its reply did not reach message_stop', self.log.getvalue())
+        self.assertIn('VALIDATION:', self.log.getvalue())
+
+    def test_a_continue_refused_by_a_later_check_stays_continuable(self):
+        prev, conv, _ = self.create('!tool sysinfo')
+        empty = {'type': 'text', 'text': ''}
+        bad = [{'role': 'user', 'content': [tool_result(tool_block(conv[-1]['content'])), empty]}]
+        self.assertEqual(self.cont(prev, bad)[0], 400)
+        self.assertEqual(self.threads.stored[prev].state, 'ready')
+        self.assertEqual(self.cont(prev, self.answer(conv))[0], 200)
+
+    def test_a_continue_retried_after_a_529_or_an_overload_continues(self):
+        for kind in ('529', 'overload'):
+            self.log = io.StringIO()
+            prev, conv, _ = self.create(f'!threadretry {kind}')
+            status, events = self.cont(prev, self.answer(conv))
+            if kind == '529':
+                self.assertEqual(status, 529)
+            else:
+                self.assertEqual((status, events[-1][0]), (200, 'error'))
+            status, events = self.cont(prev, self.answer(conv))
+            self.assertEqual(status, 200)
+            self.assertIn(f'The reply after the {kind}: sysinfo -> ok', reply(events)[0])
+            self.assertIn(f'threadretry {kind}: the result came again by thread continue', self.log.getvalue())
+            self.assertNotIn('VALIDATION', self.log.getvalue())
+
+    def test_a_plain_404_or_400_to_a_continue_has_no_thread_code(self):
+        for kind in ('404', '400'):
+            prev, conv, _ = self.create(f'!threadretry {kind}')
+            status, body = self.cont(prev, self.answer(conv))
+            self.assertEqual(status, int(kind))
+            self.assertNotIn('details', body['error'])
+
     def test_the_tool_tour_continues_with_small_requests(self):
         messages = [{'role': 'user', 'content': '!tooltour'}]
         status, events = self.post(messages, CREATE)
@@ -976,7 +1018,8 @@ class ThreadTest(unittest.TestCase):
                 break
             new = [{'role': 'user', 'content': [tool_result(tool_block(blocks), 'ok')]}]
             status, events = self.cont(message_id(events), new)
-        self.assertRegex(self.log.getvalue(), r'tool tour threads: PASS \(a create of \d+ bytes, 25 continues, the largest \d+ bytes, 0 new')
+        self.assertRegex(self.log.getvalue(),
+                         r'tool tour threads: PASS \(a create of \d+ bytes, 25 continues, the largest \d+ bytes, 0 new')
         self.assertNotIn('VALIDATION', self.log.getvalue())
 
     def test_note_opens_the_reply_after_its_call_with_the_note(self):

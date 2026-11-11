@@ -11,7 +11,9 @@ REM thread_unsupported_request, and the rest of the conversation goes without a
 REM thread. !threadfail: the continue and its replay are both refused, which ends
 REM the turn with the message. !threadlost run: a full_memory run through
 REM CLAWDOS.EXE comes back to a thread that has gone (as one past its five
-REM minutes would), and the resumed harness replays.
+REM minutes would), and the resumed harness replays. !threadretry: the continue
+REM meets a 529, or an overloaded_error event, once and is sent again as the
+REM same continue; a plain 404 or 400 (no thread code) ends the turn.
 ECHO CLAWDOS-THREADS-TEST > COM1
 CALL C:\NET\NETUP.BAT
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadlost"
@@ -24,6 +26,14 @@ C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!nothreads"
 ECHO HARNESS.EXE nothreads exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadfail"
 ECHO HARNESS.EXE threadfail exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadretry 529"
+ECHO HARNESS.EXE threadretry 529 exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadretry overload"
+ECHO HARNESS.EXE threadretry overload exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadretry 404"
+ECHO HARNESS.EXE threadretry 404 exit code %ERRORLEVEL% > COM1
+C:\CLAWDOS\HARNESS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadretry 400"
+ECHO HARNESS.EXE threadretry 400 exit code %ERRORLEVEL% > COM1
 C:\CLAWDOS\CLAWDOS.EXE 10.0.2.2:18023 -unsafe -q -m "!threadlost run"
 ECHO CLAWDOS.EXE threadlost run exit code %ERRORLEVEL% > COM1
 TYPE C:\CLAWDOS\CLAWDOS.LOG > COM1
