@@ -63,6 +63,10 @@ BETA_BINDING = 'thinking-binding-controls-2026-08-01'
 CACHE_TTLS = ('5m', '1h')
 BETA_THREADS = 'message-threads-2026-08-12'
 THREAD_TTL = 300.0      # seconds a stored response stays continuable after its request
+# Every anthropic-beta value the API knows, as far as ClawDOS goes: another (a mistyped betas line in
+# CLAWDOS.CFG) is a 400, as on the real API.
+KNOWN_BETAS = (BETA_PROGRESS, BETA_BINDING, BETA_THREADS)
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')     # output_config.effort (F5 cycles through them)
 # What a thread holds fixed (docs/API.md, "Threads"); the set of anthropic-beta values is the sixth.
 THREAD_FIXED = ('model', 'tool_choice', 'thinking', 'output_config', 'cache_control')
 # The thread errors: error_code -> (HTTP status, error.type).
@@ -339,6 +343,17 @@ def betas_of(headers):
     return {v.strip() for v in headers.get('anthropic-beta', '').split(',') if v.strip()}
 
 
+def check_output_config(config):
+    """Raise BadRequest unless output_config is {"effort": one of EFFORTS}."""
+    if not isinstance(config, dict):
+        raise BadRequest('output_config: must be an object')
+    extra = sorted(set(config) - {'effort'})
+    if extra:
+        raise BadRequest(f'output_config.{extra[0]}: Extra inputs are not permitted')
+    if 'effort' in config and config['effort'] not in EFFORTS:
+        raise BadRequest(f'output_config.effort: must be one of {", ".join(EFFORTS)}')
+
+
 def check_thinking_config(thinking, betas):
     """Raise BadRequest unless the thinking object has a shape the API accepts with these beta values:
     display "updates" and block_binding each need their beta header, as on the real API."""
@@ -472,6 +487,9 @@ class Validator:
         if headers.get('content-length') != str(len(body)):
             raise BadRequest(f'Content-Length {headers.get("content-length")!r} does not match '
                              f'the {len(body)} body bytes')
+        unknown = sorted(betas_of(headers) - set(KNOWN_BETAS))
+        if unknown:
+            raise BadRequest(f'anthropic-beta: unknown value {unknown[0]!r}')
         try:
             req = json.loads(body.decode('utf-8'))
         except (ValueError, UnicodeDecodeError) as e:
@@ -507,6 +525,8 @@ class Validator:
             raise BadRequest(f'tools: differ from {os.path.basename(self.tools_path)}')
         if 'tool_choice' in req:
             check_tool_choice(req['tool_choice'], req.get('tools'))
+        if 'output_config' in req:
+            check_output_config(req['output_config'])
         if 'system' in req:
             check_system(req['system'])
         check_messages(req['messages'])

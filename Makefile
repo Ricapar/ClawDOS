@@ -61,7 +61,7 @@ boot: build ## one boot test in DOSBox-X (TEST=image/tests/x.bat, default units)
 boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/units.bat --expect UNITS-OK
 	$(BOOTTEST) image/tests/net.bat --expect "received from 10.0.2.2"
-	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/chat.bat --mock --expect "stop=end_turn" --reject "trying again" --reject "link lost" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/tools.bat --mock --expect "tool tour: PASS" --expect "STDINEOF under COMMAND.COM: ok" --expect "progress note: Tour step 1 of" \
 	    --expect "progress note: Tour done" --expect "tool tour threads: PASS" \
 	    --expect "tool tour MEM through COMMAND.COM: largest program" --reject "largest program None" --reject "VALIDATION:"
@@ -70,7 +70,7 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	$(BOOTTEST) image/tests/threads.bat --mock --timeout 300 --expect "thread replay after thread_not_found: PASS" \
 	    --expect "thread resend: PASS" --expect "thread replay after thread_already_continued: PASS" \
 	    --expect "thread replay after thread_unsupported_request: PASS" --expect "thread unsupported: PASS" \
-	    --expect "Thread not found (simulated by !threadfail)" --expect "threadlost run: the result came by thread create" \
+	    --expect "API error 404: Thread not found (simulated by !threadfail)" --expect "threadlost run: the result came by thread create" \
 	    --expect "threadretry 529: the result came again by thread continue" \
 	    --expect "threadretry overload: the result came again by thread continue" \
 	    --expect "API error 404: Not found (simulated, on a continue)" \
@@ -110,31 +110,31 @@ boottests: build ## the DOSBox-X boot tests that need no internet
 	    --expect "launcher timed exit code 0" --expect "SHOT.RAW consumed" --expect "SHOT.PNG consumed" \
 	    --expect "shotmem: largest program" --reject "shotmem: largest program None" --reject "after: FAIL" \
 	    --reject "replay after thread_not_found: FAIL" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/skills.bat --mock --expect "skills: PASS" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:"
+	$(BOOTTEST) image/tests/drop.bat --mock --expect "connection #2" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
+	$(BOOTTEST) image/tests/memory.bat --mock --expect "memory_write -> ok" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
+	$(BOOTTEST) image/tests/skills.bat --mock --expect "skills: PASS" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
+	$(BOOTTEST) image/tests/retry.bat --mock --expect "trying again" --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/overload.bat --mock --expect "before any text); trying again" --expect "stop=end_turn" \
-	    --reject "link lost" --reject "VALIDATION:"
+	    --reject "link lost" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/streamerr.bat --mock --expect "API error 529: Overloaded (simulated)" \
-	    --expect "Bad request (simulated, before any text)" --reject "trying again" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn" --reject "VALIDATION:"
-	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn" --reject "VALIDATION:"
+	    --expect "Bad request (simulated, before any text)" --reject "trying again" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 1" --reject "HARNESS.EXE exit code 0"
+	$(BOOTTEST) image/tests/chunks.bat --mock --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
+	$(BOOTTEST) image/tests/bigevent.bat --mock --expect "event too long" --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 1" --expect "HARNESS.EXE exit code 0"
+	$(BOOTTEST) image/tests/bigsig.bat --mock --expect "big signature round trip: PASS" --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/loop.bat --mock --timeout 240 --expect "loop: 25 tool calls, then tool_choice none" \
-	    --expect "stop=end_turn" --reject "VALIDATION:"
+	    --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/think.bat --mock --expect "I should answer with a thinking block" \
 	    --expect "sends it back unchanged on the next request" --expect "Ping events between the text deltas." \
-	    --expect "stop=end_turn" --reject "VALIDATION:"
+	    --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/thinktool.bat --mock --expect "thinking round trip: PASS" --expect "stop=end_turn" \
-	    --reject "VALIDATION:"
+	    --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/redacted.bat --mock --expect "redacted thinking round trip: PASS" \
-	    --expect "stop=end_turn" --reject "VALIDATION:"
+	    --expect "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 0" --reject "HARNESS.EXE exit code 1"
 	$(BOOTTEST) image/tests/busy.bat --mock --expect "attempt 2 of 3); trying again" --expect "attempt 3 of 3)" \
-	    --reject "attempt 3 of 3); trying again" --reject "stop=end_turn" --reject "VALIDATION:"
+	    --reject "attempt 3 of 3); trying again" --reject "stop=end_turn" --reject "VALIDATION:" --expect "HARNESS.EXE exit code 1" --reject "HARNESS.EXE exit code 0"
 	$(BOOTTEST) image/tests/ends.bat --mock --expect "stop=refusal" --expect "The model declined" \
 	    --expect "stop=max_tokens" --expect "reply cut off" --expect '"content":"!cutoff"' \
-	    --reject '"content":"!refuse"' --reject "VALIDATION:"
+	    --reject '"content":"!refuse"' --reject "VALIDATION:" --expect "HARNESS.EXE exit code 1" --expect "HARNESS.EXE exit code 0"
 	$(BOOTTEST) image/tests/relaunch.bat --mock --timeout 150 --expect "tool tour: PASS" --expect "Largest executable program size" \
 	    --expect "CLAWDOS.EXE exit code 0" --expect "plain run stayed in the harness" --expect "resume state consumed" \
 	    --expect "bigrun: the result came by thread continue" \

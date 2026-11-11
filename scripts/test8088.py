@@ -2,7 +2,7 @@
 """Run a test batch file on the accurate 8088 PC (86Box: 8088 at 4.77 MHz, CGA) and print its log.
 
   python scripts/test8088.py image/tests/devtools.bat [--log DEVTEST.LOG] [--done DEVTEST-DONE]
-                           [--timeout 900] [--no-build] [--mock] [--expect TEXT ...]
+                           [--timeout 900] [--no-build] [--mock] [--expect TEXT ...] [--reject TEXT ...]
 
 The batch file runs as C:\\AUTOTEST.BAT (no networking unless it calls NETUP)
 and should append its results to C:\\<log>, ending with the --done marker. DOSBox-X boot tests run as
@@ -13,8 +13,8 @@ this takes a screenshot (build/shot.png), closes 86Box and prints the log.
 --mock runs the mock Messages API (tunnel/mockapi.py) on the host for the
 test, as boottest.py does: 86Box's NAT reaches it at 10.0.2.2:18023 (start
 the network in the batch file with CALL C:\\NET\\NETUP.BAT); its log is in
-build/mock.log. Exit status 0 only if the marker was found in the log and
-every --expect TEXT in the log or the mock's.
+build/mock.log. Exit status 0 only if the marker was found in the log,
+every --expect TEXT is in the log or the mock's and no --reject TEXT is.
 """
 
 import argparse
@@ -72,6 +72,8 @@ def main():
                     help=f'run the mock Messages API on port {boottest.TEST_API_PORT} during the test')
     ap.add_argument('--expect', action='append', default=[], metavar='TEXT',
                     help='TEXT must appear in the log or the mock API log (repeatable)')
+    ap.add_argument('--reject', action='append', default=[], metavar='TEXT',
+                    help='TEXT must not appear in the log or the mock API log (repeatable)')
     a = ap.parse_args()
     with boottest.exclusive('test8088'):      # build/ and the mock's port are shared with boottest.py
         run_test(a)
@@ -101,15 +103,18 @@ def run_test(a):
         mock_text = boottest.read_log(mock_log).decode('utf-8', 'replace')
         print('--- mock API log ---')
         print(mock_text)
-        missing = [t for t in a.expect if t not in (log or '') and t not in mock_text]
     else:
-        missing = [t for t in a.expect if t not in (log or '')]
+        mock_text = ''
+    missing = [t for t in a.expect if t not in (log or '') and t not in mock_text]
+    found_bad = [t for t in a.reject if t in (log or '') or t in mock_text]
     if mock_exit is not None:
         verdict = f'FAILED (the mock API died during the run, exit code {mock_exit})'
     elif not found:
         verdict = f'FAILED (no {a.done} in the log)'
     elif missing:
         verdict = 'FAILED (missing: ' + ', '.join(repr(t) for t in missing) + ')'
+    elif found_bad:
+        verdict = 'FAILED (rejected text present: ' + ', '.join(repr(t) for t in found_bad) + ')'
     else:
         verdict = 'PASS'
     print(f'test8088: {verdict} after ~{elapsed}s; screenshot in build/shot.png')

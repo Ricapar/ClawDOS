@@ -831,6 +831,13 @@ class ValidatorTest(unittest.TestCase):
         self.bad('not a reply', [USER, assistant({'type': 'text', 'text': 'b'}), USER])  # altered, no thinking
         self.bad('did not come back', [USER, {'role': 'assistant', 'content': 'a'}, USER])   # a plain string
 
+    def test_output_config_carries_a_known_effort(self):
+        for effort in mockapi.EFFORTS:
+            self.ok(output_config={'effort': effort})
+        self.bad('output_config.effort: must be one of', output_config={'effort': 'medim'})
+        self.bad('output_config.format: Extra inputs', output_config={'effort': 'low', 'format': {}})
+        self.bad('output_config: must be an object', output_config='low')
+
     def test_unknown_top_level_fields_are_rejected(self):
         self.ok(output_config={'effort': 'low'}, cache_control={'type': 'ephemeral'}, thinking={'type': 'adaptive'})
         self.bad('Extra inputs are not permitted', fallbacks=['other-model'])
@@ -847,7 +854,10 @@ class ValidatorTest(unittest.TestCase):
         self.ok(thinking={'type': 'adaptive'})
         self.with_betas(mockapi.BETA_PROGRESS, thinking=updates)
         self.with_betas(mockapi.BETA_BINDING, thinking=binding)
-        self.with_betas('other-beta,' + both, thinking=dict(updates, **binding))
+        self.with_betas(both, thinking=dict(updates, **binding))
+        with self.assertRaises(mockapi.BadRequest) as cm:
+            self.with_betas('other-beta,' + both, thinking=dict(updates, **binding))
+        self.assertIn("anthropic-beta: unknown value 'other-beta'", str(cm.exception))
         self.bad('needs the anthropic-beta header thinking-display-updates', thinking=updates)
         self.bad('needs the anthropic-beta header thinking-binding-controls', thinking=binding)
         with self.assertRaises(mockapi.BadRequest) as cm:

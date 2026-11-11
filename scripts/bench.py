@@ -6,10 +6,12 @@
 Runs image/tests/bench.bat through scripts/test8088.py --mock: the mock's
 !bench scenario (tunnel/mockchat.py) makes HARNESS.EXE do 20 reads of a 4 KB
 file, one run with full_memory (a real relaunch through CLAWDOS.EXE) and a 4 KB
-reply, so the request body grows from ~13 KB to over 100 KB. Then it reads the
+reply. Without message threads each request body carries the whole history (it
+grew from ~13 KB to over 100 KB); with them, as shipped, a continue carries only
+what is new, so len stays near a round's own size. Then it reads the
 `api ...`, `relaunch:` and `stack:` lines of CLAWDOS.LOG and prints a Markdown
 table: per round the seconds since the previous round ended (gap: the tool
-call, the history written, the prefix file checked; from the log's
+call, the history written; from the log's
 timestamps), the request body (len), the upload time (up), upload KB/s, the
 wait for the API (ttft - up) and the round's total; for the final round
 the streamed characters per second; then the relaunch round trip and the

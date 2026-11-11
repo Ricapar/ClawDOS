@@ -1,6 +1,8 @@
 @ECHO OFF
 REM Screenshots on a true 8088 (python scripts/test8088.py image/tests/shot8088.bat
-REM --mock --timeout 1500 --expect "pixels B5BCA4D2"): the mode-4 picture taken at
+REM --mock --timeout 1500 --expect "shot_at=1.5): palette 0000AA 55FF55 FF5555 FFFF55,
+REM pixels B5BCA4D2" --expect "shot_at=1.5, full_memory=True): palette 0000AA 55FF55
+REM FF5555 FFFF55, pixels B5BCA4D2" --reject "VALIDATION:"): the mode-4 picture taken at
 REM exit and at shot_at in the harness, and at shot_at through the launcher (the
 REM timer hook and the 16 KB copy on the real CPU and CGA timing), then the unit
 REM tests, which time the PNG encoder and the lending of the harness's buffers
