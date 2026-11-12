@@ -1,7 +1,7 @@
 # ClawDOS
 
 DOS software for a real IBM PC 5160 (8088 @ 4.77 MHz, 640K, CGA, PicoMEM: disk images + NE2000 over WiFi).
-README.md has the quick start; docs/ROADMAP.md the plan; docs/API.md what CLAWDOS sends to the API and expects back.
+README.md is the introduction with the quick start; docs/MANUAL.md the setup in full and the reference; docs/ROADMAP.md the plan; docs/API.md what CLAWDOS sends to the API and expects back.
 
 ## Workflow
 - Setup once: `python3 scripts/setup-tools.py` (Homebrew on macOS, winget on Windows). Toolchains live in `tools/`
