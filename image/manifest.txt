@@ -69,9 +69,6 @@ DEVEL/DOC/TINYASM/      devel:tinyasm.zip!DEVEL/TINYASM/LICENSE
 DEVEL/DOC/TINYASM/      devel:tinyasm.zip!DEVEL/TINYASM/README
 DEVEL/BIN/              devel:wasm.zip!DEVEL/WASM/WASM.COM
 DEVEL/DOC/WASM/         devel:wasm.zip!DEVEL/WASM/*.TXT
-DEVEL/BIN/              devel:jwasm.zip!DEVEL/JWASM/JWasmr.exe
-DEVEL/DOC/JWASM/        devel:jwasm.zip!DEVEL/JWASM/License.txt
-DEVEL/DOC/JWASM/        devel:jwasm.zip!DEVEL/JWASM/Readme.txt
 DEVEL/BIN/              devel:ldebug.zip!BIN/ldebug.com
 DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/license.txt
 DEVEL/DOC/LDEBUG/       devel:ldebug.zip!DOC/LDEBUG/ldebug.txt

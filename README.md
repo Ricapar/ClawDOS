@@ -108,7 +108,7 @@ run from the timer interrupt and keep moving while the PC is busy.
 | `play`, `textart` | PC speaker music and coloured CP437 art |
 | `memory_list`, `memory_read`, `memory_write` | Its own notes, kept in `C:\MEMORY` |
 
-**A development kit on the disk.** Three assemblers (TINYASM, WASM, JWasm),
+**A development kit on the disk.** Two assemblers (TINYASM and WASM),
 Bruce's C, GW-BASIC and the lDebug debugger, plus Turbo C 2.0, installed from
 your own floppy images in `external/`. All of them are proven on the 8088, and
 ClawDOS knows how to drive each one.

@@ -322,7 +322,6 @@ The image carries development tools that were tested on an 8088 at 4.77 MHz
 |---|---|---|
 | `TINYASM` | NASM-syntax assembler, makes .COM files (BSD) | ~5 s |
 | `WASM` | Wolfware assembler, MASM-like (MIT) | ~5 s |
-| `JWASMR` | JWasm, full MASM syntax, .COM or .EXE (Open Watcom licence) | ~18 s |
 | `TCC` | Turbo C 2.0, from your own disks (see below) | ~27 s |
 | `BCC` | Bruce's C, K&R C to .COM (GPL); lowercase file names only | ~80 s |
 | `GWBASIC` | GW-BASIC built from Microsoft's MIT-licensed source | ~6 s |

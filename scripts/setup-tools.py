@@ -37,7 +37,7 @@ PICOMEM_DRIVERS = ['ASTCLOCK.COM', 'NE2000.COM', 'PICOMEM.EXE', 'PM2000.COM', 'P
 # FreeDOS 1.4 devel packages come from ibiblio or, when it is down, a mirror.
 FD_MIRRORS = [f'https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/{FD_VER}/devel',
               'https://sunsite.icm.edu.pl/packages/freedos/repositories/latest/devel']
-DEVEL_PACKAGES = ['tinyasm', 'wasm', 'ldebug', 'jwasm', 'bcc']
+DEVEL_PACKAGES = ['tinyasm', 'wasm', 'ldebug', 'bcc']
 
 
 def t(*parts):

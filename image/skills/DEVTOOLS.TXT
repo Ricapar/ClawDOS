@@ -29,10 +29,7 @@ ASSEMBLERS (they write a .COM directly, no linker needed)
 - WASM X
   Wolfware Asm, MASM-like syntax, makes X.COM (origin 100h is automatic).
   About 5 s. Manual: C:\DEVEL\DOC\WASM\WASM.TXT
-- JWASMR -bin -FoX.COM X.ASM
-  JWasm: full MASM syntax (.model tiny / .code / org 100h / end start);
-  -mz instead of -bin makes an .EXE. About 18 s; very big sources can run
-  out of memory.
+There is no JWasm (JWASMR): it hung this PC, so it was taken off the disk.
 
 C COMPILERS
 - Turbo C 2.0 (ANSI C), in two steps (two lines of one run call): compile, link.
