@@ -122,5 +122,6 @@ README.md is the introduction with the quick start; docs/MANUAL.md the setup in 
 - Screen output goes through lib/screen (retrace-synced writes avoid CGA snow; hardware scroll via CRTC start address).
   The real IBM CGA does NOT wrap its display at the end of its 16 KB (86Box's does): the window must stay inside it.
   A pinned footer (scr_footer) is rewritten during vertical blanking on every scroll; keep it small (each row costs ~0.3 ms).
-- Code linking mTCP (lib/net, lib/http, HARNESS.EXE) is GPLv3.
+- The repo is GPL-3.0-or-later (LICENSE); code linking mTCP (lib/net, lib/http, HARNESS.EXE) is GPLv3 in any case.
+  src/boot/freedos keeps its own GPLv2-or-later COPYING.
 - Watcom: no quoted `-D` values (use the generated force-include), and no `{}` file lists for wlink (use a .lnk file).
