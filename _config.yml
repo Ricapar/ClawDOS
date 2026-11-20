@@ -1,0 +1,5 @@
+# GitHub Pages: README.md is the home page, docs/*.md become pages (README's links
+# to them are turned into .html links by Pages' jekyll-relative-links).
+title: ClawDOS
+description: An AI chat and coding harness for DOS, on a real IBM PC 5160 (8088 at 4.77 MHz)
+theme: jekyll-theme-primer

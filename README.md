@@ -250,7 +250,7 @@ a chat.
 ## License
 
 ClawDOS is free software under the GNU General Public License, version 3 or (at your option)
-any later version: see [LICENSE](LICENSE). HARNESS.EXE links mTCP, which is GPLv3. The FreeDOS
+any later version: see [LICENSE](https://github.com/Ricapar/ClawDOS/blob/main/LICENSE). HARNESS.EXE links mTCP, which is GPLv3. The FreeDOS
 boot sector in `src/boot/freedos` is vendored unmodified under its own GPLv2-or-later license
 (its `COPYING`). Disk images you build hold other people's software (FreeDOS, mTCP, and Turbo C
 from your own floppies): don't redistribute an image with Turbo C on it.
