@@ -52,6 +52,13 @@ PC speaker or an AdLib card. Five files of Turbo C, 15 KB of source, a
   <img src="docs/images/wargames-4.png" alt="The only winning move is not to play" width="49%">
 </p>
 
+Here it is running on the real 5160, filmed off its IBM monitor:
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=Jok7MQi-16Q"><img src="docs/images/wargames-video.jpg" alt="Video: the WarGames demo running on a real IBM PC 5160 (YouTube)" width="640"></a><br>
+  <a href="https://www.youtube.com/watch?v=Jok7MQi-16Q">▶ Watch the WarGames demo on YouTube</a>
+</p>
+
 ### It remembers
 
 Start a new conversation and "your WarGames demo" is all it needs. ClawDOS
