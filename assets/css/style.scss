@@ -66,6 +66,12 @@ body {
   background: #2f3d63;
 }
 
+// The badge comes first in the card, so the site title would lose the theme's
+// first-child rule and gain a top margin: keep it level with the badge.
+.gh-badge + h1 {
+  margin-top: 0;
+}
+
 @media (max-width: 767px) {
   .gh-badge {
     top: 22px;
