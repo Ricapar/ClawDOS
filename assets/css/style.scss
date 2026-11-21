@@ -26,6 +26,12 @@ body {
   margin: 24px 0;
 }
 
+.human-note blockquote hr {
+  height: 1px;
+  background: #c9d1e6;
+  margin: 12px 0 16px;
+}
+
 @media (max-width: 767px) {
   .markdown-body {
     margin: 16px 8px !important;
