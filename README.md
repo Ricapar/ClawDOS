@@ -5,6 +5,32 @@
   It runs on an IBM PC XT: an 8088 at 4.77 MHz, 640K of RAM, a CGA card.
 </p>
 
+<div class="human-note" markdown="1">
+
+> **A (real) human's note:**
+>
+> *Backstory*
+>
+> The IBM PC was my first computer. Rather, it was my parents' first personal computer that I got to use at a very early age.
+>
+> It was already obsolete by the time I was old enough to use it, but at 5 years old it was a magical device that I could make do different things depending on what I typed.
+>
+> I learned how to type and use DOS so that I could launch some early "Learn the Alphabet" games that my mom had bought me. I learned some elementary-level use of BASIC, but at the time that didn't progress much further than making some number guessing games and other small projects.
+>
+> From there, many years passed but I still have some of the original parts of that PC. I have a collection of vintage machines that mean something to me, with my fully maxed-out IBM PC 5160 being the centerpiece of my collection. It still has a working 20 MB hard drive, but that's disconnected in favor of a PicoMEM that lets me emulate a hard drive off of an SD card, making experimentation and play much easier.
+>
+> *Old, meet new. New, meet old*
+>
+> I love intersections of old and new technology. What better way to cross the two than building an AI coding agent to run on DOS on original hardware?
+>
+> And of course, what better to build it than an AI coding agent?
+>
+> I (read: Claude) built this for my own entertainment. I wanted to see how far I could push an AI coding agent to build something given out of the (modern) norm of constraints. Also, can that something it built then build other somethings? 100% of this repo is written by Claude, with the exception of the text within this box.
+>
+> As explained in more detail below, the harness runs on the native OS and hardware and relies on a "bridge" PC in order to handle TLS, which would've been more than what an 8088 could handle.
+
+</div>
+
 <p align="center"><img src="docs/images/opening.png" alt="The ClawDOS opening screen" width="640"></p>
 
 Type `CLAWDOS` at the `C:\>` prompt and talk to Claude. It reads and edits the

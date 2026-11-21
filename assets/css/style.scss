@@ -15,6 +15,17 @@ body {
   padding: 32px 40px !important;
 }
 
+// The human's note at the top of the README: a tinted box, set apart from the rest.
+.human-note blockquote {
+  background: #eef1f8;
+  border: 1px solid #c9d1e6;
+  border-left: 4px solid #2f3d63;
+  border-radius: 6px;
+  color: #24292e;
+  padding: 16px 20px;
+  margin: 24px 0;
+}
+
 @media (max-width: 767px) {
   .markdown-body {
     margin: 16px 8px !important;
