@@ -386,8 +386,13 @@ a byte copy, and `--key-file` without an `api.anthropic.com` map is an error) it
   or without its port), so the key goes only where it belongs whatever a client or a web
   page asks; drops every `x-api-key` and `authorization` header the client sent and puts
   `x-api-key: <key>` first among the headers;
-- forwards exactly `Content-Length` bytes of body unread and unchanged, then looks for
-  the next request head on the same connection (keep-alive; pipelined requests work);
+- reads exactly `Content-Length` bytes of body unread and unchanged, then sends the
+  whole request upstream at once and looks for the next request head on the same
+  connection (keep-alive; pipelined requests work). The upstream connection is opened
+  when the first whole request is in, not when the client connects: the API closes a
+  connection that sits idle, or a request whose body stalls, after about 15 seconds,
+  and a DOS PC on a lossy link can take longer than that to upload a request (a client
+  that sends `Expect: 100-continue` would wait in vain; the harness never does);
 - copies responses back unread, as before.
 
 Limits: only Content-Length framing. A request with `Transfer-Encoding`, `Upgrade` or

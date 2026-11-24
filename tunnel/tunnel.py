@@ -19,7 +19,9 @@ strictly opt-in: the tunnel keeps the API key, so the DOS PC's disk need not
 to api.anthropic.com it removes any `x-api-key` and `authorization` header the
 client sent and adds `x-api-key: <the file's contents>`. To find each request's
 head it follows HTTP/1.1 framing: head up to the blank line, then Content-Length
-bytes of body, then the next request on the same connection. A request it cannot
+bytes of body, then the next request on the same connection. Each request is read
+whole before it goes upstream, and the upstream connection opens only then, so a
+slow client never holds an idle or half-sent request open at the API. A request it cannot
 frame (Transfer-Encoding, Upgrade, CONNECT, folded or malformed headers) is refused with
 an error and the connection closed, and so is one not meant for that host: the target
 must be a /path and there must be exactly one Host header naming it. Responses are still copied unread. The key and
@@ -166,10 +168,16 @@ def rewrite_head(head, key, host, rport=443):
     return b'\r\n'.join(out), length or 0
 
 
-async def forward_requests(reader, writer, key, counter, host, rport=443):
-    """Copy requests from reader to writer one at a time, each head rewritten by rewrite_head and
+async def forward_requests(reader, upstream, key, counter, host, rport=443):
+    """Copy requests from reader upstream one at a time, each head rewritten by rewrite_head and
     followed by exactly its Content-Length bytes. counter[0] counts bytes, counter[1] requests.
-    Returns at EOF; BadRequest if a request cannot be framed."""
+    Returns at EOF; BadRequest if a request cannot be framed.
+
+    Each request is read whole before any of it goes on, and `upstream` (an async callable
+    returning the writer) is first awaited then, so the upstream connection opens only once
+    there is a request to send. A DOS PC on a lossy link can take many seconds to upload a
+    request; the API closes a connection that sits idle, or a request whose body stalls, for
+    about 15 seconds, so neither may wait on the client."""
     buf = b''
     while True:
         while True:
@@ -184,21 +192,21 @@ async def forward_requests(reader, writer, key, counter, host, rport=443):
             buf += data
         head, buf = buf[:end], buf[end + 4:]
         new_head, remaining = rewrite_head(head, key, host, rport)
-        new_head += b'\r\n\r\n'
-        writer.write(new_head)
-        await writer.drain()                                 # a client waiting for 100 Continue needs this out first
-        counter[0] += len(new_head)
-        counter[1] += 1
+        request = [new_head + b'\r\n\r\n']
         while remaining:
             if not buf:
                 buf = await reader.read(min(16384, remaining))
                 if not buf:
-                    return
+                    return                                   # the client gave up mid-body: nothing sent
             chunk, buf = buf[:remaining], buf[remaining:]
             remaining -= len(chunk)
-            counter[0] += len(chunk)
-            writer.write(chunk)
-            await writer.drain()
+            request.append(chunk)
+        data = b''.join(request)
+        writer = await upstream()
+        writer.write(data)
+        await writer.drain()
+        counter[0] += len(data)
+        counter[1] += 1
 
 
 def close_quietly(writer):
@@ -225,11 +233,12 @@ async def pump(reader, writer, counter):
         close_quietly(writer)
 
 
-async def keyed_pump(reader, writer, key, counter, client, host, rport=443):
+async def keyed_pump(reader, upstream, key, counter, client, host, rport=443):
     """pump for the client's side in key mode: forward_requests, and an error reply to the client
-    (then everything closed) for a request that cannot be forwarded."""
+    (then everything closed) for a request that cannot be forwarded. `upstream` returns the
+    upstream writer, connecting the first time; upstream.writer is None until then."""
     try:
-        await forward_requests(reader, writer, key, counter, host, rport)
+        await forward_requests(reader, upstream, key, counter, host, rport)
     except BadRequest as e:
         log.warning('%s: refused a request: %s', client.get_extra_info('peername'), e.why)
         try:
@@ -240,7 +249,10 @@ async def keyed_pump(reader, writer, key, counter, client, host, rport=443):
     except (ConnectionError, asyncio.IncompleteReadError, ssl.SSLError, OSError):
         pass
     finally:
-        close_quietly(writer)
+        if upstream.writer is not None:
+            close_quietly(upstream.writer)
+        else:
+            close_quietly(client)                            # no upstream to end the client's side
 
 
 def tls_connector(ctx=None):
@@ -266,15 +278,34 @@ async def serve_client(reader, writer, host, rport, connect, key=None, allow=())
             close_quietly(writer)
             return
     log.info('open  %s -> %s:%d%s', peer, host, rport, ' (adds the key)' if key else '')
-    try:
-        rreader, rwriter = await connect(host, rport)
-    except (OSError, ssl.SSLError) as e:
-        log.warning('%s: cannot reach %s:%d: %s', peer, host, rport, e)
-        close_quietly(writer)
-        return
     up, down = [0, 0], [0]
-    client_side = keyed_pump(reader, rwriter, key, up, writer, host, rport) if key else pump(reader, rwriter, up)
-    await asyncio.gather(client_side, pump(rreader, writer, down))
+    if key:
+        # Key mode connects upstream only when the first whole request is in (forward_requests).
+        responses = []
+
+        async def upstream():
+            if upstream.writer is None:
+                try:
+                    rreader, upstream.writer = await connect(host, rport)
+                except (OSError, ssl.SSLError) as e:
+                    log.warning('%s: cannot reach %s:%d: %s', peer, host, rport, e)
+                    raise ConnectionError(str(e)) from e
+                responses.append(asyncio.ensure_future(pump(rreader, writer, down)))
+            return upstream.writer
+        upstream.writer = None
+        await keyed_pump(reader, upstream, key, up, writer, host, rport)
+        if responses:
+            await responses[0]
+        else:
+            close_quietly(writer)
+    else:
+        try:
+            rreader, rwriter = await connect(host, rport)
+        except (OSError, ssl.SSLError) as e:
+            log.warning('%s: cannot reach %s:%d: %s', peer, host, rport, e)
+            close_quietly(writer)
+            return
+        await asyncio.gather(pump(reader, rwriter, up), pump(rreader, writer, down))
     log.info('close %s -> %s:%d (%d bytes up, %d down%s)', peer, host, rport, up[0], down[0],
              f', {up[1]} requests' if key else '')
 

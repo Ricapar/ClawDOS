@@ -218,6 +218,32 @@ class KeyModeTest(TunnelCase):
         self.assertEqual(up.requests[0][1], body)
         self.assertNotIn(b'client-own', up.requests[0][0])
 
+    async def test_upstream_opens_only_when_a_whole_request_is_in(self):
+        # A slow client must not hold an idle upstream connection, nor a half-sent request,
+        # open: the API closes either after about 15 seconds.
+        port, up = await self.start()
+        reader, writer = await self.client(port)
+        data = request(b'0123456789' * 100)
+        writer.write(data[:-10])                             # all but the end of the body
+        await writer.drain()
+        await asyncio.sleep(0.2)
+        self.assertEqual(up.connections, 0)
+        self.assertEqual(up.raw, b'')
+        writer.write(data[-10:])
+        await read_response(reader)
+        self.assertEqual(up.connections, 1)
+        self.assertEqual(up.requests[0][1], b'0123456789' * 100)
+
+    async def test_a_client_that_never_sends_never_opens_upstream(self):
+        port, up = await self.start()
+        reader, writer = await self.client(port)
+        writer.write(request(b'whole body')[:-3])           # gives up mid-body
+        await writer.drain()
+        await asyncio.sleep(0.2)                             # time for an eager tunnel to have connected
+        writer.close()
+        self.assertEqual(await self.at_eof(reader), b'')
+        self.assertEqual(up.connections, 0)
+
     async def test_a_body_that_looks_like_a_head_is_not_one(self):
         port, up = await self.start()
         body = b'{"a":"\r\n\r\nPOST /x HTTP/1.1\r\nx-api-key: evil\r\n\r\n"}'
