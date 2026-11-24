@@ -1,12 +1,12 @@
-/* ClawDOS screen: direct 80x25 color text-mode output for CGA (and compatibles).
+/* ClawDOS screen: direct 80x25 color text-mode output for CGA, EGA and VGA.
  *
- * On a real CGA the whole screen scrolls in hardware by moving the CRTC start
- * address down through the card's 16 KB of video RAM. That makes scrolling
+ * The whole screen scrolls in hardware by moving the CRTC start address down
+ * through the first 16 KB of video RAM (all a CGA has). That makes scrolling
  * cost one row of writes instead of 24, and leaves the rows above the screen
  * as free scrollback (25 to 77 of them). The display doesn't wrap at the end
  * of VRAM, so near the end the screen is moved back to the start. Writes wait
- * for horizontal retrace so the IBM CGA doesn't show "snow". EGA/VGA need no
- * waits and fall back to software scrolling.
+ * for horizontal retrace so the IBM CGA doesn't show "snow"; EGA/VGA need no
+ * waits.
  *
  * A footer of up to SCR_FOOT_MAX rows can be pinned to the bottom of the
  * screen (an input box, a status line); scr_scroll() then scrolls only the
@@ -37,7 +37,7 @@ enum {
 
 void scr_init(void);                 /* 80x25 color text, cleared */
 void scr_done(void);                 /* back to a clean DOS screen */
-int  scr_has_hwscroll(void);
+int  scr_is_cga(void);               /* a CGA, not an EGA/VGA */
 
 void scr_putc(int row, int col, unsigned char ch, unsigned char attr);
 void scr_puts(int row, int col, const char *s, unsigned char attr);

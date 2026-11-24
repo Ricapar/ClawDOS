@@ -20,7 +20,8 @@
 static unsigned top;        /* VRAM cell offset of live row 0 */
 static int history;         /* rows of valid scrollback above `top` */
 static int view;            /* rows currently scrolled back */
-static int hwscroll;        /* hardware scrolling available (real CGA) */
+static int cga;             /* a CGA, not an EGA/VGA: snow, mode register 3D8h */
+static int hwscroll;        /* scrolling by CRTC start address (CGA, EGA and VGA) */
 static int snowcheck;       /* wait for retrace before each VRAM write */
 static unsigned cur_pos;    /* cursor, as a cell offset from `top` */
 static int foot;            /* rows pinned at the bottom */
@@ -208,6 +209,28 @@ static void set_start_now(void)
     crtc_write(15, c & 0xFF);
 }
 
+/* Point the CRTC at the new start address and return, with interrupts off,
+   in the blanking before the first frame that shows it: the rows that moved
+   can be rewritten then, unseen. A CGA's 6845 loads the start address as each
+   frame begins, so writing it in vertical blanking is enough. EGA and VGA load
+   it as vertical retrace begins: write it well before one, then wait for it. */
+static void start_in_blank(void)
+{
+    if (cga) {
+        _disable();
+        wait_vblank();
+        set_start_now();
+    } else {
+        wait_vretrace();
+        while (inp(CRTC_STATUS) & 8)    /* past this retrace: the next is a frame away */
+            ;
+        _disable();
+        set_start_now();
+        while (!(inp(CRTC_STATUS) & 8))
+            ;
+    }
+}
+
 static void set_start(void)
 {
     wait_vretrace();
@@ -229,8 +252,12 @@ void scr_init(void)
     r.h.ah = 0x12;                  /* EGA/VGA present? (BL changes if so) */
     r.h.bl = 0x10;
     int86(0x10, &r, &r);
-    hwscroll = (r.h.bl == 0x10);    /* plain CGA: 16 KB wrapping VRAM */
-    snowcheck = hwscroll;
+    cga = (r.h.bl == 0x10);
+    snowcheck = cga;
+    /* EGA and VGA have the same start address and cursor registers, in the
+       same units, and at least 32 KB at B800h, so the 16 KB window works on
+       them too. The copying path below stays for anything that can't. */
+    hwscroll = 1;
 
     suspended = 0;
     top = 0;
@@ -250,7 +277,7 @@ void scr_done(void)
     int86(0x10, &r, &r);
 }
 
-int  scr_has_hwscroll(void)    { return hwscroll; }
+int  scr_is_cga(void)          { return cga; }
 
 static void mirror_fill(int row, int col, unsigned cell, int n)
 {
@@ -350,7 +377,8 @@ static void rebase(void)
     for (done = 0; done < n; done += k) {
         k = n - done < MOVE_ROWS * SCR_COLS ? n - done : MOVE_ROWS * SCR_COLS;
         _disable();
-        wait_vblank();
+        if (cga)                    /* no snow to avoid on EGA/VGA */
+            wait_vblank();
         _fmemcpy(vram + done, vram + from + done, k * 2);
         _enable();
     }
@@ -358,9 +386,7 @@ static void rebase(void)
     history = keep;
     if (view > history)
         view = history;
-    _disable();
-    wait_vblank();
-    set_start_now();
+    start_in_blank();
     _enable();
 }
 
@@ -397,9 +423,7 @@ void scr_scroll(unsigned char attr)
             history++;
         if (view && view < history)
             view++;                 /* keep the scrolled-back text still */
-        _disable();
-        wait_vblank();
-        set_start_now();
+        start_in_blank();
         vblast(off, rows, n);
         _enable();
     } else {
@@ -490,13 +514,15 @@ void scr_resume(const unsigned short __far *save)
 
     r.x.ax = 0x0003;
     int86(0x10, &r, &r);
-    if (hwscroll)                   /* blank the display: no snow while copying */
+    if (cga)                        /* blank the display: no snow while copying */
         outp(CGA_MODE_REG, CGA_TEXT80 & ~8);
+    else if (hwscroll)              /* EGA/VGA: show the window, not row 0, as it fills */
+        set_start_now();
     _fmemcpy(MK_FP(VRAM_SEG, 0), save, SCR_SAVE_BYTES);
-    if (hwscroll) {
+    if (cga) {
         set_start_now();
         outp(CGA_MODE_REG, CGA_TEXT80);
-    } else {
+    } else if (!hwscroll) {
         scr_cursor(cur_pos / SCR_COLS, cur_pos % SCR_COLS);
     }
     suspended = 0;
