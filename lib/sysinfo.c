@@ -76,7 +76,7 @@ int tool_sysinfo(ToolCtx *t)
         date[i] = biosDate[i];
     date[8] = 0;
     tout_printf(t, "BIOS date: %s\n", date);
-    tout_printf(t, "Video: %s\n", scr_has_hwscroll() ? "CGA" : "EGA/VGA (CGA-compatible text)");
+    tout_printf(t, "Video: %s\n", scr_is_cga() ? "CGA" : "EGA/VGA (CGA-compatible text)");
 
     _dos_getdate(&d);
     _dos_gettime(&tm);

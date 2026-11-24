@@ -581,7 +581,7 @@ static void systemLine(char *buf)
 {
     union REGS r;
     int86(0x12, &r, &r);              /* conventional memory in KB */
-    sprintf(buf, "%uK RAM \xFA %s \xFA ", r.x.ax, scr_has_hwscroll() ? "CGA" : "EGA/VGA");
+    sprintf(buf, "%uK RAM \xFA %s \xFA ", r.x.ax, scr_is_cga() ? "CGA" : "EGA/VGA");
     Net::localAddress(buf + strlen(buf));
 }
 
