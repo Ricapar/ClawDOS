@@ -577,6 +577,24 @@ static void showHelp(void)
     dimLines(help);
 }
 
+/* "ClawDOS . MS-DOS 6.22 . mTCP" (dots: 0xFA): the DOS by its OEM number (INT 21h AH=30h,
+   BH). FreeDOS's kernel reports a compatibility version, not its own, so it
+   gets its name alone. */
+static void dosLine(char *buf)
+{
+    union REGS r;
+    const char *name;
+    r.x.ax = 0x3000;
+    intdos(&r, &r);
+    switch (r.h.bh) {
+    case 0xFD: strcpy(buf, "ClawDOS \xFA FreeDOS \xFA mTCP"); return;
+    case 0xFF: name = "MS-DOS"; break;
+    case 0x00: name = "PC DOS"; break;
+    default:   name = "DOS"; break;
+    }
+    sprintf(buf, "ClawDOS \xFA %s %u.%02u \xFA mTCP", name, r.h.al, r.h.ah);
+}
+
 static void systemLine(char *buf)
 {
     union REGS r;
@@ -598,11 +616,12 @@ static void welcome(void)
         "\xDF\xDF\xDB \xDB \xDB \xDB\xDF\xDF",
     };
     enum { L = 1, LW = 38, MID = 39, R = 42, RW = SCR_COLS - 2 - 42 };
-    char sys[48];
+    char sys[48], dos[40];
     Row r;
     int i;
 
     systemLine(sys);
+    dosLine(dos);
     for (i = 0; i < 12; i++) {
         rowBlank(r, A_P_TEXT);
         if (i == 0) {
@@ -635,7 +654,7 @@ static void welcome(void)
             break;
         case 7: rowText(r, R, "This machine", A_P_HEAD); break;
         case 8: rowText(r, R, sys, A_P_TEXT, RW); break;
-        case 9: rowText(r, R, "ClawDOS \xFA FreeDOS \xFA mTCP", A_P_TEXT, RW); break;
+        case 9: rowText(r, R, dos, A_P_TEXT, RW); break;
         }
         con_line(r.c);
     }
