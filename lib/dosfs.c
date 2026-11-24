@@ -118,10 +118,24 @@ int tool_dir(ToolCtx *t)
 
 /* --- read -------------------------------------------------------------------- */
 
+/* Only padding (Ctrl-Z or NUL bytes) from p[i] to the end? */
+static int only_padding(const unsigned char *p, unsigned i, unsigned n)
+{
+    for (; i < n; i++)
+        if (p[i] != 0x1A && p[i] != 0)
+            return 0;
+    return 1;
+}
+
 static int looks_binary(const unsigned char *p, unsigned n)
 {
     unsigned i, ctl = 0;
     for (i = 0; i < n; i++) {
+        /* A Ctrl-Z followed by nothing but padding ends the text: GW-BASIC
+           and CP/M-style tools end a file with Ctrl-Z and pad it with NULs
+           to 128 bytes. Otherwise the Ctrl-Z is just a byte. */
+        if (p[i] == 0x1A && only_padding(p, i, n))
+            return ctl * 10 > i;
         if (p[i] == 0)
             return 1;
         if (p[i] < 32 && p[i] != '\t' && p[i] != '\r' && p[i] != '\n' && p[i] != 0x1A && p[i] != 0x0C)

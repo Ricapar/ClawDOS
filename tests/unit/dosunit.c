@@ -1589,6 +1589,34 @@ static void testFileRead(void)
     arg("lines", "ten");
     CHECK("read unparsable lines fails", tool_read(&ft) == TS_ERROR && strstr(ft.out, "lines") != NULL);
     remove("C:\\ZZREAD.TXT");
+
+    /* GW-BASIC ends a file it writes with Ctrl-Z and pads it with NULs to
+       128 bytes: still text, read up to the Ctrl-Z. */
+    {
+        static const char gw[] = " 1  1 \r\n 2  4 \r\n\x1A";
+        static const char com[] = "\xB4\x09\xBA\x1A\x01\xCD\x21\x00";   /* mov dx,011Ah: 1Ah in code */
+        char pad[128];
+
+        memset(pad, 0, sizeof pad);
+        memcpy(pad, gw, sizeof gw - 1);
+        f = fopen("C:\\ZZREAD.TXT", "wb");
+        fwrite(pad, 1, sizeof pad, f);
+        fclose(f);
+        newCall();
+        arg("path", "C:\\ZZREAD.TXT");
+        CHECK("read Ctrl-Z then NUL padding: text", tool_read(&ft) == TS_OK
+              && strstr(ft.out, "binary") == NULL && !strncmp(ft.out, "    1  1  1", 11));
+        CHECK("read Ctrl-Z then NUL padding: stops at the Ctrl-Z", strstr(ft.out, "    3") == NULL);
+
+        f = fopen("C:\\ZZREAD.TXT", "wb");
+        fwrite(com, 1, sizeof com - 1, f);
+        fclose(f);
+        newCall();
+        arg("path", "C:\\ZZREAD.TXT");
+        CHECK("read a 1Ah byte inside a program: still binary", tool_read(&ft) == TS_OK
+              && strstr(ft.out, "binary file") != NULL);
+        remove("C:\\ZZREAD.TXT");
+    }
 }
 
 static void testFileWrite(void)
